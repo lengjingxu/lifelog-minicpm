@@ -79,6 +79,37 @@ def cmd_sync(args) -> int:
     return 0
 
 
+def cmd_doctor(args) -> int:
+    """自检：模型是否就绪、库里有多少数据、llama.cpp 版本。"""
+    import subprocess
+    db.init_db()
+    print("== 运行环境")
+    try:
+        proc = subprocess.run([config.LLAMA_SERVER_BIN, "--version"],
+                              capture_output=True, text=True, timeout=20)
+        lines = (proc.stdout + proc.stderr).splitlines()
+        version = lines[0] if lines else "未知版本"
+    except Exception as exc:
+        version = f"无法执行 llama-server: {exc}"
+    print(" ", version)
+    print("  Python:", sys.version.split()[0])
+    print("  数据库:", config.DB_PATH)
+    print("== 模型")
+    for key in config.MODELS:
+        gguf, mmproj = models.model_paths(key)
+        ok = gguf.exists() and mmproj is not None
+        size = gguf.stat().st_size / 1e9 if gguf.exists() else 0
+        print(f"  {'OK ' if ok else '缺失'} {config.MODELS[key]['title']:22s} {size:5.2f} GB  {config.MODELS[key]['role']}")
+    print("== 数据")
+    stats = aggregate.compute_stats()
+    print(" ", aggregate.stats_to_text(stats))
+    with db.session() as con:
+        tables = {t["name"]: con.execute(f"SELECT COUNT(*) FROM {t['name']}").fetchone()[0]
+                  for t in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    print(" ", tables)
+    return 0
+
+
 def cmd_serve_mcp(args) -> int:
     from . import mcp_server
     return mcp_server.main()
@@ -152,6 +183,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dest", help="下载目录，默认 data/photos")
     p.add_argument("--limit", type=int)
     p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("doctor", help="自检：模型、数据、运行环境")
+    p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("serve-mcp", help="以 MCP stdio 服务运行")
     p.set_defaults(func=cmd_serve_mcp)

@@ -30,8 +30,20 @@ def build_profile(model_key: str = "minicpm-v-4.7-1b", describe_model: str | Non
     text = aggregate.stats_to_text(stats)
     if stats["described"] == 0:
         raise RuntimeError("还没有任何已识别的照片，先跑 lifelog caption")
-    with models.Server(model_key) as server:
-        narrative = server.chat(PROMPT.format(stats=text), max_tokens=1200, temperature=0.4, timeout=600)
+    narrative = ""
+    used_model = model_key
+    for candidate in [model_key] + [k for k in ("minicpm-v-4.7-1b",) if k != model_key]:
+        try:
+            with models.Server(candidate) as server:
+                narrative = server.chat(PROMPT.format(stats=text), max_tokens=1200,
+                                        temperature=0.4, timeout=600)
+        except Exception as exc:
+            print(f"模型 {candidate} 生成画像失败（{exc}），尝试下一个")
+            continue
+        used_model = candidate
+        break
+    if not narrative:
+        raise RuntimeError("所有候选模型都没能生成画像")
     entries = {
         "summary": narrative,
         "stats": text,
@@ -49,7 +61,7 @@ def build_profile(model_key: str = "minicpm-v-4.7-1b", describe_model: str | Non
                      evidence=excluded.evidence, updated_at=excluded.updated_at""",
                 (key, value, stats["described"], now_iso()),
             )
-    return {"stats": stats, "narrative": narrative}
+    return {"stats": stats, "narrative": narrative, "model": used_model}
 
 
 def get_profile() -> dict:

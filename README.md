@@ -29,6 +29,15 @@
 
 模型权重来自 openbmb 官方 GGUF 仓库，下载走 hf-mirror 镜像，可断点续传。
 
+## 一键演示（100 张试跑）
+
+```bash
+bash scripts/demo.sh /Volumes/Leng/照片 4
+```
+
+依次完成：登记资产 → MiniCPM-V-4.7-1B 逐张理解（全时间轴等距抽 100 张）→
+聚合成天/生活片段 → MiniCPM-V-4.5-8B 写生活画像 → 自然语言提问。
+
 ## 快速开始
 
 ```bash
@@ -106,5 +115,16 @@ lifelog-minicpm/
 ## 数据与隐私
 
 - 照片、描述、画像、索引全部落在本地 `data/lifelog.sqlite`，默认不发出任何网络请求。
+- 已实测：Apple M6 / 16 GB 上，1B 模型识别约 1.2 张/秒（4 并发）；8B 模型写画像单次约 40 秒。
+
+## 踩坑备忘
+
+- **16 GB 机器上 8B 模型要用 `-c 4096`**：config.py 里 MiniCPM-V-4.5-8B 的 ctx 已设为 4096，
+  8192 会触发 Metal Insufficient Memory。
+- **MiniCPM-OCR 需要 llama.cpp ≥ 0.8**：0.7.0 不认识 minicpm_ocr_1_0 投影器；
+  OCR 服务还必须带 --jinja --reasoning off，否则只会回一句「无可读文字」。
+- **4.5-8B 是思考型模型**：不关 reasoning 时答案落在 reasoning_content 里，content 为空；
+  配置里已加 --reasoning off，画像生成失败还会自动降级到 1B 模型。
+
 - 只用本地 GGUF 权重做推理，不调用任何云端视觉 API。
 - 小米云盘同步只读云端、只写本地目录，不删除任何云端或本地文件。

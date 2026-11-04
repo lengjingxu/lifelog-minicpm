@@ -90,8 +90,11 @@ class Server:
         if self.parallel > 1:
             cmd += ["-np", str(self.parallel)]
         cmd += list(self.spec.get("extra_args", []))
+        log_path = config.LOG_DIR / f"llama-server-{self.key}-{self.port}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.log_path = log_path
         self.proc = subprocess.Popen(
-            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            cmd, stdout=subprocess.DEVNULL, stderr=open(log_path, "w")
         )
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -142,9 +145,25 @@ class Server:
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode())
-        return data["choices"][0]["message"]["content"].strip()
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            tail = ""
+            try:
+                tail = self.log_path.read_text(errors="ignore")[-400:]
+            except Exception:
+                pass
+            raise ModelError(
+                f"llama-server 返回 HTTP {exc.code}（模型 {self.key}）。"
+                f"常见原因是 16 GB 机器上上下文过大导致 Metal 显存不足，可把 config.py 里的 "
+                f"ctx 调小或换更小的模型。服务日志尾部：{tail[-300:]}"
+            ) from exc
+        message = data["choices"][0]["message"]
+        content = (message.get("content") or "").strip()
+        if not content:
+            content = (message.get("reasoning_content") or "").strip()
+        return content
 
 
 def image_data_url(path: Path, max_side: int = 1024, quality: int = 88) -> str:

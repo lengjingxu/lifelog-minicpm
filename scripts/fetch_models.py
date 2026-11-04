@@ -53,13 +53,16 @@ def main() -> int:
         repo = config.REPOS[key]
         target_dir = config.MODELS_DIR / config.MODELS[key]["dir"]
         print(f"== {key} -> {target_dir}")
-        for name, _size in FILES[key]:
+        for name, size in FILES[key]:
             url = f"{args.endpoint}/{repo}/resolve/main/{name}"
             target = target_dir / name
-            if target.exists():
+            if target.exists() and target.stat().st_size >= size * 0.98:
                 print(f"  已存在 {name} ({target.stat().st_size/1e9:.2f} GB)，跳过")
                 continue
-            print(f"  下载 {name} ...")
+            if target.exists():
+                print(f"  {name} 不完整（{target.stat().st_size/1e9:.2f} GB / 期望 {size/1e9:.2f} GB），续传")
+            else:
+                print(f"  下载 {name} ...")
             if not fetch(url, target):
                 print(f"  失败 {name}", file=sys.stderr)
                 return 1

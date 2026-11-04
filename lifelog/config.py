@@ -29,7 +29,8 @@ MODELS: dict[str, dict] = {
         "dir": "minicpm-v-4.5-8b",
         "gguf": "MiniCPM-V-4_5-Q4_K_M.gguf",
         "mmproj": "mmproj-model-f16.gguf",
-        "ctx": 8192,
+        "ctx": 4096,   # 16 GB 机器上 8B + mmproj 用 8192 会 Metal OOM
+        "extra_args": ["--reasoning", "off"],
         "role": "深度理解：对重点照片与成组照片做细粒度解读",
     },
     "minicpm-ocr-1.0": {
