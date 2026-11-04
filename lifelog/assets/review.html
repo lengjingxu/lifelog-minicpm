@@ -78,6 +78,17 @@ a{color:inherit}
 .insight .kicker{font-size:12px;letter-spacing:.26em;color:var(--a2);text-transform:uppercase}
 .insight h2{font-family:var(--serif);font-size:clamp(26px,3.6vw,40px);margin:12px 0 10px;font-weight:600}
 .insight .lead{color:var(--muted);font-size:14.5px;margin:0 0 26px;max-width:640px;line-height:1.9}
+
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 22px}
+.pill{font-size:12.5px;color:#cdd4ea;background:rgba(255,255,255,.05);
+  border:1px solid var(--line);border-radius:999px;padding:6px 13px}
+.pill b{color:#fff;font-weight:600}
+.proofs{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.proof{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.proof img{width:100%;height:150px;object-fit:cover;display:block;background:#141620}
+.proof .tx{padding:11px 13px}
+.proof .dt{font-size:11.5px;color:var(--a1);letter-spacing:.06em}
+.proof .cp{font-size:12.5px;line-height:1.75;color:#c7cddf;margin-top:6px}
 .cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .card{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:16px;padding:22px 24px;
   position:relative;overflow:hidden;transition:.35s cubic-bezier(.2,.7,.2,1)}
@@ -200,6 +211,10 @@ footer{padding:60px 6vw 90px;color:var(--muted);font-size:12.5px;border-top:1px 
   <h2>关于你的画像</h2>
   <p class="lead">同一批照片，换一个问法——MiniCPM 读出来的不只是「发生了什么」，还有「这像谁」。</p>
   <div class="cards" id="cards"></div>
+  <div class="pills" id="pills"></div>
+  <div class="kicker" style="margin:34px 0 12px">Evidence</div>
+  <p class="lead" style="margin-bottom:16px">上面每条判断的出处——以下是 MiniCPM 逐张写下的原始描述。</p>
+  <div class="proofs" id="proofs"></div>
 </section>
 
 <section class="capability">
@@ -255,6 +270,8 @@ window.addEventListener("error", function(e){ document.title = "ERR: " + e.messa
     seg: document.getElementById("seg"),
     cards: document.getElementById("cards"),
     flow: document.getElementById("flow"),
+    pills: document.getElementById("pills"),
+    proofs: document.getElementById("proofs"),
     lb: document.getElementById("lightbox"),
     lbImg: document.getElementById("lbImg"),
     lbDate: document.getElementById("lbDate"),
@@ -526,6 +543,31 @@ window.addEventListener("error", function(e){ document.title = "ERR: " + e.messa
     }).join("");
   }
 
+  function fillEvidence(){
+    var ev = DATA.evidence || {};
+    var pills = [];
+    (ev.places || []).forEach(function(p){
+      pills.push("<span class='pill'><b>" + p.name + "</b> " + p.photos + " 张 / " + p.days + " 天</span>");
+    });
+    if (ev.busiest && ev.busiest.day) {
+      pills.push("<span class='pill'><b>" + ev.busiest.day + "</b> 拍了 " + ev.busiest.count +
+        " 张，其中 " + ev.busiest.same_place + " 张在同一个地方</span>");
+    }
+    pills.push("<span class='pill'>平均一天 <b>" + ev.scenes_per_day + "</b> 处</span>");
+    (ev.weekday_kid || []).forEach(function(w){
+      pills.push("<span class='pill'>带孩子的日子多在 <b>" + w[0] + "</b></span>");
+    });
+    (ev.light || []).forEach(function(l){
+      pills.push("<span class='pill'>" + l[0] + " <b>" + l[1] + "</b> 张</span>");
+    });
+    els.pills.innerHTML = pills.join("");
+    els.proofs.innerHTML = (ev.samples || []).map(function(s){
+      return "<figure class='proof'><img src='/thumb/" + s.id + "' alt=''>" +
+        "<div class='tx'><div class='dt'>" + s.day + " " + s.time + "</div>" +
+        "<div class='cp'>" + s.caption + "</div></div></figure>";
+    }).join("");
+  }
+
   function fillFlow(){
     var m = DATA.meta;
     var items = [
@@ -546,6 +588,7 @@ window.addEventListener("error", function(e){ document.title = "ERR: " + e.messa
   buildSeg();
   fillStory();
   fillCards();
+  fillEvidence();
   fillFlow();
   buildChips();
   buildStream();

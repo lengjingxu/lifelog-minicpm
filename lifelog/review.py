@@ -79,6 +79,20 @@ def build_data(photos_per_event: int | None = None) -> dict:
     days = sorted(p["day"] for p in flat if p.get("day"))
     meta["visible_span"] = [days[0], days[-1]] if days else []
     meta["cover"] = _cover(flat)
+    ev = story.build_evidence(config.REVIEW_SINCE_DAY)
+    evidence = {
+        "samples": [{"id": s["id"], "day": s["day"], "time": s["time"],
+                     "caption": s["caption"], "detail": s["detail"]}
+                    for s in ev["samples"]],
+        "places": [{"name": name, "photos": photos, "days": days}
+                   for name, days, photos in ev["top_places"][:4]],
+        "light": ev["light"][:4],
+        "busiest": {"day": ev["busiest_day"], "count": ev["busiest_day_count"],
+                    "same_place": ev["busiest_day_same_place"]},
+        "scenes_per_day": ev["avg_scenes_per_day"],
+        "weekday_kid": ev["weekday_kid"][:3],
+        "subject": ev["subject"][:6],
+    }
     stored = db_profile()
     story_text = stored.get("story", "")
     voices = []
@@ -112,6 +126,7 @@ def build_data(photos_per_event: int | None = None) -> dict:
         "full_summary": lede,
         "story": story_text,
         "voices": voices,
+        "evidence": evidence,
         "insight": insight_text,
         "insight_cards": cards,
         "facts": story.render_facts(story.build_facts(config.REVIEW_SINCE_DAY)),
