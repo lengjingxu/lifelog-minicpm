@@ -81,7 +81,12 @@ def cmd_sync(args) -> int:
 
 def cmd_story(args) -> int:
     from . import story
-    print(story.generate_story(args.model))
+    result = story.generate_story(args.model, voice=args.voice, all_voices=args.all_voices)
+    for key, text in result.items():
+        if len(result) > 1:
+            print("=" * 20, story.VOICES[key]["title"], "=" * 20)
+        print(text)
+        print()
     return 0
 
 
@@ -203,8 +208,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int)
     p.set_defaults(func=cmd_sync)
 
-    p = sub.add_parser("story", help="生成日记式人生回顾（第二人称、事实入文）")
+    p = sub.add_parser("story", help="生成人生回顾（三种视角：回顾/给十年后的你/给家人的信）")
     p.add_argument("--model", default="minicpm-v-4.5-8b")
+    p.add_argument("--voice", default="diary", choices=["diary", "future", "family"])
+    p.add_argument("--all-voices", dest="all_voices", action="store_true", help="一次生成三种视角")
     p.set_defaults(func=cmd_story)
 
     p = sub.add_parser("insight", help="生成拍摄偏好与性格分析")

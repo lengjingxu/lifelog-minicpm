@@ -211,6 +211,139 @@ INSIGHT_PROMPT = (
     + "可直接引用的数字：" + chr(10) + "{facts}"
 )
 
+VOICES = {
+    "diary": {
+        "title": "你的这些年",
+        "kicker": "Recap",
+        "label": "回顾",
+        "prompt": (
+            "你在替一个人写他相册的「人生回顾」。用**第二人称**（对读者说「你」），"
+            "像朋友翻完这批照片后当面跟你说话。"
+            "只能围绕下面「素材」里的瞬间展开，挑 2-3 个讲，**不要把素材罗列一遍**，"
+            "也不要另找素材。"
+            + chr(10) + chr(10)
+            + "素材：" + chr(10) + "{beats}"
+            + chr(10) + chr(10)
+            + "这些数字只用于核对（不要逐条报出来）：" + chr(10) + "{facts}"
+        ),
+    },
+    "future": {
+        "title": "给十年后的你",
+        "kicker": "In Ten Years",
+        "label": "给十年后的你",
+        "prompt": (
+            "你要写一段文字，给**十年后的自己**看：以后翻这本相册的人，"
+            "会想知道现在的自己是怎么活的。用**第二人称**，把「十年后的你」当作读者。"
+            "只围绕下面「素材」里的瞬间展开，挑 2-3 个讲，不要罗列。"
+            "用陈述句写，像在跟未来的自己交代这几年的情况；"
+            "不要抒情、不要想象未来的画面、不要励志、不要教训人。"
+            + chr(10) + chr(10)
+            + "素材：" + chr(10) + "{beats}"
+            + chr(10) + chr(10)
+            + "这些数字只用于核对（不要逐条报出来）：" + chr(10) + "{facts}"
+        ),
+    },
+    "family": {
+        "title": "给家人的一封信",
+        "kicker": "To Family",
+        "label": "给家人的信",
+        "prompt": (
+            "你要写一封短信给家里人，收信人是那个陪你出门、带孩子的人。"
+            "用**第一人称**（写信的人是你）。只围绕下面「素材」里的瞬间展开，"
+            "挑 1-2 个讲，像随口交代一句近况。"
+            "不要歌颂亲情，不要写称呼，不要抒情；"
+            "只允许使用素材里出现过的日期，不能出现「今天」「昨天」这类没有依据的时间；"
+            "结尾停在一件具体的小事上。"
+            + chr(10) + chr(10)
+            + "素材：" + chr(10) + "{beats}"
+            + chr(10) + chr(10)
+            + "这些数字只用于核对（不要逐条报出来）：" + chr(10) + "{facts}"
+        ),
+    },
+}
+
+COMMON_RULES = (
+    "写作要求："
+    "1. 开头不要报统计数字，先给一个画面；"
+    "1b. 用平实的说法，像在说话，不要比喻、不要写得像散文诗"
+    "（禁止「像…一样」「你看着时间流走」这类句子）；"
+    "1c. 不要用「你拍了 X，也拍了 Y」这种排比句式；"
+    "2. 不要罗列素材，不要逐条引用清单里的数字，数字最多出现两处，且要嵌在句子里；"
+    "3. 短句为主，每句不超过二十来个字，一段 2-4 句；"
+    "4. 克制：可以有情绪，但不煽情，不用「岁月静好」「时光温柔」「治愈」「释怀」这类词，"
+    "不堆形容词；"
+    "5. 不要在结尾升华或总结，不要写「这就是生活」这类收尾；"
+    "6. 只写正文，不要标题、不要 Markdown、不要列表；"
+    "7. 长度：回顾 3-5 段，给十年后的你 2-4 段，给家人的信 1-2 段，每段都要短。"
+    + chr(10) + chr(10)
+)
+
+
+def build_beats(since_day: str | None = None) -> list[dict]:
+    """挑出几个具体瞬间当素材：模型围着画面写，而不是围着数字写。"""
+    db.init_db()
+    with db.session() as con:
+        query = ("SELECT a.day, a.taken_at, c.caption, c.people, c.place, c.activity, c.tags "
+                 "FROM assets a JOIN captions c ON c.asset_id = a.id "
+                 "WHERE c.status='ok' AND c.prompt_version='describe-v1'")
+        params: list = []
+        if since_day:
+            query += " AND a.day >= ?"
+            params.append(since_day)
+        rows = con.execute(query + " ORDER BY a.day, a.taken_at", params).fetchall()
+
+    by_day: dict[str, list] = {}
+    for row in rows:
+        by_day.setdefault(row["day"], []).append(row)
+
+    def kid_row(day_rows):
+        for row in day_rows:
+            people = row["people"] or ""
+            tags = db.jload(row["tags"])
+            if any(w in people for w in KID_WORDS) or "儿童" in tags:
+                return row
+        return None
+
+    def outdoor_row(day_rows):
+        for row in day_rows:
+            if any(t in db.jload(row["tags"]) for t in OUTDOOR_TAGS):
+                return row
+        return None
+
+    beats: list[dict] = []
+    if by_day:
+        busiest = max(by_day.items(), key=lambda kv: len(kv[1]))
+        row = outdoor_row(busiest[1]) or busiest[1][0]
+        beats.append({"kind": "最密集的一天",
+                      "text": f"{busiest[0]} 这一天你拍了 {len(busiest[1])} 张。"
+                              f"其中一张写着：{row['caption']}"})
+        kid_days = [d for d in sorted(by_day) if kid_row(by_day[d])]
+        if kid_days:
+            last = kid_days[-1]
+            row = kid_row(by_day[last])
+            beats.append({"kind": "最近一次带孩子出门",
+                          "text": f"{last}，{row['caption']}"})
+            first = kid_days[0]
+            row = kid_row(by_day[first])
+            beats.append({"kind": "最早一次带孩子出门",
+                          "text": f"{first}，{row['caption']}"})
+        outdoor_days = [d for d in sorted(by_day) if outdoor_row(by_day[d])]
+        if outdoor_days:
+            mid = outdoor_days[len(outdoor_days) // 2]
+            row = outdoor_row(by_day[mid])
+            beats.append({"kind": "一个普通的外出日",
+                          "text": f"{mid}，{row['caption']}"})
+        late = [r for r in rows if (r["taken_at"] or "")[11:13] == "16"]
+        if late:
+            row = late[len(late) // 3]
+            beats.append({"kind": "下午四点的光线",
+                          "text": f"{row['day']} {row['taken_at'][11:16]}，{row['caption']}"})
+    return beats
+
+
+def render_beats(beats: list[dict]) -> str:
+    return chr(10).join(f"- 【{b['kind']}】{b['text']}" for b in beats)
+
 
 def _store(con, key: str, value: str) -> None:
     con.execute(
@@ -221,19 +354,29 @@ def _store(con, key: str, value: str) -> None:
     )
 
 
-def generate_story(model_key: str = "minicpm-v-4.5-8b", since_day: str | None = None) -> str:
-    """把事实清单写成第二人称日记式回顾。"""
+def generate_story(model_key: str = "minicpm-v-4.5-8b", since_day: str | None = None,
+                   voice: str = "diary", all_voices: bool = False) -> dict:
+    """把素材写成指定视角的叙事（默认回顾；all_voices=True 一次生成三种）。"""
     from . import models
 
-    facts = build_facts(since_day if since_day is not None else config.REVIEW_SINCE_DAY)
-    text = render_facts(facts)
+    since = since_day if since_day is not None else config.REVIEW_SINCE_DAY
+    facts = render_facts(build_facts(since))
+    beats = render_beats(build_beats(since))
+    targets = list(VOICES) if all_voices else [voice]
+    out_map = {}
     with models.Server(model_key) as server:
-        out = server.chat(STORY_PROMPT.format(facts=text), max_tokens=1600,
-                          temperature=0.6, timeout=600)
-    out = out.strip()
-    with db.session() as con:
-        _store(con, "story", out)
-    return out
+        for key in targets:
+            spec = VOICES[key]
+            prompt = spec["prompt"] + COMMON_RULES
+            out = server.chat(prompt.format(beats=beats, facts=facts),
+                              max_tokens=1100, temperature=0.55, timeout=600).strip()
+            out_map[key] = out
+            with db.session() as con:
+                _store(con, f"story_{key}", out)
+            if key == "diary":
+                with db.session() as con:
+                    _store(con, "story", out)
+    return out_map
 
 
 def generate_insight(model_key: str = "minicpm-v-4.5-8b", since_day: str | None = None) -> str:

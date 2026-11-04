@@ -23,7 +23,7 @@ echo "== 4. MiniCPM-V-4.5-8B 写生活画像"
 $PY -m lifelog.cli profile --model minicpm-v-4.5-8b
 
 echo "== 5. 人生回顾与自我画像"
-$PY -m lifelog.cli story --model minicpm-v-4.5-8b | head -20
+$PY -m lifelog.cli story --model minicpm-v-4.5-8b --all-voices
 $PY -m lifelog.cli insight --model minicpm-v-4.5-8b | head -20
 
 echo "== 6. 提问"

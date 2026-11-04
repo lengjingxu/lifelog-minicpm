@@ -81,6 +81,19 @@ def build_data(photos_per_event: int | None = None) -> dict:
     meta["cover"] = _cover(flat)
     stored = db_profile()
     story_text = stored.get("story", "")
+    voices = []
+    for key, spec in story.VOICES.items():
+        text = stored.get(f"story_{key}", "") or (story_text if key == "diary" else "")
+        if not text:
+            continue
+        voices.append({
+            "id": key,
+            "title": spec["title"],
+            "kicker": spec["kicker"],
+            "label": spec["label"],
+            "text": text,
+            "lead": chr(10).join([p for p in text.split(chr(10)) if p.strip()][:2]),
+        })
     insight_text = stored.get("insight", "")
     cards = []
     for chunk in insight_text.splitlines():
@@ -98,6 +111,7 @@ def build_data(photos_per_event: int | None = None) -> dict:
         "summary": chr(10).join(paragraphs[:2]) if paragraphs else "",
         "full_summary": lede,
         "story": story_text,
+        "voices": voices,
         "insight": insight_text,
         "insight_cards": cards,
         "facts": story.render_facts(story.build_facts(config.REVIEW_SINCE_DAY)),

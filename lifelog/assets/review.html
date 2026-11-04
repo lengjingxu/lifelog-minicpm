@@ -22,11 +22,18 @@ a{color:inherit}
 #progress{position:fixed;left:0;top:0;height:2px;width:0;z-index:60;
   background:linear-gradient(90deg,var(--a1),var(--a2));box-shadow:0 0 12px rgba(108,140,255,.8)}
 .topbar{position:fixed;top:0;left:0;right:0;z-index:50;display:flex;align-items:center;gap:18px;
-  padding:14px 26px;background:rgba(8,9,13,.55);backdrop-filter:blur(14px);
-  border-bottom:1px solid var(--line);opacity:0;transform:translateY(-12px);
+  padding:14px 26px;background:rgba(8,9,13,.62);backdrop-filter:blur(16px);
+  border-bottom:1px solid var(--line);opacity:1;transform:none;
   transition:.5s cubic-bezier(.2,.7,.2,1)}
-.topbar.show{opacity:1;transform:none}
 .brand{font-family:var(--serif);font-size:17px;letter-spacing:2px;white-space:nowrap}
+
+.seg{display:flex;gap:2px;padding:3px;border-radius:999px;background:rgba(255,255,255,.06);
+  border:1px solid var(--line);flex:0 0 auto}
+.seg button{border:0;background:transparent;color:var(--muted);font-size:12.5px;cursor:pointer;
+  padding:6px 14px;border-radius:999px;transition:.25s;font-family:var(--sans);white-space:nowrap}
+.seg button:hover{color:var(--ink)}
+.seg button.on{background:linear-gradient(120deg,var(--a1),var(--a2));color:#fff;
+  box-shadow:0 3px 14px rgba(108,140,255,.35)}
 .chips{display:flex;gap:7px;overflow-x:auto;flex:1;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
 .chip{border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--muted);
@@ -39,7 +46,7 @@ a{color:inherit}
   padding:7px 14px;border-radius:999px;font-size:12.5px;cursor:pointer;white-space:nowrap;
   transition:.22s;font-family:var(--sans)}
 .ghost:hover{background:rgba(255,255,255,.12)}
-.hero{position:relative;min-height:100vh;display:flex;align-items:flex-end;
+.hero{position:relative;min-height:100vh;padding-top:64px;display:flex;align-items:flex-end;
   padding:0 6vw 8vh;overflow:hidden}
 .hero-bg{position:absolute;inset:-4%;background-size:cover;background-position:center;
   filter:saturate(.85) brightness(.55);transform:scale(1.06);animation:drift 26s ease-in-out infinite alternate}
@@ -166,6 +173,7 @@ footer{padding:60px 6vw 90px;color:var(--muted);font-size:12.5px;border-top:1px 
 <div id="progress"></div>
 <header class="topbar" id="topbar">
   <div class="brand">拾光 LifeLog</div>
+  <div class="seg" id="seg"></div>
   <div class="chips" id="chips"></div>
   <button class="ghost" id="shuffle">随机回放</button>
 </header>
@@ -182,8 +190,8 @@ footer{padding:60px 6vw 90px;color:var(--muted);font-size:12.5px;border-top:1px 
 </section>
 
 <section class="story-block">
-  <div class="kicker">Recap</div>
-  <h2>你的这些年</h2>
+  <div class="kicker" id="storyKicker">Recap</div>
+  <h2 id="storyTitle">你的这些年</h2>
   <div class="story-prose" id="story"></div>
 </section>
 
@@ -242,6 +250,9 @@ window.addEventListener("error", function(e){ document.title = "ERR: " + e.messa
     heroStats: document.getElementById("heroStats"),
     footMeta: document.getElementById("footMeta"),
     story: document.getElementById("story"),
+    storyTitle: document.getElementById("storyTitle"),
+    storyKicker: document.getElementById("storyKicker"),
+    seg: document.getElementById("seg"),
     cards: document.getElementById("cards"),
     flow: document.getElementById("flow"),
     lb: document.getElementById("lightbox"),
@@ -461,14 +472,51 @@ window.addEventListener("error", function(e){ document.title = "ERR: " + e.messa
     var h = document.documentElement.scrollHeight - window.innerHeight;
     var p = h > 0 ? (window.scrollY / h) * 100 : 0;
     els.progress.style.width = p + "%";
-    if (window.scrollY > window.innerHeight * 0.55) { els.topbar.classList.add("show"); }
-    else { els.topbar.classList.remove("show"); }
+    els.topbar.classList.add("show");
   }, {passive:true});
 
   document.documentElement.classList.add("js");
+  var currentVoice = 0;
+
+  function applyVoice(index){
+    var voices = DATA.voices || [];
+    if (!voices.length) {
+      els.story.textContent = DATA.story || DATA.full_summary || "";
+      return;
+    }
+    currentVoice = (index + voices.length) % voices.length;
+    var voice = voices[currentVoice];
+    els.story.textContent = voice.text;
+    els.storyTitle.textContent = voice.title;
+    els.storyKicker.textContent = voice.kicker;
+    els.heroLede.textContent = voice.lead;
+    els.seg.querySelectorAll("button").forEach(function(b, i){
+      b.classList.toggle("on", i === currentVoice);
+    });
+  }
+
+  function buildSeg(){
+    var voices = DATA.voices || [];
+    els.seg.innerHTML = "";
+    voices.forEach(function(v, i){
+      var b = document.createElement("button");
+      b.textContent = v.label;
+      b.className = i === 0 ? "on" : "";
+      b.addEventListener("click", function(){ applyVoice(i); });
+      els.seg.appendChild(b);
+    });
+  }
+
   function fillStory(){
-    var text = DATA.story || DATA.full_summary || "";
-    els.story.textContent = text;
+    var m = /[?&]voice=([a-z]+)/.exec(window.location.search);
+    var idx = 0;
+    if (m) {
+      var voices = DATA.voices || [];
+      for (var i = 0; i < voices.length; i++) {
+        if (voices[i].id === m[1]) { idx = i; }
+      }
+    }
+    applyVoice(idx);
   }
 
   function fillCards(){
@@ -495,6 +543,7 @@ window.addEventListener("error", function(e){ document.title = "ERR: " + e.messa
 
   photos = allPhotos();
   fillHero();
+  buildSeg();
   fillStory();
   fillCards();
   fillFlow();
