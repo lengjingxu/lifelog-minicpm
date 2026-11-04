@@ -59,6 +59,36 @@ a{color:inherit}
 .hero-stats div b{font-family:var(--serif);font-size:24px;font-weight:500}
 .scroll-hint{font-size:12px;color:var(--muted);letter-spacing:.2em;animation:bob 2.4s ease-in-out infinite}
 @keyframes bob{0%,100%{transform:translateY(0);opacity:.65}50%{transform:translateY(7px);opacity:1}}
+
+.story-block{max-width:840px;margin:56px auto 0;padding:0 6vw}
+.story-block .kicker{font-size:12px;letter-spacing:.26em;color:var(--a1);text-transform:uppercase}
+.story-block h2{font-family:var(--serif);font-size:clamp(26px,3.6vw,40px);margin:12px 0 18px;
+  font-weight:600;letter-spacing:.04em}
+.story-prose{font-family:var(--serif);font-size:16.5px;line-height:2.15;color:#d9dcec;
+  white-space:pre-wrap;background:rgba(255,255,255,.035);border:1px solid var(--line);
+  border-left:3px solid var(--a1);border-radius:4px 16px 16px 4px;padding:28px 32px}
+.insight{max-width:980px;margin:72px auto 0;padding:0 6vw}
+.insight .kicker{font-size:12px;letter-spacing:.26em;color:var(--a2);text-transform:uppercase}
+.insight h2{font-family:var(--serif);font-size:clamp(26px,3.6vw,40px);margin:12px 0 10px;font-weight:600}
+.insight .lead{color:var(--muted);font-size:14.5px;margin:0 0 26px;max-width:640px;line-height:1.9}
+.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.card{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:16px;padding:22px 24px;
+  position:relative;overflow:hidden;transition:.35s cubic-bezier(.2,.7,.2,1)}
+.card:hover{transform:translateY(-3px);border-color:rgba(108,140,255,.45);
+  background:rgba(108,140,255,.07)}
+.card h3{font-family:var(--serif);font-size:19px;margin:0 0 12px;font-weight:600;color:#eef1ff;
+  display:flex;align-items:center;gap:10px}
+.card h3:before{content:"";width:8px;height:8px;border-radius:50%;
+  background:linear-gradient(120deg,var(--a1),var(--a2));flex:0 0 auto}
+.card p{margin:0;font-size:14px;line-height:2.05;color:#c3c9dd}
+.capability{max-width:980px;margin:80px auto 0;padding:0 6vw}
+.capability .kicker{font-size:12px;letter-spacing:.26em;color:var(--muted);text-transform:uppercase}
+.capability h2{font-family:var(--serif);font-size:clamp(22px,3vw,32px);margin:12px 0 20px;font-weight:600}
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.flow div{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.flow b{display:block;font-family:var(--serif);font-size:21px;margin-bottom:6px;color:#fff}
+.flow span{font-size:12.5px;color:var(--muted);line-height:1.7}
+@media (max-width:760px){.cards{grid-template-columns:1fr}.story-prose{padding:22px 20px;font-size:15.5px}}
 main{position:relative;z-index:2;padding:0 6vw 120px}
 .year{position:relative;padding:90px 0 10px}
 .year:first-child{padding-top:40px}
@@ -151,6 +181,25 @@ footer{padding:60px 6vw 90px;color:var(--muted);font-size:12.5px;border-top:1px 
   </div>
 </section>
 
+<section class="story-block">
+  <div class="kicker">Recap</div>
+  <h2>你的这些年</h2>
+  <div class="story-prose" id="story"></div>
+</section>
+
+<section class="insight">
+  <div class="kicker">Portrait</div>
+  <h2>关于你的画像</h2>
+  <p class="lead">同一批照片，换一个问法——MiniCPM 读出来的不只是「发生了什么」，还有「这像谁」。</p>
+  <div class="cards" id="cards"></div>
+</section>
+
+<section class="capability">
+  <div class="kicker">Pipeline</div>
+  <h2>同一套流程，照片越多，能长出来的东西越多</h2>
+  <div class="flow" id="flow"></div>
+</section>
+
 <main id="stream"></main>
 
 <footer>
@@ -192,6 +241,9 @@ window.addEventListener("error", function(e){ document.title = "ERR: " + e.messa
     heroLede: document.getElementById("heroLede"),
     heroStats: document.getElementById("heroStats"),
     footMeta: document.getElementById("footMeta"),
+    story: document.getElementById("story"),
+    cards: document.getElementById("cards"),
+    flow: document.getElementById("flow"),
     lb: document.getElementById("lightbox"),
     lbImg: document.getElementById("lbImg"),
     lbDate: document.getElementById("lbDate"),
@@ -414,8 +466,38 @@ window.addEventListener("error", function(e){ document.title = "ERR: " + e.messa
   }, {passive:true});
 
   document.documentElement.classList.add("js");
+  function fillStory(){
+    var text = DATA.story || DATA.full_summary || "";
+    els.story.textContent = text;
+  }
+
+  function fillCards(){
+    var cards = DATA.insight_cards || [];
+    els.cards.innerHTML = cards.map(function(c){
+      return '<article class="card"><h3>' + c.title + '</h3><p>' + c.body + '</p></article>';
+    }).join("");
+  }
+
+  function fillFlow(){
+    var m = DATA.meta;
+    var items = [
+      [m.described_total + " 张", "已被 MiniCPM 逐张读过，产出结构化描述、场景与标签"],
+      ["1 段", "日记式人生回顾：把计数事实织进第二人称叙事"],
+      ["4 段", "性格与偏好分析：拍摄偏好、性格底色、没拍的部分、三条建议"],
+      [m.events + " 段", "生活片段：按时间串起的片段，含代表照片与地点线索"],
+      ["5 个 MCP 工具", "AI 可随时追问：作息、去哪、情绪、工作、整个人生轨迹"],
+      [m.total_assets + " 张", "已登记的相册总量——全量跑完，管线完全一样"]
+    ];
+    els.flow.innerHTML = items.map(function(it){
+      return "<div><b>" + it[0] + "</b><span>" + it[1] + "</span></div>";
+    }).join("");
+  }
+
   photos = allPhotos();
   fillHero();
+  fillStory();
+  fillCards();
+  fillFlow();
   buildChips();
   buildStream();
 
@@ -432,11 +514,31 @@ window.addEventListener("error", function(e){ document.title = "ERR: " + e.messa
   openFromHash();
   window.addEventListener("load", function(){
     openFromHash();
-    var m = /[?&]y=(\d{4})/.exec(window.location.search);
-    if (m) {
-      var hero = document.getElementById("hero");
+    var hero = document.getElementById("hero");
+    var only = /[?&]only=([a-z]+)/.exec(window.location.search);
+    if (only) {
+      var keep = {story: "story-block", insight: "insight", capability: "capability"}[only[1]];
+      ["story-block", "insight", "capability"].forEach(function(cls){
+        var el = document.querySelector("." + cls);
+        if (el && cls !== keep) { el.style.display = "none"; }
+      });
+      var streamEl = document.getElementById("stream");
+      if (streamEl) { streamEl.style.display = "none"; }
       if (hero) { hero.style.display = "none"; }
-      var target = document.getElementById("y" + m[1]);
+      var top = document.querySelector("." + keep);
+      if (top) { top.scrollIntoView(); }
+    }
+    var m = /[?&]y=(\d{4})/.exec(window.location.search);
+    var sec = /[?&]section=([a-z]+)/.exec(window.location.search);
+    if (m || sec) {
+      if (hero) { hero.style.display = "none"; }
+      var target = null;
+      if (sec) {
+        var map = {story: "story-block", insight: "insight", capability: "capability"};
+        target = document.querySelector("." + (map[sec[1]] || sec[1]));
+      } else {
+        target = document.getElementById("y" + m[1]);
+      }
       if (target) { target.scrollIntoView(); }
     }
   });

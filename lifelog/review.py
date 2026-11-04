@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from . import config, db, journey
+from . import config, db, journey, story
 
 TEMPLATE = Path(__file__).resolve().parent / "assets" / "review.html"
 
@@ -79,12 +79,35 @@ def build_data(photos_per_event: int | None = None) -> dict:
     days = sorted(p["day"] for p in flat if p.get("day"))
     meta["visible_span"] = [days[0], days[-1]] if days else []
     meta["cover"] = _cover(flat)
+    stored = db_profile()
+    story_text = stored.get("story", "")
+    insight_text = stored.get("insight", "")
+    cards = []
+    for chunk in insight_text.splitlines():
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if chunk.startswith("【") and "】" in chunk:
+            title = chunk[1:chunk.index("】")]
+            body = chunk[chunk.index("】") + 1:].strip()
+            cards.append({"title": title, "body": body})
+        elif cards:
+            cards[-1]["body"] = (cards[-1]["body"] + " " + chunk).strip()
     return {
         "meta": meta,
         "summary": chr(10).join(paragraphs[:2]) if paragraphs else "",
         "full_summary": lede,
+        "story": story_text,
+        "insight": insight_text,
+        "insight_cards": cards,
+        "facts": story.render_facts(story.build_facts(config.REVIEW_SINCE_DAY)),
         "years": years,
     }
+
+
+def db_profile() -> dict:
+    from . import profile as profile_mod
+    return profile_mod.get_profile()
 
 
 def render(photos_per_event: int | None = None) -> str:

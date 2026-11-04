@@ -79,6 +79,25 @@ def cmd_sync(args) -> int:
     return 0
 
 
+def cmd_story(args) -> int:
+    from . import story
+    print(story.generate_story(args.model))
+    return 0
+
+
+def cmd_insight(args) -> int:
+    from . import story
+    print(story.generate_insight(args.model))
+    return 0
+
+
+def cmd_facts(args) -> int:
+    from . import story
+    facts = story.build_facts(args.since or config.REVIEW_SINCE_DAY)
+    print(story.render_facts(facts))
+    return 0
+
+
 def cmd_doctor(args) -> int:
     """自检：模型是否就绪、库里有多少数据、llama.cpp 版本。"""
     import subprocess
@@ -183,6 +202,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dest", help="下载目录，默认 data/photos")
     p.add_argument("--limit", type=int)
     p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("story", help="生成日记式人生回顾（第二人称、事实入文）")
+    p.add_argument("--model", default="minicpm-v-4.5-8b")
+    p.set_defaults(func=cmd_story)
+
+    p = sub.add_parser("insight", help="生成拍摄偏好与性格分析")
+    p.add_argument("--model", default="minicpm-v-4.5-8b")
+    p.set_defaults(func=cmd_insight)
+
+    p = sub.add_parser("facts", help="打印可讲的���实清单")
+    p.add_argument("--since")
+    p.set_defaults(func=cmd_facts)
 
     p = sub.add_parser("doctor", help="自检：模型、数据、运行环境")
     p.set_defaults(func=cmd_doctor)
