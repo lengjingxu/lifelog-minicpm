@@ -70,3 +70,15 @@ TAGS = [
     "活动聚会", "运动户外", "交通出行", "室内居家", "文档票据", "屏幕截图",
     "图表数据", "商品物品", "艺术绘画", "文字排版",
 ]
+
+
+# —— 展示层隐私策略（人生回顾页 / 人生经历 MCP）——
+# 只展示这个日期之后的照片，避免把早年居家、孩子等画面暴露在外
+REVIEW_SINCE_DAY = os.environ.get("LIFELOG_REVIEW_SINCE", "2023-01-01")
+# 每段生活片段最多展示几张照片
+REVIEW_PHOTOS_PER_EVENT = int(os.environ.get("LIFELOG_REVIEW_PHOTOS", "3"))
+# 需要额外排除的标签，逗号分隔，例如 "儿童,室内居家"
+REVIEW_EXCLUDE_TAGS = [t.strip() for t in
+                       os.environ.get(
+                           "LIFELOG_REVIEW_EXCLUDE_TAGS",
+                           "屏幕截图,文字排版,图表数据,文档票据").split(",") if t.strip()]

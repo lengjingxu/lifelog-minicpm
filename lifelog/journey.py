@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from . import aggregate, db, profile as profile_mod
+from . import aggregate, config, db, profile as profile_mod
 
 
 def _spread(items: list, count: int) -> list:
@@ -46,8 +46,11 @@ def event_photos(con, start_day: str, end_day: str, count: int = 6) -> list[dict
     return diverse[:count]
 
 
-def build_journey(max_events: int = 60, photos_per_event: int = 6) -> dict:
+def build_journey(max_events: int = 60, photos_per_event: int = 6,
+                  since_day: str | None = None, exclude_tags: list[str] | None = None) -> dict:
     db.init_db()
+    since_day = since_day if since_day is not None else config.REVIEW_SINCE_DAY
+    exclude_tags = exclude_tags if exclude_tags is not None else config.REVIEW_EXCLUDE_TAGS
     with db.session() as con:
         events = con.execute(
             """SELECT id, start_day, end_day, title, summary, tags, photo_count
@@ -55,7 +58,15 @@ def build_journey(max_events: int = 60, photos_per_event: int = 6) -> dict:
         ).fetchall()
         sections = []
         for event in events:
+            if since_day and (event["end_day"] or "") < since_day:
+                continue
+            if set(exclude_tags) & set(db.jload(event["tags"])):
+                continue
             photos = event_photos(con, event["start_day"], event["end_day"], photos_per_event)
+            photos = [p for p in photos
+                      if not since_day or (p.get("day") or "") >= since_day]
+            photos = [p for p in photos
+                      if not (set(exclude_tags) & set(db.jload(p.get("tags"))))]
             if not photos:
                 continue
             year = (event["start_day"] or "")[:4]
@@ -73,10 +84,13 @@ def build_journey(max_events: int = 60, photos_per_event: int = 6) -> dict:
             })
     sections = [s for s in sections if s["events"]][-max_events:]
     stats = aggregate.compute_stats()
+    stats["shown_events"] = sum(len(s["events"]) for s in sections)
+    stats["shown_photos"] = sum(len(e["photos"]) for s in sections for e in s["events"])
     stored = profile_mod.get_profile()
     return {
         "sections": sections,
-        "summary": stored.get("summary_first_person") or stored.get("summary", ""),
+        "summary": (stored.get("summary_recent") or stored.get("summary_first_person")
+                    or stored.get("summary", "")),
         "summary_third_person": stored.get("summary", ""),
         "stats": {
             "span": stats["day_span"],
@@ -84,7 +98,9 @@ def build_journey(max_events: int = 60, photos_per_event: int = 6) -> dict:
             "described": stats["described"],
             "total_assets": stats["total_assets"],
             "coverage": stats["coverage"],
-            "events": sum(len(s["events"]) for s in sections),
+            "events": stats["shown_events"],
+            "shown_events": stats["shown_events"],
+            "shown_photos": stats["shown_photos"],
         },
         "generated_at": datetime.now().isoformat(timespec="seconds"),
     }

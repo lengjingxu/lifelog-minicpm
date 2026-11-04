@@ -58,6 +58,28 @@ def make_thumbnail(path: Path, asset_id: str) -> bytes | None:
         return None
 
 
+def make_full(path: Path, asset_id: str, max_side: int = 1600) -> bytes | None:
+    """灯箱用的大图（最长边 1600），带本地缓存。"""
+    full_dir = THUMB_DIR / "full"
+    full_dir.mkdir(parents=True, exist_ok=True)
+    cache = full_dir / f"{asset_id}.jpg"
+    if cache.exists():
+        return cache.read_bytes()
+    try:
+        from PIL import Image
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+        with Image.open(path) as image:
+            image = image.convert("RGB")
+            if max(image.size) > max_side:
+                scale = max_side / max(image.size)
+                image = image.resize((int(image.width * scale), int(image.height * scale)))
+            image.save(cache, format="JPEG", quality=86)
+        return cache.read_bytes()
+    except Exception:
+        return None
+
+
 def render_index(con, day: str | None = None, limit: int = 60) -> str:
     if day:
         rows = con.execute(
@@ -130,7 +152,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(_html("lifelog · 相册", render_index(con, day)))
             elif path.startswith("/day/"):
                 self._send(_html("lifelog · 相册", render_index(con, path.split("/")[-1])))
-            elif path == "/journey":
+            elif path in ("/journey", "/review"):
+                from . import review
+                self._send(review.render().encode("utf-8"))
+            elif path == "/journey-simple":
                 self._send(journey_view.render_html().encode("utf-8"))
             elif path == "/api/journey":
                 from . import journey
@@ -149,6 +174,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(_html("lifelog · 生活片段", render_events(con)))
             elif path == "/stats":
                 self._send(_html("lifelog · 统计", render_stats(con)))
+            elif path.startswith("/photo/"):
+                asset_id = path.split("/")[-1]
+                row = con.execute("SELECT path FROM assets WHERE id=?", (asset_id,)).fetchone()
+                if not row:
+                    self._send(b"not found", "text/plain", 404)
+                    return
+                data = make_full(Path(row["path"]), asset_id)
+                self._send(data or b"", "image/jpeg" if data else "text/plain",
+                           200 if data else 404)
             elif path.startswith("/thumb/"):
                 asset_id = path.split("/")[-1]
                 row = con.execute("SELECT path FROM assets WHERE id=?", (asset_id,)).fetchone()

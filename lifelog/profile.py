@@ -26,11 +26,18 @@ FIRST_PERSON_PROMPT = (
     "生活节奏与作息、常见场景与地点、家人与独处、兴趣与活动、情绪基调、季节与时段偏好、"
     "最近的生活变化。只使用底稿里出现的信息，不要编造具体人名、地名或事件；"
     "语气具体、有画面感，不要用报告腔，不要使用 Markdown 标题和列表符号，只写段落；"
-    "严禁虚构底稿里没有的具体情节（例如醒来、对话、心情独白等），只写底稿能支持的内容。"
+    "严禁虚构底稿里没有的具体情节（例如醒来、对话、心情独白等），只写底稿能支持的内容；不要写标题行，直接从正文开始。"
     + chr(10) + chr(10)
     + "统计底稿：" + chr(10) + "{stats}"
 )
 
+
+def strip_heading(text: str) -> str:
+    """去掉模型可能自己加的标题行（如「我的生活回顾」）。"""
+    lines = list((text or "").splitlines())
+    while lines and len(lines[0].strip()) <= 12 and lines[0].strip():
+        lines.pop(0)
+    return chr(10).join(lines).strip()
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
@@ -64,9 +71,21 @@ def build_profile(model_key: str = "minicpm-v-4.7-1b", describe_model: str | Non
     except Exception as exc:
         print(f"第一人称画像生成失败（{exc}），保留第三人称版本")
 
+    recent_text = ""
+    recent_stats = aggregate.compute_stats(since_day=config.REVIEW_SINCE_DAY)
+    if recent_stats["described"] >= 20:
+        try:
+            with models.Server(model_key) as server:
+                recent_text = server.chat(
+                    FIRST_PERSON_PROMPT.format(stats=aggregate.stats_to_text(recent_stats)),
+                    max_tokens=1000, temperature=0.3, timeout=600)
+        except Exception as exc:
+            print(f"近期画像生成失败（{exc}）")
+
     entries = {
         "summary": narrative,
-        "summary_first_person": first_person,
+        "summary_first_person": strip_heading(first_person),
+        "summary_recent": strip_heading(recent_text),
         "stats": text,
         "top_tags": db.jdump(stats["top_tags"]),
         "top_places": db.jdump(stats["top_places"]),
