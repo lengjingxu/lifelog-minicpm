@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:1600px;height:900px;overflow:hidden;background:#0b0a0c;color:#fff;
+  font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;position:relative}
+.shot{position:absolute;inset:0;background-size:cover;background-position:center}
+.shot1{left:80px;top:120px;width:660px;height:660px;transform:rotate(-2deg);
+  box-shadow:0 40px 120px rgba(0,0,0,.8)}
+.shot2{left:520px;top:200px;width:660px;height:660px;transform:rotate(2deg);
+  box-shadow:0 40px 120px rgba(0,0,0,.8)}
+.step{position:absolute;font-size:15px;letter-spacing:.3em;color:#c9a45a}
+.step.s1{left:80px;top:80px}.step.s2{left:520px;top:160px}
+h1{position:absolute;right:100px;top:110px;text-align:right;font-size:58px;line-height:1.2;
+  font-weight:800;max-width:13ch}
+h1 .hl{color:#c9a45a}
+ul{position:absolute;right:100px;top:420px;list-style:none;text-align:right;
+  font-size:19px;line-height:2.4;color:#c8c2d4}
+ul b{color:#fff}
+.brand{position:absolute;left:100px;bottom:70px;font-size:14px;letter-spacing:.3em;color:#6b6674}
+.card{position:absolute;right:100px;bottom:150px;background:rgba(201,164,90,.12);
+  border:1px solid rgba(201,164,90,.4);border-radius:4px;padding:18px 24px;max-width:520px}
+.card p{font-size:15px;line-height:1.9;color:#e8d9b8}
+</style></head><body>
+<div class="shot shot1" style="background-image:url('/Users/leng/lifelog-minicpm/marketing/shots/02-sheet.png')"></div>
+<div class="shot shot2" style="background-image:url('/Users/leng/lifelog-minicpm/marketing/shots/04-portrait.png')"></div>
+<p class="step s1">BEFORE · 29294 张无序照片</p>
+<p class="step s2">AFTER · 每一张都有描述 · 有标签 · 有时间</p>
+<h1>机器替你<br>把 <span class="hl">29294 张</span>照片<br>重新读了一遍</h1>
+<ul>
+  <li><b>去重</b> · 内容哈希 + 感知哈希，连拍与重复图一目了然</li>
+  <li><b>标签</b> · 17 类标签：场景 / 人物 / 地点 / 活动 / 氛围</li>
+  <li><b>检索</b> · 按年份、地点、人物、事件，任意组合</li>
+  <li><b>识别</b> · MiniCPM-V-4.7-1B，每张 <span style="font-family:'Schibsted Grotesk'">≈0.25s</span></li>
+</ul>
+<div class="card"><p>识别全部发生在本机 —— MiniCPM-V-4.7-1B 只有 1.1 GB，
+Apple Silicon 上约 1.2 张/秒，全程离线，照片不出电脑。</p></div>
+<p class="brand">拾光 LifeLog</p>
+</body></html>

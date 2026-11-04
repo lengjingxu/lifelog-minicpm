@@ -506,6 +506,16 @@
     openLightbox(photos[Math.floor(Math.random() * photos.length)]);
   });
 
+  var only = /[?&]only=([a-z]+)/.exec(window.location.search);
+  if (only) {
+    var keep = {voices: "voices", evidence: "evidence", events: "events", tiles: "tiles"}[only[1]];
+    document.querySelectorAll("body > section").forEach(function(sec){
+      if (!(sec.querySelector("#" + keep) || sec.id === keep)) { sec.style.display = "none"; }
+    });
+    var hero = document.getElementById("top");
+    if (hero) { hero.style.display = "none"; }
+  }
+
   buildIntro();
   buildTop();
   buildSheet();
