@@ -29,6 +29,15 @@
 
 模型权重来自 openbmb 官方 GGUF 仓库，下载走 hf-mirror 镜像，可断点续传。
 
+## 人生经历页
+
+把相册按时间串成一条人生轨迹：
+
+- 顶部是 MiniCPM 写的第一人称生活回顾（页面明确标注这是润色表述，事实以时间线为准）
+- 下面是按年份分段的时间线：每段生活片段带日期、张数、标签、摘要与代表照片
+- 页面地址：http://127.0.0.1:8766/journey
+- 同样的数据也通过 MCP 工具 `lifelog_journey` 暴露给 AI
+
 ## 问答能力测试
 
 .venv/bin/python tests/qa_suite.py --model minicpm-v-4.5-8b

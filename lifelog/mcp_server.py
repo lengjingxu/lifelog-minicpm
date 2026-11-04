@@ -52,6 +52,16 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "lifelog_journey",
+        "description": "返回按时间排好的「人生经历」轨迹：每个年份下的生活片段、代表照片与描述。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "max_events": {"type": "integer", "description": "最多返回多少个片段，默认 40"}
+            },
+        },
+    },
+    {
         "name": "lifelog_events",
         "description": "返回按时间串起来的「生活片段」列表。",
         "inputSchema": {
@@ -90,6 +100,19 @@ def call_tool(name: str, args: dict) -> dict:
         stats = aggregate.compute_stats()
         return _tool_result({"画像": stored.get("summary", "尚未生成"),
                              "统计底稿": aggregate.stats_to_text(stats)})
+    if name == "lifelog_journey":
+        from . import journey
+        payload = journey.build_journey(max_events=int(args.get("max_events", 40)))
+        lines = []
+        for section in payload["sections"]:
+            lines.append(f"## {section['year']} 年")
+            for event in section["events"]:
+                photos = "；".join((p.get("caption") or "") for p in event["photos"][:3])
+                lines.append(
+                    f"- {event['start_day']}~{event['end_day']}｜{event['title']}"
+                    f"（{event['photo_count']} 张）：{photos}"
+                )
+        return _tool_result(chr(10).join(lines))
     if name == "lifelog_events":
         with _db_session() as con:
             rows = con.execute(

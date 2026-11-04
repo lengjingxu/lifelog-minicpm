@@ -111,7 +111,24 @@ def build_events(gap_days: int = 1, min_photos: int = 3, model: str | None = Non
                     if row["caption"]:
                         summary_bits.append(row["caption"])
             top_tags = [t for t, _ in tags.most_common(4)]
-            title = "、".join(top_tags[:2]) or segment[0]
+            generic = {"人物", "风景"}
+            specific = [t for t in top_tags if t not in generic]
+            activity_head = ""
+            for row in con.execute(
+                """SELECT c.activity FROM captions c JOIN assets a ON a.id=c.asset_id
+                   WHERE a.day = ? AND c.status='ok' AND c.activity IS NOT NULL
+                     AND c.activity != '' LIMIT 20""", (day,)
+            ):
+                head = str(row["activity"]).split("/")[0].strip()
+                if head:
+                    activity_head = head
+                    break
+            if specific:
+                title = "、".join(specific[:2])
+            elif activity_head:
+                title = f"{top_tags[0]}｜{activity_head}" if top_tags else activity_head
+            else:
+                title = "、".join(top_tags[:2]) or segment[0]
             summary = "；".join(summary_bits[:6])
             con.execute(
                 """INSERT INTO events (start_day, end_day, title, summary, tags, photo_count,

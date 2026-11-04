@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import aggregate, config, db, profile as profile_mod
+from . import aggregate, config, db, journey_view, profile as profile_mod
 
 THUMB_DIR = config.DATA_DIR / "thumbs"
 
@@ -35,7 +35,7 @@ def _html(title: str, body: str) -> bytes:
  td,th{{border-bottom:1px solid #eee;padding:7px 10px;text-align:left}}
 </style></head><body>
 <header><h1>{title}</h1><nav>
-<a href="/">相册</a><a href="/profile">生活画像</a><a href="/events">生活片段</a><a href="/stats">统计</a>
+<a href="/journey">人生经历</a><a href="/">相册</a><a href="/profile">生活画像</a><a href="/events">生活片段</a><a href="/stats">统计</a>
 </nav></header><main>{body}</main></body></html>"""
     return page.encode("utf-8")
 
@@ -130,6 +130,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(_html("lifelog · 相册", render_index(con, day)))
             elif path.startswith("/day/"):
                 self._send(_html("lifelog · 相册", render_index(con, path.split("/")[-1])))
+            elif path == "/journey":
+                self._send(journey_view.render_html().encode("utf-8"))
+            elif path == "/api/journey":
+                from . import journey
+                payload = journey.build_journey()
+                payload["sections"] = [
+                    {**section, "events": [{**e, "photos": [
+                        {k: p.get(k) for k in ("id", "day", "caption", "tags", "place", "activity")}
+                        for p in e["photos"]]} for e in section["events"]]}
+                    for section in payload["sections"]
+                ]
+                self._send(json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                           "application/json")
             elif path == "/profile":
                 self._send(_html("lifelog · 生活画像", render_profile(con)))
             elif path == "/events":

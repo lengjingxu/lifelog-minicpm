@@ -26,3 +26,4 @@ echo "== 5. 提问"
 $PY -m lifelog.cli ask "我平时都在哪里活动？"
 
 echo "== 6. 本地网页: http://127.0.0.1:8766"
+echo "   人生经历页: http://127.0.0.1:8766/journey"

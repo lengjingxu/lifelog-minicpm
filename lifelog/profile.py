@@ -20,6 +20,18 @@ PROMPT = (
 )
 
 
+FIRST_PERSON_PROMPT = (
+    "下面是一个人的私人相册被本地视觉模型识别后得到的统计底稿。"
+    "请用第一人称（像在写自己的日记）写一段「我的生活回顾」，6-10 段短文字，覆盖："
+    "生活节奏与作息、常见场景与地点、家人与独处、兴趣与活动、情绪基调、季节与时段偏好、"
+    "最近的生活变化。只使用底稿里出现的信息，不要编造具体人名、地名或事件；"
+    "语气具体、有画面感，不要用报告腔，不要使用 Markdown 标题和列表符号，只写段落；"
+    "严禁虚构底稿里没有的具体情节（例如醒来、对话、心情独白等），只写底稿能支持的内容。"
+    + chr(10) + chr(10)
+    + "统计底稿：" + chr(10) + "{stats}"
+)
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
@@ -44,8 +56,17 @@ def build_profile(model_key: str = "minicpm-v-4.7-1b", describe_model: str | Non
         break
     if not narrative:
         raise RuntimeError("所有候选模型都没能生成画像")
+    first_person = ""
+    try:
+        with models.Server(model_key) as server:
+            first_person = server.chat(FIRST_PERSON_PROMPT.format(stats=text),
+                                        max_tokens=1200, temperature=0.3, timeout=600)
+    except Exception as exc:
+        print(f"第一人称画像生成失败（{exc}），保留第三人称版本")
+
     entries = {
         "summary": narrative,
+        "summary_first_person": first_person,
         "stats": text,
         "top_tags": db.jdump(stats["top_tags"]),
         "top_places": db.jdump(stats["top_places"]),
