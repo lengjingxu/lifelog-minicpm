@@ -74,8 +74,41 @@ def cmd_stats(args) -> int:
 def cmd_sync(args) -> int:
     from . import sync_xiaomi
     dest = Path(args.dest).expanduser() if args.dest else config.DATA_DIR / "photos"
-    stats = sync_xiaomi.sync(args.start, args.end, dest, limit=args.limit)
+    if args.incremental:
+        stats = sync_xiaomi.incremental(args.start, args.end, dest, limit=args.limit)
+    else:
+        if not args.start or not args.end:
+            print("需要 --start/--end，或加 --incremental 做增量同步", file=sys.stderr)
+            return 2
+        stats = sync_xiaomi.sync(args.start, args.end, dest, limit=args.limit)
     print(json.dumps(stats, ensure_ascii=False))
+    return 0
+
+
+def cmd_weekly(args) -> int:
+    """一条命令跑完整条管线：增量同步 → 入库 → 识别 → 聚合 → 画像与叙事。"""
+    from . import aggregate, caption, ingest, profile, story, sync_xiaomi
+
+    photos_dir = config.DATA_DIR / "photos"
+    report = {}
+    print("== 1/5 增量同步小米云盘相册")
+    report["sync"] = sync_xiaomi.incremental()
+    print(json.dumps(report["sync"], ensure_ascii=False))
+    print("== 2/5 登记资产")
+    report["ingest"] = ingest.ingest([str(photos_dir)])
+    print(json.dumps(report["ingest"], ensure_ascii=False))
+    print("== 3/5 MiniCPM 逐张识别")
+    report["caption"] = caption.run_caption(args.model, sample=args.sample)
+    print(json.dumps(report["caption"], ensure_ascii=False))
+    print("== 4/5 聚合")
+    report["days"] = aggregate.build_days()
+    report["events"] = aggregate.build_events()
+    print(json.dumps({"days": report["days"], "events": report["events"]}, ensure_ascii=False))
+    print("== 5/5 画像与叙事")
+    report["profile"] = len(profile.build_profile(args.profile_model)["narrative"])
+    report["story"] = list(story.generate_story(args.profile_model, all_voices=True).keys())
+    report["insight"] = len(story.generate_insight(args.profile_model))
+    print(json.dumps(report, ensure_ascii=False))
     return 0
 
 
@@ -202,11 +235,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_stats)
 
     p = sub.add_parser("sync", help="从小米云盘同步相册到本地")
-    p.add_argument("--start", required=True, help="起始日期 YYYYMMDD")
-    p.add_argument("--end", required=True, help="结束日期 YYYYMMDD")
+    p.add_argument("--start", help="起始日期 YYYYMMDD")
+    p.add_argument("--end", help="结束日期 YYYYMMDD")
+    p.add_argument("--incremental", action="store_true", help="只拉上次之后新增的")
     p.add_argument("--dest", help="下载目录，默认 data/photos")
     p.add_argument("--limit", type=int)
     p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("weekly", help="一条命令跑完：增量同步→入库→识别→聚合→画像与叙事")
+    p.add_argument("--model", default="minicpm-v-4.7-1b")
+    p.add_argument("--profile-model", default="minicpm-v-4.5-8b")
+    p.add_argument("--sample", type=int, help="每次只识别 N 张（默认全量新增）")
+    p.set_defaults(func=cmd_weekly)
 
     p = sub.add_parser("story", help="生成人生回顾（三种视角：回顾/给十年后的你/给家人的信）")
     p.add_argument("--model", default="minicpm-v-4.5-8b")

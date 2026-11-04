@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 HOST = "https://i.mi.com"
@@ -42,8 +43,21 @@ def get_credentials(force: bool = False) -> dict:
                             capture_output=True, text=True, timeout=180)
     if result.returncode != 0:
         raise SyncError("取登录态失败：" + result.stderr.strip()[:200])
-    data = json.loads(result.stdout.strip().splitlines()[-1])
-    if not data.get("serviceToken"):
+    # 助手在被 import 时会自己打印一行结果，里面可能包含 token；
+    # 取第一行含 serviceToken 的 JSON，并且不把它写进日志。
+    data = None
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            candidate = json.loads(line)
+        except ValueError:
+            continue
+        if candidate.get("serviceToken"):
+            data = candidate
+            break
+    if not data:
         raise SyncError("未取到 serviceToken")
     return {"token": data["serviceToken"], "userId": data["userId"]}
 
@@ -142,7 +156,16 @@ def download(cred: dict, item: dict, dest_dir: Path, date_hint: str | None = Non
     key = _decode_key(kss.get("secure_key"))
 
     name = item.get("fileName") or f"{item.get('id')}.bin"
-    month = (date_hint or datetime.now().strftime("%Y%m"))[:6]
+    stamp = date_hint or ""
+    if not stamp:
+        sort_time = int(item.get("sortTime") or 0)
+        if sort_time:
+            stamp = datetime.fromtimestamp(sort_time / 1000).strftime("%Y%m")
+    if not stamp:
+        digits = "".join(ch for ch in str(name) if ch.isdigit())
+        if len(digits) >= 8:
+            stamp = digits[:8]
+    month = (stamp or datetime.now().strftime("%Y%m"))[:6]
     target_dir = dest_dir / month
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / name
@@ -201,4 +224,57 @@ def sync(start_date: str, end_date: str, dest_dir: Path, limit: int | None = Non
             print(f"  失败 {item.get('fileName')}: {exc}")
         if index % 20 == 0:
             print(f"  已处理 {index}/{len(items)}")
+    return stats
+
+
+STATE_FILE = Path(os.environ.get("LIFELOG_SYNC_STATE",
+                                Path(__file__).resolve().parent.parent / "data" / "sync_state.json"))
+
+
+def load_state() -> dict:
+    try:
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"last_end": None, "index": {}}
+
+
+def save_state(state: dict) -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def incremental(start: str | None = None, end: str | None = None,
+                dest_dir: Path | None = None, limit: int | None = None) -> dict:
+    """增量同步：只拉上次之后新增的照片，已下载的按 sha1 跳过。"""
+    state = load_state()
+    index = state.get("index", {})
+    if start:
+        begin = start
+    elif state.get("last_end"):
+        begin = (datetime.strptime(state["last_end"], "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
+    else:
+        begin = (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")
+    finish = end or datetime.now().strftime("%Y%m%d")
+    cred = get_credentials()
+    items = list_range(cred, begin, finish)
+    items.sort(key=lambda x: int(x.get("sortTime") or 0))
+    stats = {"listed": len(items), "skipped": 0, "ok": 0, "failed": 0,
+             "from": begin, "to": finish}
+    dest = dest_dir or (Path(__file__).resolve().parent.parent / "data" / "photos")
+    for item in items:
+        sha1 = str(item.get("sha1") or "")
+        if sha1 and sha1 in index:
+            stats["skipped"] += 1
+            continue
+        try:
+            path = download(cred, item, dest, date_hint=None)
+            if sha1:
+                index[sha1] = str(path)
+            stats["ok"] += 1
+        except Exception as exc:
+            stats["failed"] += 1
+            print(f"  失败 {item.get('fileName')}: {exc}")
+    state["index"] = index
+    state["last_end"] = finish
+    save_state(state)
     return stats
