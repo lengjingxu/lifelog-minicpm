@@ -174,6 +174,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(_html("lifelog · 生活片段", render_events(con)))
             elif path == "/stats":
                 self._send(_html("lifelog · 统计", render_stats(con)))
+            elif path.startswith("/assets/"):
+                name = path.split("/")[-1]
+                target = Path(__file__).resolve().parent / "assets" / name
+                if target.exists() and target.suffix in {".css", ".js", ".png", ".svg", ".woff2"}:
+                    ctype = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+                    self._send(target.read_bytes(), ctype)
+                else:
+                    self._send(b"not found", "text/plain", 404)
             elif path.startswith("/photo/"):
                 asset_id = path.split("/")[-1]
                 row = con.execute("SELECT path FROM assets WHERE id=?", (asset_id,)).fetchone()

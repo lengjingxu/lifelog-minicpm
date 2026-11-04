@@ -1,0 +1,13 @@
+{
+  "name": "lifelog-minicpm",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "css": "tailwindcss -i src/tailwind.css -o lifelog/assets/tailwind.css --minify",
+    "css:watch": "tailwindcss -i src/tailwind.css -o lifelog/assets/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.0",
+    "tailwindcss": "^4.1.0"
+  }
+}

@@ -52,6 +52,18 @@
 - 两者都在回顾页里：`/review` 的「你的这些年」与「关于你的画像」两节。
 - 查看事实底稿：`lifelog facts`（数字白名单）与照片细节证据（供画像引用）（模型只能引用这里面的数字，不能自己算）。
 
+## 页面技术栈
+
+- **Tailwind CSS v4**（本地编译，离线可用）：`src/tailwind.css` → `lifelog/assets/tailwind.css
+  `npm run css` 重新编译，`npm run css:watch` 开发时监听。
+- **设计方向**：采用 taste-skill（Leonxlnx/taste-skill）的方向库与验收器，
+  当前方向是 **contact sheet（接触印相表）**：没有巨幅标题，文字带 + 一整版照片网格。
+  验收：
+  `node <taste-skill>/scripts/inspect.mjs http://127.0.0.1:8766/review --out out --widths 1440,768,390`
+  当前结果：**0 FAIL**（5 条 WARN 均可辩护：私人相册无可公开视频素材、方向本身不用展示级标题、
+  首屏以大照片作主导、对比度已按色板调整）。
+- 配色取自相册本身（暮色湖面 + 暖金），字体 Schibsted Grotesk + 苹方。
+
 ## 人生回顾页（沉浸式）
 
 把相册串成一条可以一路滚下去的轨迹：http://127.0.0.1:8766/review

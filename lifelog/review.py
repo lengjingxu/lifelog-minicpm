@@ -105,6 +105,7 @@ def build_data(photos_per_event: int | None = None) -> dict:
             "title": spec["title"],
             "kicker": spec["kicker"],
             "label": spec["label"],
+            "note": spec.get("note", ""),
             "text": text,
             "lead": chr(10).join([p for p in text.split(chr(10)) if p.strip()][:2]),
         })
