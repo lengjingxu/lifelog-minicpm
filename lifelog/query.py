@@ -105,9 +105,38 @@ def evidence_block(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+STATS_HINTS = ("多少", "几张", "多少张", "多少天", "几天", "总数", "数量", "覆盖率", "规模",
+               "多长时间", "多久", "占比", "统计", "一共", "总共")
+BROAD_HINTS = ("一般", "通常", "整体", "总体", "平时", "习惯", "规律", "生活")
+
+
+NL = chr(10)
+
+
+def is_stat_question(question: str) -> bool:
+    return any(hint in question for hint in STATS_HINTS)
+
+
+def is_broad_question(question: str) -> bool:
+    return any(hint in question for hint in BROAD_HINTS)
+
+
+def stats_context() -> str:
+    """客观统计：数字由数据库直接算出，不允许模型从证据条数推断。"""
+    from . import aggregate, profile as profile_mod
+
+    stored = profile_mod.get_profile().get("stats")
+    if stored:
+        return stored
+    return aggregate.stats_to_text(aggregate.compute_stats())
+
+
 def ask(question: str, model_key: str = "minicpm-v-4.7-1b", top_k: int = 12,
         use_profile: bool = True) -> dict:
     """检索证据 → 交给本地 MiniCPM 写答案。"""
+    want_stats = is_stat_question(question)
+    if is_broad_question(question):
+        top_k = max(top_k, 24)
     rows = search(question, limit=top_k)
     if not rows:
         rows = search(question, limit=top_k, auto_date=False)
@@ -119,18 +148,20 @@ def ask(question: str, model_key: str = "minicpm-v-4.7-1b", top_k: int = 12,
             profile_text = summary
     context = []
     if profile_text:
-        context.append("【已有生活画像】\n" + profile_text)
+        context.append("【已有生活画像】" + NL + profile_text)
+    if want_stats:
+        context.append("【客观统计（由数据库直接算出）】" + NL + stats_context())
     if rows:
-        context.append("【相册中检索到的相关记录】\n" + evidence_block(rows))
+        context.append("【相册中检索到的相关记录】" + NL + evidence_block(rows))
     if not context:
         return {"answer": "相册里还没有可用的记录，先跑 lifelog caption 生成描述。", "evidence": []}
-    prompt = (
-        "你是一个只根据用户私人相册记录回答问题的助手。"
-        "请只依据下面的记录回答用户问题，用中文，语气自然，可以提到具体日期和场景；"
-        "如果记录不足以回答，就直接说记录里看不到相关线索。\n\n"
-        + "\n\n".join(context)
-        + f"\n\n问题：{question}"
-    )
+    rules = ["你是一个只根据用户私人相册记录回答问题的助手。",
+             "请只依据下面的记录回答用户问题，用中文，语气自然，可以提到具体日期和场景；",
+             "如果记录不足以回答，就直接说记录里看不到相关线索，不要猜测。"]
+    if want_stats:
+        rules.append("问题涉及数量时，数字一律取自【客观统计】里的数值，"
+                     "严禁把下面列出的记录条数当成总数。")
+    prompt = NL.join(rules) + NL + NL + (NL + NL).join(context) + NL + NL + f"问题：{question}"
     with models.Server(model_key) as server:
         answer = server.chat(prompt, max_tokens=700, temperature=0.3, timeout=600)
-    return {"answer": answer, "evidence": rows}
+    return {"answer": answer, "evidence": rows, "stats_used": want_stats}
