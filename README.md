@@ -29,6 +29,13 @@
 
 模型权重来自 openbmb 官方 GGUF 仓库，下载走 hf-mirror 镜像，可断点续传。
 
+## 问答能力测试
+
+.venv/bin/python tests/qa_suite.py --model minicpm-v-4.5-8b
+
+12 个典型问题一次跑完，输出答案、命中证据条数与耗时；报告见 reports/qa-report.json。
+实测结论与能力边界见 docs/能力边界与问答测试.md。
+
 ## 一键演示（100 张试跑）
 
 ```bash
