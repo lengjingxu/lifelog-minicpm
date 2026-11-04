@@ -1,0 +1,7 @@
+.venv/
+data/
+*.pyc
+__pycache__/
+.DS_Store
+vendor/
+vendor-unused/
