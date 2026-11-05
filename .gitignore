@@ -7,3 +7,4 @@ vendor/
 vendor-unused/
 node_modules/
 # package-lock.json 需要提交以固定依赖版本
+reports/demo/*.json
