@@ -106,7 +106,7 @@
 
 ```bash
 # 1) 克隆
-git clone https://github.com/<your-name>/lifelog-minicpm.git
+git clone https://github.com/lengjingxu/lifelog-minicpm.git
 cd lifelog-minicpm
 
 # 2) 装依赖

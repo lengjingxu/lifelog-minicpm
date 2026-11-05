@@ -8,3 +8,5 @@ vendor-unused/
 node_modules/
 # package-lock.json 需要提交以固定依赖版本
 reports/demo/*.json
+# 生成的演示页内嵌真实照片，绝不入库
+reports/demo/qa-demo.html
