@@ -15,7 +15,7 @@ description: >-
 
 **1. MCP（首选，已在本机注册）** 启动：
 ```bash
-cd /Users/leng/lifelog-minicpm && .venv/bin/python -m lifelog.mcp_server
+cd ~/lifelog-minicpm && .venv/bin/python -m lifelog.mcp_server
 ```
 工具：
 - `lifelog_ask` — 自然语言提问，返回带日期与场景依据的回答（最常用）
@@ -27,7 +27,7 @@ cd /Users/leng/lifelog-minicpm && .venv/bin/python -m lifelog.mcp_server
 
 **2. 命令行**
 ```bash
-cd /Users/leng/lifelog-minicpm
+cd ~/lifelog-minicpm
 .venv/bin/python -m lifelog.cli ask "我上个月常去哪？" --model minicpm-v-4.7-1b
 .venv/bin/python -m lifelog.cli search "湖边 孩子" --limit 8
 .venv/bin/python -m lifelog.cli stats
@@ -37,7 +37,7 @@ cd /Users/leng/lifelog-minicpm
 ## 页面
 
 回顾页：http://127.0.0.1:8766/review
-启动：`cd /Users/leng/lifelog-minicpm && .venv/bin/python -m lifelog.cli serve-web --port 8766`
+启动：`cd ~/lifelog-minicpm && .venv/bin/python -m lifelog.cli serve-web --port 8766`
 
 页面包含：接触印相表（按年份铺开的全部照片）、生活片段、三种叙事（回顾／给十年后的你／
 给家人的信）、自我画像与照片依据、关键数字。
