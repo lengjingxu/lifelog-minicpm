@@ -157,6 +157,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(review.render().encode("utf-8"))
             elif path == "/journey-simple":
                 self._send(journey_view.render_html().encode("utf-8"))
+            elif path == "/demo":
+                demo = Path(__file__).resolve().parent.parent / "reports" / "demo" / "qa-demo.html"
+                if demo.exists():
+                    self._send(demo.read_bytes())
+                else:
+                    self._send(b"demo not generated; run scripts/gen_demo.py", "text/plain")
             elif path == "/api/journey":
                 from . import journey
                 payload = journey.build_journey()
