@@ -57,6 +57,21 @@ def _extract_block(text: str) -> str | None:
     return None
 
 
+def _extract_partial(text: str) -> str | None:
+    """输出被 max_tokens 截断时，把没闭合的块补全到可解析。"""
+    start = text.find("{")
+    if start < 0:
+        return None
+    body = text[start:]
+    tail = ""
+    if body.count(chr(34)) % 2 == 1:
+        tail += chr(34)
+    if body.count("[") > body.count("]"):
+        tail += "]"
+    if body.count("{") > body.count("}"):
+        tail += "}"
+    return body + tail
+
 def _add_missing_commas(block: str) -> str:
     """小模型偶尔在两个字段之间漏掉逗号：在字符串结束后紧跟下一个键时补上。"""
     out = []
@@ -136,7 +151,7 @@ def _tags_field(block: str) -> list[str]:
 def parse_json_object(text: str) -> dict | None:
     """解析模型输出：严格 JSON → 补逗号 → 逐字段兜底。"""
     text = text.strip()
-    block = _extract_block(text)
+    block = _extract_block(text) or _extract_partial(text)
     if not block:
         return None
     try:

@@ -84,13 +84,13 @@ def render_index(con, day: str | None = None, limit: int = 60) -> str:
     if day:
         rows = con.execute(
             """SELECT a.id, a.path, a.day, a.taken_at, c.caption, c.tags
-               FROM assets a LEFT JOIN captions c ON c.asset_id=a.id AND c.prompt_version='describe-v1'
+               FROM assets a LEFT JOIN current_caption c ON c.asset_id=a.id AND c.prompt_version='describe-v1'
                WHERE a.day = ? ORDER BY a.taken_at LIMIT ?""", (day, limit)).fetchall()
         title = f"{day} 的照片"
     else:
         rows = con.execute(
             """SELECT a.id, a.path, a.day, a.taken_at, c.caption, c.tags
-               FROM assets a LEFT JOIN captions c ON c.asset_id=a.id AND c.prompt_version='describe-v1'
+               FROM assets a LEFT JOIN current_caption c ON c.asset_id=a.id AND c.prompt_version='describe-v1'
                WHERE a.kind='image' ORDER BY a.day DESC, a.taken_at DESC LIMIT ?""", (limit,)).fetchall()
         title = "最近的相册"
     cards = []
@@ -134,7 +134,9 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # 安静一点
         pass
 
-    def _send(self, body: bytes, content_type: str = "text/html; charset=utf-8", code: int = 200):
+    def _send(self, body, content_type: str = "text/html; charset=utf-8", code: int = 200):
+        if isinstance(body, str):
+            body = body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -209,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
                 asset_id = path.split("/")[-1]
                 row = con.execute(
                     """SELECT a.*, c.caption, c.tags, c.scene, c.place, c.activity, c.people, c.mood
-                       FROM assets a LEFT JOIN captions c ON c.asset_id=a.id AND c.prompt_version='describe-v1'
+                       FROM assets a LEFT JOIN current_caption c ON c.asset_id=a.id AND c.prompt_version='describe-v1'
                        WHERE a.id=?""", (asset_id,)).fetchone()
                 if not row:
                     self._send(b"not found", "text/plain", 404)

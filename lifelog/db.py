@@ -84,6 +84,25 @@ CREATE INDEX IF NOT EXISTS idx_assets_day ON assets(day);
 CREATE INDEX IF NOT EXISTS idx_captions_asset ON captions(asset_id);
 """
 
+# 每个 asset 只取一条描述：优先当前主模型，其次最新的 ok 记录。
+# 用视图而不是散落各处的 WHERE，避免统计口径漂移（曾经把旧模型的条目也算了进去）。
+CURRENT_CAPTION_VIEW = """
+CREATE VIEW IF NOT EXISTS current_caption AS
+SELECT c.* FROM captions c
+JOIN (
+    SELECT asset_id, MAX(
+        CASE WHEN model = 'minicpm-v-4.7-1b' AND status = 'ok' THEN 2
+             WHEN status = 'ok' THEN 1
+             ELSE 0 END
+    ) AS rank
+    FROM captions GROUP BY asset_id
+) best ON best.asset_id = c.asset_id
+WHERE c.status = 'ok' AND (
+    (best.rank = 2 AND c.model = 'minicpm-v-4.7-1b') OR (best.rank = 1 AND c.status = 'ok')
+)
+GROUP BY c.asset_id;
+"""
+
 FTS_SCHEMA = """
 CREATE VIRTUAL TABLE IF NOT EXISTS caption_fts USING fts5(
     asset_id UNINDEXED, caption, tags, place, activity, ocr_text,
@@ -105,6 +124,10 @@ def init_db() -> None:
         con.executescript(SCHEMA)
         try:
             con.executescript(FTS_SCHEMA)
+        except sqlite3.OperationalError:
+            pass
+        try:
+            con.executescript(CURRENT_CAPTION_VIEW)
         except sqlite3.OperationalError:
             pass
 

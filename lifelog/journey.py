@@ -21,7 +21,7 @@ def _spread(items: list, count: int) -> list:
 def event_photos(con, start_day: str, end_day: str, count: int = 6) -> list[dict]:
     rows = con.execute(
         """SELECT a.id, a.path, a.day, a.taken_at, c.caption, c.tags, c.place, c.activity
-           FROM assets a JOIN captions c ON c.asset_id = a.id
+           FROM assets a JOIN current_caption c ON c.asset_id = a.id
            WHERE c.prompt_version = 'describe-v1' AND c.status = 'ok'
              AND a.day >= ? AND a.day <= ?
            ORDER BY a.taken_at, a.path""",

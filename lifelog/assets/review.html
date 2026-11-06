@@ -30,8 +30,8 @@
         读到最后，成为一份可以回头看的人生回顾。
       </p>
       <ul class="mt-8 space-y-1 text-body text-muted">
-        <li>2023 年 4 月 — 2026 年 3 月</li>
-        <li>51 张照片在这一页上</li>
+        <li id="spanLabel">—</li>
+        <li><span id="countLabel">—</span> 张照片在这一页上</li>
         <li>只放真实照片，不放截屏</li>
       </ul>
       <ul class="mt-4 space-y-1 text-body text-muted">
@@ -515,6 +515,15 @@
     var hero = document.getElementById("top");
     if (hero) { hero.style.display = "none"; }
   }
+
+  (function fillFacts() {
+    var span = (M.visible_span && M.visible_span.length === 2) ? M.visible_span : [];
+    var label = span.length ? span[0].slice(0, 7) + ' — ' + span[1].slice(0, 7) : (M.since_day || '');
+    var spanEl = document.getElementById("spanLabel");
+    var countEl = document.getElementById("countLabel");
+    if (spanEl) { spanEl.textContent = label; }
+    if (countEl) { countEl.textContent = M.described; }
+  })();
 
   buildIntro();
   buildTop();

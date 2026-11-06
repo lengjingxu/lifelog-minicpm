@@ -87,24 +87,27 @@ def cmd_sync(args) -> int:
 
 def cmd_weekly(args) -> int:
     """一条命令跑完整条管线：增量同步 → 入库 → 识别 → 聚合 → 画像与叙事。"""
-    from . import aggregate, caption, ingest, profile, story, sync_xiaomi
+    from . import aggregate, caption, ingest, merge_captions, profile, story, sync_xiaomi
 
     photos_dir = config.DATA_DIR / "photos"
     report = {}
-    print("== 1/5 增量同步小米云盘相册")
+    print("== 1/6 增量同步小米云盘相册")
     report["sync"] = sync_xiaomi.incremental()
     print(json.dumps(report["sync"], ensure_ascii=False))
-    print("== 2/5 登记资产")
+    print("== 2/6 登记资产")
     report["ingest"] = ingest.ingest([str(photos_dir)])
     print(json.dumps(report["ingest"], ensure_ascii=False))
-    print("== 3/5 MiniCPM 逐张识别")
+    print("== 3/6 MiniCPM 逐张识别")
     report["caption"] = caption.run_caption(args.model, sample=args.sample)
     print(json.dumps(report["caption"], ensure_ascii=False))
-    print("== 4/5 聚合")
+    print("== 4/6 合并多模型描述")
+    report["merge"] = merge_captions.run()
+    print(json.dumps(report["merge"], ensure_ascii=False))
+    print("== 5/6 聚合")
     report["days"] = aggregate.build_days()
     report["events"] = aggregate.build_events()
     print(json.dumps({"days": report["days"], "events": report["events"]}, ensure_ascii=False))
-    print("== 5/5 画像与叙事")
+    print("== 6/6 画像与叙事")
     report["profile"] = len(profile.build_profile(args.profile_model)["narrative"])
     report["story"] = list(story.generate_story(args.profile_model, all_voices=True).keys())
     report["insight"] = len(story.generate_insight(args.profile_model))

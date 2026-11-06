@@ -82,3 +82,51 @@ REVIEW_EXCLUDE_TAGS = [t.strip() for t in
                        os.environ.get(
                            "LIFELOG_REVIEW_EXCLUDE_TAGS",
                            "屏幕截图,文字排版,图表数据,文档票据").split(",") if t.strip()]
+
+# —— 标签词表 ——
+# 自建模型（MiniCPM）用 17 类粗分类；迁移进来的旧模型（Qwen3-VL）用的是更细的
+# 自由词表。两边都保留原词，但统一映射到下面这套「主类」，统计与检索都按主类走，
+# 这样两批结果能合在一起算，也不会因为换模型而让统计口径漂移。
+TAG_TAXONOMY = {
+    "人物": ["人物"],
+    "风景": ["风景", "户外", "山野", "海边", "湖泊", "雪地", "日出", "日落", "天空", "自然"],
+    "城市建筑": ["城市建筑", "街道", "建筑", "招牌", "车辆", "交通出行", "交通"],
+    "室内居家": ["室内居家", "室内", "家具", "家居", "厨房", "客厅", "卧室"],
+    "美食": ["美食", "餐具", "餐厅", "蛋糕", "饮品", "食物"],
+    "植物花卉": ["植物花卉", "花朵", "植物", "花卉"],
+    "活动聚会": ["活动聚会", "舞台", "表演", "聚会", "合影"],
+    "运动户外": ["运动户外", "运动", "骑行", "徒步", "游泳"],
+    "儿童": ["儿童", "玩具", "婴儿", "孩子"],
+    "宠物动物": ["宠物动物", "宠物", "动物"],
+    "文档票据": ["文档票据", "文字", "二维码", "票据", "文档"],
+    "屏幕截图": ["屏幕截图", "手机", "电脑", "截图"],
+    "文字排版": ["文字排版"],
+    "图表数据": ["图表数据", "图表"],
+    "商品物品": ["商品物品", "商品", "物品"],
+    "艺术绘画": ["艺术绘画", "绘画", "艺术"],
+    "交通出行": ["交通出行", "交通"],
+}
+
+# 反向索引：原词 -> 主类
+TAXONOMY_ORDER = list(TAG_TAXONOMY)
+
+TAG_TO_CATEGORY = {alias: cat for cat, aliases in TAG_TAXONOMY.items() for alias in aliases}
+
+
+def canonical_tags(tags) -> list[str]:
+    """把任意模型的标签归一到主类，去重并按词表顺序排序。"""
+    seen = []
+    for tag in tags or []:
+        name = str(tag).strip()
+        if not name:
+            continue
+        category = TAG_TO_CATEGORY.get(name)
+        if category is None:
+            for alias, cat in TAG_TO_CATEGORY.items():
+                if alias in name or name in alias:
+                    category = cat
+                    break
+        if category and category not in seen:
+            seen.append(category)
+    order = {name: i for i, name in enumerate(TAG_TAXONOMY)}
+    return sorted(seen, key=lambda t: order.get(t, 99))

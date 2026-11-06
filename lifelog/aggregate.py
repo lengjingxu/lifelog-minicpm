@@ -14,7 +14,7 @@ def now_iso() -> str:
 def _caption_rows(con, since_day=None, until_day=None, model=None):
     query = """SELECT a.id, a.day, a.taken_at, a.path, c.caption, c.scene, c.people,
                       c.place, c.activity, c.mood, c.tags
-               FROM assets a JOIN captions c ON c.asset_id = a.id
+               FROM assets a JOIN current_caption c ON c.asset_id = a.id
                WHERE c.status = 'ok'"""
     params: list = []
     if since_day:
@@ -35,7 +35,8 @@ def build_days(model: str | None = None) -> int:
     db.init_db()
     with db.session() as con:
         rows = _caption_rows(con, model=model)
-        photos = {r["day"]: r["day"] for r in con.execute("SELECT day FROM assets WHERE day IS NOT NULL")}
+        photos = {row["day"]: row["n"] for row in con.execute(
+            "SELECT day, COUNT(*) AS n FROM assets WHERE day IS NOT NULL GROUP BY day")}
         buckets: dict[str, dict] = {}
         for day in photos:
             buckets[day] = {"tags": Counter(), "hours": Counter(), "described": 0}
@@ -57,7 +58,7 @@ def build_days(model: str | None = None) -> int:
                      photo_count=excluded.photo_count, described=excluded.described,
                      tags=excluded.tags, hour_histogram=excluded.hour_histogram,
                      updated_at=excluded.updated_at""",
-                (day, len([1 for d in photos if d == day]), bucket["described"],
+                (day, photos.get(day, 0), bucket["described"],
                  db.jdump(bucket["tags"].most_common(6)),
                  db.jdump({str(h): c for h, c in sorted(bucket["hours"].items())}),
                  now_iso()),
@@ -73,7 +74,7 @@ def build_events(gap_days: int = 1, min_photos: int = 3, model: str | None = Non
     with db.session() as con:
         rows = con.execute(
             """SELECT a.day, COUNT(*) AS n FROM assets a
-               JOIN captions c ON c.asset_id = a.id
+               JOIN current_caption c ON c.asset_id = a.id
                WHERE c.status='ok' AND a.day IS NOT NULL
                GROUP BY a.day ORDER BY a.day"""
         ).fetchall()
@@ -103,7 +104,7 @@ def build_events(gap_days: int = 1, min_photos: int = 3, model: str | None = Non
             summary_bits = []
             for day in segment:
                 for row in con.execute(
-                    """SELECT c.caption, c.tags FROM captions c JOIN assets a ON a.id=c.asset_id
+                    """SELECT c.caption, c.tags FROM current_caption c JOIN assets a ON a.id=c.asset_id
                        WHERE a.day = ? AND c.status='ok' LIMIT 6""", (day,)
                 ):
                     for tag in db.jload(row["tags"]):
@@ -115,7 +116,7 @@ def build_events(gap_days: int = 1, min_photos: int = 3, model: str | None = Non
             specific = [t for t in top_tags if t not in generic]
             activity_head = ""
             for row in con.execute(
-                """SELECT c.activity FROM captions c JOIN assets a ON a.id=c.asset_id
+                """SELECT c.activity FROM current_caption c JOIN assets a ON a.id=c.asset_id
                    WHERE a.day = ? AND c.status='ok' AND c.activity IS NOT NULL
                      AND c.activity != '' LIMIT 20""", (day,)
             ):

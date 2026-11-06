@@ -64,7 +64,7 @@ def search(question: str, since_day: str | None = None, until_day: str | None = 
     with db.session() as con:
         query = """SELECT a.id, a.day, a.taken_at, a.path, c.caption, c.scene, c.people,
                           c.place, c.activity, c.mood, c.tags, c.ocr_text
-                   FROM assets a JOIN captions c ON c.asset_id = a.id
+                   FROM assets a JOIN current_caption c ON c.asset_id = a.id
                    WHERE c.status = 'ok' AND c.prompt_version = 'describe-v1'"""
         params: list = []
         if since_day:
