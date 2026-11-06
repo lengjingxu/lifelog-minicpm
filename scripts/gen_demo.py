@@ -46,15 +46,18 @@ def stat(where):
 
 total_img = stat("select count(*) from assets where kind='image'")
 covered = stat("select count(distinct asset_id) from captions where status='ok'")
-c2023 = stat("select count(*) from assets a join captions c on c.asset_id=a.id where a.day like '2023%' and c.status='ok'")
-office_n = stat("""select count(*) from assets a join captions c on c.asset_id=a.id
+c2023 = stat("select count(distinct a.id) from assets a join captions c on c.asset_id=a.id where a.day like '2023%' and c.status='ok'")
+office_n = stat("""select count(distinct a.id) from assets a join captions c on c.asset_id=a.id
  where a.day like '2023%' and c.status='ok' and (c.caption like '%办公桌%' or c.caption like '%办公%'
  or c.caption like '%写字楼%' or c.caption like '%会议室%' or c.caption like '%工位%' or c.caption like '%同事%')""")
 office_days = con.execute("""select count(distinct a.day) from assets a join captions c on c.asset_id=a.id
  where a.day like '2023%' and c.status='ok' and (c.caption like '%办公%'
  or c.caption like '%写字楼%' or c.caption like '%会议室%' or c.caption like '%工位%' or c.caption like '%同事%')""").fetchone()[0]
-trip_n = stat("""select count(*) from assets a join captions c on c.asset_id=a.id
+trip_captioned = stat("""select count(distinct a.id) from assets a join captions c on c.asset_id=a.id
  where a.day in ('2023-06-03','2023-06-04','2023-06-05') and a.lat between 18.15 and 18.25""")
+
+trip_n = stat("""select count(*) from assets
+ where day in ('2023-06-03','2023-06-04','2023-06-05') and lat between 18.15 and 18.25""")
 
 print('total_img', total_img, 'covered', covered, '2023', c2023, 'office', office_n, office_days, 'trip', trip_n)
 
@@ -115,7 +118,7 @@ figure figcaption b{{display:block;color:var(--ink);font-size:11px;margin-bottom
 <div class="turn">
 <div class="q">我想带朋友出去玩，推荐一个我们去过的地方？</div>
 <div class="a">
-<p>推荐 <b>三亚太阳湾</b>。2023 年 6 月 3 日到 5 日，三天拍了 <b>{trip_n} 张</b>，是这一年密度最高的短途。</p>
+<p>推荐 <b>三亚太阳湾</b>。2023 年 6 月 3 日到 5 日，同一坐标段三天拍了 <b>{trip_n} 张，其中 {trip_captioned} 张有描述</b>，是这一年密度最高的短途。</p>
 <ul class="steps">
 <li>画面构成：户外 214 张、海边 184 张、室内 181 张、山野 52 张——有海、有山、有能待住的酒店，不是一个打卡点。</li>
 <li>时间分布：17 点 172 张、22 点 129 张、16 点 102 张——下午到夜里光线最好。</li>
