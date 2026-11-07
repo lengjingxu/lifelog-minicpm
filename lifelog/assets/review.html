@@ -2,539 +2,695 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>拾光 LifeLog · 你的相册被机器逐张读过</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;600;800&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>拾光 LifeLog · 你的人生回顾</title>
 <link rel="stylesheet" href="/assets/tailwind.css">
+<style>
+  /* 页面级补充：hero 遮罩与深色段的小节标签 */
+  .hero-veil { background: linear-gradient(to top, rgba(20,20,22,.97) 0%, rgba(20,20,22,.78) 22%, rgba(20,20,22,.44) 48%, rgba(20,20,22,.12) 72%, rgba(20,20,22,.38) 100%); }
+  #voices .sheet-label { color: var(--color-gold); }
+  #voices .sheet-label::before { background: var(--color-gold); }
+  .hero-slide { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: 0; transition: opacity 1.4s ease; }
+  .hero-slide.on { opacity: 1; }
+  .lb-strip-item { width: 44px; height: 44px; flex: none; border-radius: 6px; overflow: hidden; cursor: pointer; opacity: .45; transition: opacity .2s, box-shadow .2s; }
+  .lb-strip-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .lb-strip-item.now { opacity: 1; box-shadow: 0 0 0 2px var(--color-gold); }
+  .scroll-hint { animation: hintFloat 2.4s ease-in-out infinite; }
+  /* 年份轴激活态：金色指示条 */
+  .year-link { position: relative; padding-left: 0; transition: color .25s ease, padding-left .25s ease; }
+  .year-link::before {
+    content: ""; position: absolute; left: 0; top: 50%; height: 0;
+    width: 2px; background: var(--color-gold); transform: translateY(-50%);
+    transition: height .25s ease; border-radius: 2px;
+  }
+  .year-link.on { padding-left: 1rem; font-weight: 600; }
+  .year-link.on::before { height: 70%; }
+  @keyframes hintFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
+</style>
 </head>
-<body class="grain">
+<body class="bg-canvas font-body text-ink antialiased">
 
-<header class="fixed inset-x-0 top-0 z-50 bg-bg/90 backdrop-blur-md">
-  <div class="flex items-center gap-3 px-[var(--spacing-gutter)] py-3">
-    <a href="#top" class="font-display text-small tracking-[0.2em]">拾光 LifeLog</a>
-    <div id="seg" class="flex gap-1.5"></div>
-    <div id="chips" class="flex flex-1 gap-1.5 overflow-x-auto"></div>
-    <button id="shuffle" class="btn">随机一张</button>
+<!-- ① 沉浸 Hero：满屏轮播 + 底部渐变遮罩，模型参数降级为脚注 -->
+<header id="top" class="relative h-[100svh] min-h-[560px] overflow-hidden bg-night text-white">
+  <div id="heroSlides" class="absolute inset-0"></div>
+  <div class="hero-veil pointer-events-none absolute inset-0"></div>
+  <div class="relative flex h-full flex-col justify-end pb-20 md:pb-24">
+    <div class="wrap">
+      <p class="font-mono text-caption tracking-[0.28em] text-gold">SHIGUANG · LIFELOG REVIEW</p>
+      <h1 class="mt-5 font-display text-display font-semibold text-balance">你的这些年</h1>
+      <p id="heroSub" class="mt-5 font-mono text-caption tracking-[0.08em] text-white/90 tnum"></p>
+    </div>
   </div>
+  <p class="absolute bottom-4 left-1/2 hidden -translate-x-1/2 whitespace-nowrap font-mono text-[11px] text-white/35 md:block">MiniCPM-V-4.7-1B · llama.cpp · 全程离线，照片从未离开这台设备</p>
+  <a href="#figures" aria-label="向下浏览" class="absolute bottom-5 right-6 flex h-10 w-10 items-center justify-center rounded-full border border-white/25 text-white/70 transition hover:border-gold hover:text-gold">
+    <svg class="scroll-hint" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v10m0 0 4-4m-4 4L4 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </a>
 </header>
 
-<!-- 封面：文字带 + 接触印相表 -->
-<section id="top" class="pt-24">
-  <div class="grid grid-cols-1 gap-x-4 gap-y-8 px-[var(--spacing-gutter)] lg:grid-cols-12 lg:pt-24">
-    <div class="lg:col-span-6">
-      <h1 class="font-display text-lead font-normal tracking-[0.06em] whitespace-nowrap">拾光 LifeLog</h1>
-      <p class="mt-6 max-w-[46ch] text-body leading-[1.6]">
-        你的私人相册被一台本地的视觉模型逐张读过——每一张都留下了描述、场景、人物、地点与标签，
-        读到最后，成为一份可以回头看的人生回顾。
-      </p>
-      <ul class="mt-8 space-y-1 text-body text-muted">
-        <li id="spanLabel">—</li>
-        <li><span id="countLabel">—</span> 张照片在这一页上</li>
-        <li>只放真实照片，不放截屏</li>
-      </ul>
-      <ul class="mt-4 space-y-1 text-body text-muted">
-        <li>MiniCPM-V-4.7-1B 逐张识别</li>
-        <li>MiniCPM-V-4.5-8B 写成叙事</li>
-        <li>全程离线，不出本机</li>
-      </ul>
-      <nav class="mt-8 flex gap-5 text-body">
-        <a href="#events" class="hover:text-accent">生活片段</a>
-        <a href="#voices" class="hover:text-accent">三种视角</a>
-        <a href="#evidence" class="hover:text-accent">依据</a>
-      </nav>
+<!-- 毛玻璃顶栏：滚过 hero 后出现，视图锚点 + 筛选 -->
+<nav id="bar" class="sticky top-0 z-40 -translate-y-2 border-b border-black/5 opacity-0 transition-all duration-300 glass">
+  <div class="wrap flex h-14 items-center justify-between gap-3">
+    <a href="#top" class="font-display text-body font-semibold tracking-wide">拾光</a>
+    <div class="hidden items-center gap-7 text-caption text-ink-soft md:flex">
+      <a class="transition hover:text-ink" href="#timeline">生活片段</a>
+      <a class="transition hover:text-ink" href="#voices">三种叙事</a>
+      <a class="transition hover:text-ink" href="#portrait">自我画像</a>
+      <a class="font-medium text-gold-deep transition hover:text-gold" href="/live">识别现场</a>
     </div>
-    <figure class="lg:col-span-6">
-      <div class="frame aspect-[16/10] w-full overflow-hidden lg:aspect-[4/5]">
-        <img id="leadPhoto" class="kenburns h-full w-full object-cover" alt="">
+    <div class="flex items-center gap-2">
+      <button id="shuffleBtn" class="btn" type="button">随机一张</button>
+      <button id="filterBtn" class="btn btn-solid" type="button">筛选</button>
+    </div>
+  </div>
+  <div id="activeChips" class="wrap hidden flex-wrap gap-2 pb-3"></div>
+</nav>
+
+<!-- ② 数字带：进入视口滚动到目标值 -->
+<section id="figures" class="py-20 md:py-28">
+  <div class="wrap">
+    <p class="sheet-label reveal">这些年，被认真看过一遍</p>
+    <div class="mt-10 grid grid-cols-2 gap-x-6 gap-y-12 md:grid-cols-4">
+      <div class="reveal">
+        <p class="font-display text-figure font-semibold tnum" data-count id="figTotal">0</p>
+        <p class="mt-2 text-caption text-ink-soft">张照片</p>
       </div>
-      <figcaption class="mt-2 flex flex-wrap items-baseline justify-between gap-3 text-small text-muted">
-        <span id="leadCap"></span><span id="leadMeta"></span>
-      </figcaption>
-    </figure>
-  </div>
-
-  <div class="h-[6vh] md:h-[9vh]"></div>
-
-  <div id="sheet" class="px-[var(--spacing-gutter)] pb-16"></div>
-
-  <div id="preview" class="pointer-events-none fixed bottom-5 left-5 z-40 hidden max-w-[22rem] bg-surface p-4 rounded-[2px]">
-    <p class="text-small text-muted" id="previewDate"></p>
-    <p class="mt-1 text-body leading-[1.6]" id="previewText"></p>
-    <p class="mt-2 text-small text-faint" id="previewMeta"></p>
-  </div>
-</section>
-
-<!-- 引子：statement tiles -->
-<section id="tiles" class="px-[var(--spacing-gutter)]">
-  <div class="grid grid-cols-2 gap-2 md:grid-cols-12 md:gap-2">
-    <div class="reveal relative col-span-2 flex min-h-[46svh] flex-col justify-end overflow-hidden rounded-[2px] bg-field-1 p-5 md:col-span-8 md:min-h-[38svh]">
-      <p class="font-display text-slogan leading-[0.86] text-field-1-ink">机器替你<br>读过一遍</p>
-    </div>
-    <div class="reveal relative col-span-1 flex min-h-[23svh] items-end overflow-hidden rounded-[2px] bg-field-2 p-4 text-field-2-ink md:col-span-4 md:min-h-[19svh]">
-      <p class="font-display text-[clamp(2.5rem,6vw,5rem)] leading-[0.85]" id="tileFigure">1953</p>
-    </div>
-    <div class="reveal relative col-span-1 min-h-[23svh] overflow-hidden rounded-[2px] md:col-span-4 md:min-h-[19svh]">
-      <img id="tilePhoto" class="kenburns h-full w-full object-cover" alt="">
-    </div>
-    <div class="reveal col-span-2 md:col-span-12">
-      <div class="grid md:grid-cols-12">
-        <p class="hidden md:col-span-5 md:block"></p>
-        <div class="md:col-span-7 md:py-10">
-          <p class="max-w-[62ch] text-lead leading-[1.55] text-ink/90" id="tileLong"></p>
-        </div>
+      <div class="reveal">
+        <p class="font-display text-figure font-semibold tnum"><span data-count data-suffix="%" id="figCov">0</span></p>
+        <p class="mt-2 text-caption text-ink-soft">逐张识别覆盖</p>
+      </div>
+      <div class="reveal">
+        <p class="font-display text-figure font-semibold tnum" data-count id="figEvents">0</p>
+        <p class="mt-2 text-caption text-ink-soft">段生活片段</p>
+      </div>
+      <div class="reveal">
+        <p class="font-display text-figure font-semibold tnum" data-count id="figDays">0</p>
+        <p class="mt-2 text-caption text-ink-soft">个有画面的日子</p>
       </div>
     </div>
+    <p class="reveal mt-12 text-caption text-ink-faint">以上事实由 MiniCPM-V-4.7-1B 在本机离线逐张识别后统计。</p>
   </div>
 </section>
 
-<!-- 生活片段：色彩块 -->
-<section id="events" class="px-[var(--spacing-gutter)] pt-20">
-  <h2 class="font-display text-head">生活片段</h2>
-  <p class="mt-3 max-w-[56ch] text-body leading-[1.7] text-muted">
-    每一次出门都是一段生活。下面是这些年的片段：日期、去过的地方、当时的天气和心情，都由模型从照片里读出来。
-  </p>
-  <div id="tileGrid" class="mt-10 grid grid-cols-2 gap-2 md:grid-cols-6"></div>
+<!-- ③ 年份编辑网格：左侧锚点轴 + 每段「featured 大图 + 信息 + 小图行」 -->
+<section id="timeline" class="pb-24 md:pb-32">
+  <div class="wrap">
+    <p class="sheet-label reveal">接触印相表</p>
+    <h2 class="reveal mt-4 max-w-[22em] font-display text-head font-semibold text-balance">按年份铺开，每一段都是一段日子</h2>
+    <div class="mt-12 flex flex-col gap-10 md:flex-row md:gap-14">
+      <aside class="shrink-0 md:w-24">
+        <div id="yearNav" class="sticky top-20 flex gap-3 md:flex-col md:gap-4"></div>
+      </aside>
+      <div id="years" class="min-w-0 flex-1"></div>
+    </div>
+  </div>
 </section>
 
-<!-- 三种视角：ledger + 侧预览 -->
-<section id="voices" class="px-[var(--spacing-gutter)] pt-24">
-  <h2 class="font-display text-head">同一批照片，三种说法</h2>
-  <div class="mt-10 grid gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)]">
-    <div>
-      <div id="voiceList" class="space-y-8"></div>
-    </div>
-    <aside class="md:sticky md:top-24 md:self-start">
-      <div class="frame aspect-[4/5] w-full max-w-[26rem]">
-        <img id="voicePhoto" class="h-full w-full object-cover" alt="">
+<!-- ④ 三种叙事（深色段） -->
+<section id="voices" class="bg-night py-20 text-white md:py-28">
+  <div class="wrap">
+    <p class="sheet-label reveal">三种叙事</p>
+    <h2 class="reveal mt-4 font-display text-head font-semibold text-balance">同一批照片，三种说法</h2>
+    <div id="voiceTabs" class="reveal mt-9 flex flex-wrap gap-2"></div>
+    <div class="mt-10 grid gap-10 md:grid-cols-[1fr_280px] md:gap-14">
+      <div class="min-w-0">
+        <p id="voiceNote" class="max-w-[36em] text-caption italic text-white/55"></p>
+        <div id="voiceBody" class="mt-7 max-w-[34em] space-y-5 text-lead leading-relaxed text-white/90"></div>
       </div>
-      <p class="mt-3 text-small text-muted" id="voicePhotoCap"></p>
-    </aside>
-  </div>
-</section>
-
-<!-- 依据：small frames, wide space -->
-<section id="evidence" class="px-[var(--spacing-gutter)] pt-24">
-  <h2 class="font-display text-head">这些判断的依据</h2>
-  <p class="mt-3 max-w-[58ch] text-body leading-[1.7] text-muted">
-    上面每一条判断都可以指回具体的照片。下面是模型为这些照片写下的原始描述，点开任意一张可以看大图。
-  </p>
-  <div class="mt-12 grid gap-8 md:grid-cols-2" id="portrait"></div>
-  <div class="mt-16 grid grid-cols-2 gap-4 md:grid-cols-5 md:gap-6" id="proofGrid"></div>
-  <div class="mt-10 flex flex-wrap gap-2" id="pills"></div>
-</section>
-
-<!-- 数字：quiet figure lines -->
-<section class="px-[var(--spacing-gutter)] pt-24">
-  <dl id="figures" class="space-y-6"></dl>
-</section>
-
-<!-- 页脚：一行 -->
-<footer class="mt-20 px-[var(--spacing-gutter)] py-16">
-  <p class="max-w-[70ch] text-[0.9rem] leading-[1.7] text-muted">
-    拾光 LifeLog：本地相册经 MiniCPM 逐张理解后生成的回顾。照片与描述一次都没有离开这台机器。
-    <span class="text-faint" id="footMeta"></span>
-  </p>
-</footer>
-
-<!-- 灯箱 -->
-<div id="lightbox" class="fixed inset-0 z-[80] hidden flex-col items-center justify-center gap-4 bg-bg/97 px-[var(--spacing-gutter)] py-14 backdrop-blur-lg">
-  <button id="lbClose" class="absolute right-6 top-5 h-10 w-10 rounded-full border border-white/15 bg-white/5 text-ink transition-colors hover:border-accent hover:text-accent">×</button>
-  <button id="lbPrev" class="absolute left-4 top-1/2 h-12 w-12 -translate-y-1/2 rounded-full border border-white/15 bg-white/5 text-ink transition-colors hover:border-accent hover:text-accent">‹</button>
-  <button id="lbNext" class="absolute right-4 top-1/2 h-12 w-12 -translate-y-1/2 rounded-full border border-white/15 bg-white/5 text-ink transition-colors hover:border-accent hover:text-accent">›</button>
-  <img id="lbImg" class="max-h-[56svh] w-auto max-w-full rounded-[2px] object-contain shadow-2xl" alt="">
-  <div class="flex w-full max-w-[76rem] flex-col gap-3 border-t border-white/10 pt-4 md:flex-row md:items-start md:justify-between">
-    <div class="max-w-[52ch]">
-      <p class="text-small text-accent" id="lbDate"></p>
-      <p class="mt-1 font-display text-lead leading-snug" id="lbCap"></p>
+      <aside class="hidden md:block">
+        <figure class="frame-night sticky top-24 aspect-[3/4]"><img id="voiceImg" alt="" loading="lazy"></figure>
+        <p class="mt-3 text-right font-mono text-[11px] text-white/35">影像证据 · 原片</p>
+      </aside>
     </div>
-    <div class="text-small text-muted md:text-right" id="lbMeta"></div>
   </div>
-  <p class="text-small text-faint">← → 切换 · Esc 关闭</p>
-  <div id="film" class="flex w-full max-w-[76rem] gap-1.5 overflow-x-auto"></div>
+</section>
+
+<!-- ⑤ 自我画像与依据 -->
+<section id="portrait" class="py-20 md:py-28">
+  <div class="wrap">
+    <p class="sheet-label reveal">自我画像</p>
+    <h2 class="reveal mt-4 font-display text-head font-semibold text-balance">每一条判断，都挂着证据</h2>
+    <div id="insightGrid" class="reveal mt-10 grid gap-5 md:grid-cols-2"></div>
+    <div id="dataCards" class="reveal mt-5 grid gap-5 md:grid-cols-3"></div>
+    <div id="proof" class="mt-16">
+      <p class="reveal text-caption text-ink-soft">模型当时写下的原始描述 —— 可逐条核对</p>
+      <div id="proofGrid" class="reveal mt-6 grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-4 md:gap-x-6"></div>
+    </div>
+    <details class="reveal mt-14 rounded-card bg-mist px-5 py-4 text-caption text-ink-soft">
+      <summary class="cursor-pointer select-none font-medium text-ink">回顾所依据的事实清单</summary>
+      <pre id="factList" class="mt-3 whitespace-pre-wrap font-mono text-[12px] leading-relaxed"></pre>
+    </details>
+  </div>
+</section>
+
+<!-- 筛选 sheet：年份与标签收进弹出层，不再挤占常驻导航 -->
+<div id="filterSheet" class="fixed inset-0 z-50 hidden">
+  <div id="filterVeil" class="absolute inset-0 bg-ink/30"></div>
+  <div class="absolute inset-x-0 bottom-0 max-h-[74vh] overflow-y-auto rounded-t-3xl bg-surface p-6 shadow-float md:mx-auto md:max-w-xl md:rounded-3xl">
+    <div class="flex items-center justify-between">
+      <h3 class="font-display text-title font-semibold">筛选照片</h3>
+      <button id="filterClose" class="flex h-8 w-8 items-center justify-center rounded-full text-ink-faint transition hover:bg-mist hover:text-ink" type="button">✕</button>
+    </div>
+    <p class="mt-5 text-caption font-medium text-ink-soft">年份</p>
+    <div id="yearChips" class="mt-2 flex flex-wrap gap-2"></div>
+    <p class="mt-5 text-caption font-medium text-ink-soft">标签</p>
+    <div id="tagChips" class="mt-2 flex flex-wrap gap-2"></div>
+    <div class="mt-7 flex items-center justify-between">
+      <button id="filterReset" class="btn" type="button">清除全部</button>
+      <button id="filterDone" class="btn btn-solid" type="button">完成</button>
+    </div>
+  </div>
 </div>
 
-<script id="lifelog-data">{"placeholder":true}</script>
+<footer class="border-t border-black/5 py-10">
+  <div class="wrap flex flex-col gap-4 text-caption text-ink-faint md:flex-row md:items-end md:justify-between">
+    <div>
+      <p class="font-display text-body font-semibold text-ink">拾光 LifeLog</p>
+      <p class="mt-2" id="footSpan"></p>
+      <p class="mt-1">本页由本机生成 · 推理全程离线</p>
+    </div>
+    <p class="font-mono text-[11px] leading-relaxed" id="footMeta"></p>
+  </div>
+</footer>
+
+<!-- 灯箱：大图 + 模型描述 + 胶片条 + 键盘导航 -->
+<div id="lightbox" class="fixed inset-0 z-[60] hidden bg-night/95">
+  <button id="lbClose" class="absolute right-5 top-5 z-10 flex h-10 w-10 items-center justify-center rounded-full border border-white/20 text-white/80 transition hover:border-gold hover:text-gold" type="button">✕</button>
+  <p class="absolute left-6 top-6 z-10 font-mono text-caption text-white/50 tnum" id="lbCount"></p>
+  <button id="lbPrev" class="absolute left-3 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 text-white/80 transition hover:border-gold hover:text-gold md:left-6" type="button">‹</button>
+  <button id="lbNext" class="absolute right-3 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 text-white/80 transition hover:border-gold hover:text-gold md:right-6" type="button">›</button>
+  <figure class="absolute inset-x-0 top-[8vh] mx-auto flex max-h-[64vh] items-center justify-center px-14">
+    <img id="lbImg" class="max-h-[64vh] max-w-full rounded-xl object-contain shadow-float" alt="">
+  </figure>
+  <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-night via-night/85 to-transparent px-6 pb-5 pt-14 text-center">
+    <p id="lbCaption" class="mx-auto max-w-3xl text-body text-white/90"></p>
+    <p id="lbMeta" class="mt-2 font-mono text-caption text-gold"></p>
+    <div id="lbStrip" class="mt-4 flex justify-center gap-1.5 overflow-x-auto"></div>
+  </div>
+</div>
+
+<script id="lifelog-data" type="application/json">{"placeholder":true}</script>
 <script>
-(function(){
+(function () {
+  "use strict";
   var DATA = JSON.parse(document.getElementById("lifelog-data").textContent);
   var M = DATA.meta || {};
   var VOICES = DATA.voices || [];
   var photos = [];
   var events = [];
-  DATA.years.forEach(function(y){
-    y.events.forEach(function(e){
+  (DATA.years || []).forEach(function (y) {
+    y.events.forEach(function (e) {
       e.year = y.year;
       events.push(e);
-      e.photos.forEach(function(p){ photos.push(p); });
+      e.photos.forEach(function (p) { p.year = y.year; photos.push(p); });
     });
   });
-  var currentVoice = 0;
 
-  function $(id){ return document.getElementById(id); }
-  function el(tag, cls, html){
+  function $(id) { return document.getElementById(id); }
+  function el(tag, cls, html) {
     var n = document.createElement(tag);
-    if (cls) { n.className = cls; }
-    if (html !== undefined) { n.innerHTML = html; }
+    if (cls) n.className = cls;
+    if (html !== undefined) n.innerHTML = html;
     return n;
   }
-  function escapeText(s){
-    return String(s === undefined || s === null ? "" : s)
+  function esc(s) {
+    return String(s == null ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
+  function fmtDay(d) { return d ? d.replace(/-/g, ".") : ""; }
+  function fmtNumber(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+  var REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  /* ---------- 接触印相表 ---------- */
-  function buildSheet(){
-    var sheet = $("sheet");
-    sheet.innerHTML = "";
-    DATA.years.forEach(function(y){
-      var group = el("section", "sheet-year mb-10 md:mb-14");
-      var head = el("div", "mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-small");
-      head.appendChild(el("span", "font-display text-lead tracking-[0.08em]", y.year));
-      var count = 0;
-      y.events.forEach(function(e){ count += e.photos.length; });
-      head.appendChild(el("span", "text-muted", y.events.length + " 段生活片段 · " + count + " 张照片"));
-      group.appendChild(head);
-      var strip = el("div", "flex flex-wrap gap-2");
-      y.events.forEach(function(e){
-        e.photos.forEach(function(p){
-          var fig = el("figure", "cursor-zoom-in");
-          var img = el("img", "h-[88px] w-auto object-cover rounded-[2px] md:h-[124px] transition-all duration-500 hover:opacity-100");
-          img.src = p.thumb;
-          img.alt = "";
-          img.loading = "lazy";
-          img.addEventListener("click", function(){ openLightbox(p); });
-          fig.appendChild(img);
-          fig.addEventListener("mouseenter", function(){ showPhoto(p, strip); });
-          fig.addEventListener("mouseleave", hidePreview);
-          strip.appendChild(fig);
-        });
-      });
-      group.appendChild(strip);
-      sheet.appendChild(group);
-    });
-  }
-
-  function showPhoto(p, strip){
-    $("previewDate").textContent = (p.day || "") + (p.time ? " " + p.time : "");
-    $("previewText").textContent = p.caption || "";
+  /* ---------- ① Hero：横构图风景优先轮播 ---------- */
+  function initHero() {
+    var span = M.visible_span || [];
     var bits = [];
-    if (p.place && p.place !== "无") { bits.push(p.place); }
-    if (p.tags && p.tags.length) { bits.push(p.tags.join(" · ")); }
-    $("previewMeta").textContent = bits.join(" · ");
-    $("preview").classList.remove("hidden");
-  }
+    if (span.length === 2) bits.push(fmtDay(span[0]).slice(0, 7) + " — " + fmtDay(span[1]).slice(0, 7));
+    if (M.total_assets) bits.push(fmtNumber(M.total_assets) + " 张照片");
+    if (M.events) bits.push(M.events + " 段生活片段");
+    $("heroSub").textContent = bits.join("   ·   ");
 
-  function hidePreview(){
-    $("preview").classList.add("hidden");
-  }
-
-  /* ---------- 色彩块 ---------- */
-  var TINTS = ["bg-field-1", "bg-field-2", "bg-surface", "bg-[#2b2030]"];
-  function buildTiles(){
-    var grid = $("tileGrid");
-    grid.innerHTML = "";
-    events.forEach(function(e, i){
-      var p = e.photos[0];
-      var tile = el("article", "reveal overflow-hidden rounded-[2px] " + TINTS[i % TINTS.length]);
-      var fig = el("figure", "aspect-[4/5] w-full overflow-hidden");
-      if (p) {
-        var img = el("img", "h-full w-full object-cover grayscale contrast-[1.15] mix-blend-multiply opacity-90 transition-transform duration-500 hover:scale-[1.04]");
-        img.src = p.thumb;
-        img.alt = "";
-        img.addEventListener("click", function(){ openLightbox(p); });
-        fig.appendChild(img);
-      }
-      tile.appendChild(fig);
-      var pale = (i % TINTS.length) === 1;
-      var cap = el("div", "p-2 " + (pale ? "text-field-2-ink" : "text-ink"));
-      cap.appendChild(el("p", "text-small leading-tight", e.start + " · " + e.title));
-      cap.appendChild(el("p", "text-small opacity-70 mt-1", e.count + " 张照片"));
-      tile.appendChild(cap);
-      grid.appendChild(tile);
+    var slides = $("heroSlides");
+    var loaded = [];
+    var shown = null;
+    photos.slice(0, 60).forEach(function (p) {
+      var img = new Image();
+      img.onload = function () {
+        if (img.naturalWidth > img.naturalHeight) {
+          loaded.push({ url: p.full, scenic: (p.tags || []).indexOf("风景") >= 0 });
+          loaded.sort(function (a, b) { return (b.scenic ? 1 : 0) - (a.scenic ? 1 : 0); });
+          render(loaded.slice(0, 5));
+        }
+      };
+      img.src = p.thumb;
     });
-    observeReveals();
-  }
-
-  /* ---------- 三种视角 ---------- */
-  function buildVoices(){
-    var list = $("voiceList");
-    list.innerHTML = "";
-    VOICES.forEach(function(v, i){
-      var block = el("article", "voice-block");
-      var head = el("div", "flex items-baseline gap-3");
-      head.appendChild(el("h3", "font-display text-lead", v.title));
-      head.appendChild(el("span", "text-small text-faint", v.label));
-      block.appendChild(head);
-      var body = el("p", "mt-3 whitespace-pre-line text-body leading-[2] text-ink/85");
-      body.textContent = v.text;
-      block.appendChild(body);
-      block.addEventListener("mouseenter", function(){ setVoice(i); });
-      block.addEventListener("click", function(){ setVoice(i); });
-      list.appendChild(block);
-    });
-    setVoice(0);
-  }
-
-  function setVoice(i){
-    currentVoice = i;
-    var v = VOICES[i];
-    if (!v) { return; }
-    document.querySelectorAll(".voice-block").forEach(function(b, k){
-      b.style.opacity = k === i ? "1" : "0.5";
-    });
-    document.querySelectorAll("#seg .chip").forEach(function(b, k){
-      b.setAttribute("aria-pressed", k === i ? "true" : "false");
-    });
-    var pick = photos[(i * 9 + 5) % Math.max(1, photos.length)];
-    if (pick) {
-      $("voicePhoto").src = pick.full;
-      $("voicePhotoCap").textContent = pick.day + " · " + (pick.caption || "");
-    }
-  }
-
-  /* ---------- 画像与依据 ---------- */
-  function buildEvidence(){
-    var portrait = $("portrait");
-    if (portrait) {
-      portrait.innerHTML = "";
-      (DATA.insight_cards || []).forEach(function(c){
-        var block = el("div", "mb-8");
-        block.appendChild(el("h3", "font-display text-lead leading-tight", c.title));
-        block.appendChild(el("p", "mt-2 text-body leading-[1.95] text-ink/80", c.body));
-        portrait.appendChild(block);
+    var nodes = [];
+    function render(list) {
+      if (!list.length || shown === list.length) return;
+      shown = list.length;
+      slides.innerHTML = "";
+      nodes = list.map(function (item) {
+        var d = el("div", "hero-slide");
+        d.style.backgroundImage = 'url("' + item.url + '")';
+        slides.appendChild(d);
+        return d;
       });
+      nodes[0].classList.add("on", "kenburns");
     }
-    var grid = $("proofGrid");
-    grid.innerHTML = "";
-    var ev = DATA.evidence || {};
-    (ev.samples || []).forEach(function(s){
-      var fig = el("figure", "cursor-zoom-in");
-      var img = el("img", "aspect-[4/5] w-full object-cover rounded-[2px] transition-transform duration-500 hover:scale-[1.03]");
-      img.src = "/thumb/" + s.id;
-      img.alt = "";
-      img.loading = "lazy";
-      img.addEventListener("click", function(){
-        photos.forEach(function(p){ if (p.id === s.id) { openLightbox(p); } });
+    var idx = 0;
+    if (!REDUCED) {
+      setInterval(function () {
+        if (nodes.length < 2) return;
+        nodes[idx].classList.remove("on", "kenburns");
+        idx = (idx + 1) % nodes.length;
+        nodes[idx].classList.add("on", "kenburns");
+      }, 6500);
+    }
+  }
+
+  /* ---------- ② 数字带 count-up ---------- */
+  function countUp(node, target, suffix) {
+    if (REDUCED) { node.textContent = fmtNumber(target) + (suffix || ""); return; }
+    var start = null, dur = 1100;
+    function tick(t) {
+      if (!start) start = t;
+      var k = Math.min((t - start) / dur, 1);
+      k = 1 - Math.pow(1 - k, 3);
+      node.textContent = fmtNumber(Math.round(target * k)) + (suffix || "");
+      if (k < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+  function initFigures() {
+    var cov = Math.round((Number(M.coverage) || 0) * 100);
+    $("figTotal").setAttribute("data-target", M.total_assets || 0);
+    $("figCov").setAttribute("data-target", cov);
+    $("figEvents").setAttribute("data-target", M.events || 0);
+    $("figDays").setAttribute("data-target", M.active_days || 0);
+  }
+
+  /* ---------- ③ 年份编辑网格 ---------- */
+  function photoTile(p, cls) {
+    var fig = el("figure", cls + " frame frame-hover cursor-zoom-in");
+    var img = el("img");
+    img.src = p.thumb; img.alt = p.caption || ""; img.loading = "lazy";
+    fig.appendChild(img);
+    fig.addEventListener("click", function () { openLightbox(p); });
+    return fig;
+  }
+
+  function buildTimeline() {
+    var yearsBox = $("years"), navBox = $("yearNav");
+    yearsBox.innerHTML = ""; navBox.innerHTML = "";
+    (DATA.years || []).forEach(function (y) {
+      var section = el("section", "reveal mb-20 scroll-mt-32");
+      section.id = "year-" + y.year;
+      section.setAttribute("data-year", y.year);
+      var count = 0;
+      y.events.forEach(function (e) { count += e.photos.length; });
+      var head = el("div", "mb-9 flex items-baseline gap-4 border-b border-black/8 pb-6");
+      head.appendChild(el("h3", "font-display text-figure font-semibold tnum", esc(y.year)));
+      head.appendChild(el("p", "text-caption text-ink-soft",
+        y.events.length + " 段片段 · " + count + " 张照片"));
+      section.appendChild(head);
+
+      y.events.forEach(function (e) {
+        var tags = (e.tags || []).slice(0, 4);
+        var art = el("article", "mb-16");
+        art.setAttribute("data-tags", tags.join(" "));
+        var grid = el("div", "grid gap-5 md:grid-cols-[1.55fr_1fr] md:gap-8");
+        var featured = e.photos[0];
+        if (featured) grid.appendChild(photoTile(featured, "aspect-[4/3]"));
+        var info = el("div", "flex min-w-0 flex-col justify-between py-1");
+        var infoTop = el("div");
+        var dateBits = e.start === e.end ? fmtDay(e.start) : fmtDay(e.start) + " — " + fmtDay(e.end);
+        infoTop.appendChild(el("p", "font-mono text-caption text-gold-deep", esc(dateBits)));
+        infoTop.appendChild(el("h4", "mt-2 font-display text-title font-semibold text-balance", esc(e.title || "")));
+        if (e.summary) {
+          var clip = el("p", "mt-3 text-body text-ink-soft line-clamp-4");
+          clip.textContent = e.summary;
+          infoTop.appendChild(clip);
+        }
+        info.appendChild(infoTop);
+        if (tags.length) {
+          var chips = el("div", "mt-5 flex flex-wrap gap-2");
+          tags.forEach(function (t) {
+            chips.appendChild(el("span", "rounded-pill bg-mist px-3 py-1 text-caption text-ink-soft", esc(t)));
+          });
+          info.appendChild(chips);
+        }
+        grid.appendChild(info);
+        art.appendChild(grid);
+        if (e.photos.length > 1) {
+          var rest = e.photos.slice(1);
+          var label = el("p", "mt-5 font-mono text-[11px] tracking-[0.14em] text-ink-faint uppercase",
+            "同段其余 " + rest.length + " 张");
+          var strip = el("div", "mt-2.5 grid grid-cols-3 gap-3 md:grid-cols-6");
+          rest.forEach(function (p) { strip.appendChild(photoTile(p, "aspect-square")); });
+          art.appendChild(label);
+          art.appendChild(strip);
+        }
+        section.appendChild(art);
       });
-      fig.appendChild(img);
-      fig.appendChild(el("figcaption", "mt-2 text-small leading-[1.6] text-muted",
-        s.day + " · " + (s.caption || "")));
-      grid.appendChild(fig);
-    });
-    var pills = $("pills");
-    pills.innerHTML = "";
-    (ev.places || []).forEach(function(p){
-      pills.appendChild(el("span", "chip", p.name + " " + p.photos + " 张 / " + p.days + " 天"));
-    });
-    if (ev.busiest && ev.busiest.day) {
-      pills.appendChild(el("span", "chip", ev.busiest.day + "：一天 " + ev.busiest.count + " 张"));
-    }
-    (ev.weekday_kid || []).forEach(function(w){
-      pills.appendChild(el("span", "chip", "带孩子的日子多在 " + w[0]));
-    });
-    (ev.light || []).forEach(function(l){
-      pills.appendChild(el("span", "chip", l[0] + " " + l[1] + " 张"));
+      yearsBox.appendChild(section);
+
+      var link = el("a", "year-link font-display text-body text-ink-faint transition hover:text-ink md:text-title", esc(y.year));
+      link.href = "#year-" + y.year;
+      link.setAttribute("data-nav", y.year);
+      navBox.appendChild(link);
     });
   }
 
-  /* ---------- 数字行 ---------- */
-  function buildFigures(){
-    var dl = $("figures");
-    dl.innerHTML = "";
-    var solo = 0;
-    photos.forEach(function(p){
-      if (!p.people || p.people.indexOf("独自") >= 0 || p.people.indexOf("一人") >= 0) { solo++; }
+  function spyYears() {
+    var links = {};
+    Array.prototype.forEach.call($("yearNav").children, function (a) {
+      links[a.getAttribute("data-nav")] = a;
     });
-    var ratio = photos.length ? Math.round(solo / photos.length * 100) : 0;
-    var ev = DATA.evidence || {};
-    var lines = [
-      [String(M.described_total || 0), "张照片被逐张读过，每一张留下一段描述"],
-      [String(ratio) + "%", "的画面里只有你一个人"],
-      [String(ev.busiest ? ev.busiest.count : 0), "张，是一天之内拍下的最多的一次"],
-      [String(M.events || 0), "段生活片段，按时间串在一起"],
-      [String(M.total_assets || 0), "张已登记的相册照片，全部跑完也是同一套流程"]
-    ];
-    lines.forEach(function(line){
-      var row = el("div", "flex flex-col gap-1 py-4 md:flex-row md:items-baseline md:gap-10");
-      var dt = el("dt", "font-display text-head leading-none text-ink md:min-w-[10ch]");
-      dt.textContent = line[0];
-      var dd = el("dd", "text-body text-muted md:flex-1 md:max-w-[52ch]");
-      dd.textContent = line[1];
-      row.appendChild(dt); row.appendChild(dd);
-      dl.appendChild(row);
-    });
-  }
-
-  /* ---------- 引子 ---------- */
-  function buildIntro(){
-    $("tileFigure").textContent = M.described_total || 0;
-    var scenic = photos.filter(function(p){
-      return (p.tags || []).indexOf("风景") >= 0;
-    });
-    var pick = scenic.length ? scenic[Math.floor(scenic.length / 2)] : photos[0];
-    if (pick) {
-      $("tilePhoto").src = pick.full;
-      $("leadPhoto").src = pick.full;
-      $("leadCap").textContent = pick.day + " · " + (pick.caption || "");
-      $("leadMeta").textContent = (pick.tags || []).join(" · ");
-    }
-    $("tileLong").textContent =
-      "识别、统计、写作，全部发生在这台机器上。MiniCPM-V-4.7-1B 逐张看图，" +
-      "写下场景、人物、地点、正在做的事、氛围和标签；程序再把这些描述聚成天、片段和习惯；" +
-      "最后由 MiniCPM-V-4.5-8B 写成三种叙述和一份关于你的画像。" +
-      "照片没有上传，描述没有外传，这一页上的每句话都能指回某一张具体的照片。";
-  }
-
-  /* ---------- 顶栏 ---------- */
-  function buildTop(){
-    var seg = $("seg");
-    seg.innerHTML = "";
-    VOICES.forEach(function(v, i){
-      var b = el("button", "chip", v.label);
-      b.setAttribute("aria-pressed", i === 0 ? "true" : "false");
-      b.addEventListener("click", function(){ setVoice(i); scrollToVoice(i); });
-      seg.appendChild(b);
-    });
-    var chips = $("chips");
-    chips.innerHTML = "";
-    var tagCount = {};
-    photos.forEach(function(p){
-      (p.tags || []).forEach(function(t){ tagCount[t] = (tagCount[t] || 0) + 1; });
-    });
-    var tags = Object.keys(tagCount).sort(function(a,b){ return tagCount[b] - tagCount[a]; }).slice(0,6);
-    var items = [{key:"all", label:"全部"}];
-    DATA.years.forEach(function(y){ items.push({key:"y:" + y.year, label: String(y.year)}); });
-    tags.forEach(function(t){ items.push({key:"t:" + t, label: t}); });
-    items.forEach(function(it, idx){
-      var b = el("button", "chip", it.label);
-      b.setAttribute("aria-pressed", idx === 0 ? "true" : "false");
-      b.addEventListener("click", function(){
-        chips.querySelectorAll(".chip").forEach(function(x){ x.setAttribute("aria-pressed","false"); });
-        b.setAttribute("aria-pressed","true");
-        filter(it.key);
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        var a = links[en.target.getAttribute("data-year")];
+        if (!a || !en.isIntersecting) return;
+        Object.keys(links).forEach(function (k) {
+          links[k].classList.remove("on", "text-ink");
+          links[k].classList.add("text-ink-faint");
+        });
+        a.classList.remove("text-ink-faint");
+        a.classList.add("on", "text-ink");
       });
-      chips.appendChild(b);
-    });
+    }, { rootMargin: "-30% 0px -55% 0px" });
+    Array.prototype.forEach.call($("years").children, function (s) { obs.observe(s); });
   }
 
-  function scrollToVoice(i){
-    var blocks = document.querySelectorAll(".voice-block");
-    if (blocks[i]) { blocks[i].scrollIntoView({block:"center", behavior:"smooth"}); }
-  }
-
-  function filter(key){
-    events.forEach(function(e){
-      var keep = true;
-      if (key.indexOf("y:") === 0) { keep = String(e.year) === key.slice(2); }
-      else if (key.indexOf("t:") === 0) {
-        keep = (e.tags || []).indexOf(key.slice(2)) >= 0 ||
-               e.photos.some(function(p){ return (p.tags || []).indexOf(key.slice(2)) >= 0; });
-      }
-      e.run.style.display = keep ? "" : "none";
-    });
-  }
-
-  /* ---------- 进场动画 ---------- */
-  function observeReveals(){
-    if (!window.IntersectionObserver) {
-      document.querySelectorAll(".reveal").forEach(function(el){ el.classList.add("in"); });
+  /* ---------- ④ 三种叙事 ---------- */
+  var currentVoice = 0;
+  function buildVoices() {
+    var tabs = $("voiceTabs");
+    tabs.innerHTML = "";
+    if (!VOICES.length) {
+      tabs.parentNode.removeChild(tabs);
+      $("voiceBody").innerHTML = "";
+      $("voiceNote").textContent = "";
       return;
     }
-    var io = new IntersectionObserver(function(entries){
-      entries.forEach(function(en){
-        if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
+    VOICES.forEach(function (v, i) {
+      var b = el("button", "tab", esc(v.label || v.title));
+      b.type = "button";
+      b.setAttribute("data-on", i === currentVoice ? "1" : "0");
+      b.addEventListener("click", function () { currentVoice = i; paintVoice(); });
+      tabs.appendChild(b);
+    });
+    var vertical = null;
+    photos.slice(0, 40).forEach(function (p) {
+      if (vertical) return;
+      var img = new Image();
+      img.onload = function () {
+        if (!vertical && img.naturalHeight > img.naturalWidth) {
+          vertical = p;
+          $("voiceImg").src = p.full;
+        }
+      };
+      img.src = p.thumb;
+    });
+    paintVoice();
+  }
+  function paintVoice() {
+    var v = VOICES[currentVoice];
+    Array.prototype.forEach.call($("voiceTabs").children, function (b, i) {
+      b.setAttribute("data-on", i === currentVoice ? "1" : "0");
+    });
+    $("voiceNote").textContent = v.note || "";
+    var body = $("voiceBody");
+    body.innerHTML = "";
+    (v.text || "").split("\n").forEach(function (line) {
+      if (!line.trim()) return;
+      var html = esc(line).replace(
+        /(20\d{2}\s*年(?:\s*\d{1,2}\s*月)?)/g,
+        '<span class="text-gold font-medium">$1</span>');
+      body.appendChild(el("p", null, html));
+    });
+    body.classList.remove("figure-pop");
+    void body.offsetWidth;
+    body.classList.add("figure-pop");
+  }
+
+  /* ---------- ⑤ 画像与依据 ---------- */
+  function buildPortrait() {
+    var grid = $("insightGrid");
+    (DATA.insight_cards || []).forEach(function (c) {
+      var card = el("article", "card");
+      card.appendChild(el("h3", "font-display text-title font-semibold text-balance", esc(c.title)));
+      card.appendChild(el("p", "mt-3 text-body text-ink-soft leading-relaxed", esc(c.body)));
+      grid.appendChild(card);
+    });
+    var dc = $("dataCards");
+    function dataCard(label, lines) {
+      var c = el("article", "rounded-card bg-mist p-5");
+      c.appendChild(el("p", "font-mono text-[11px] tracking-[0.18em] text-ink-soft uppercase", esc(label)));
+      var box = el("div", "mt-3 space-y-1.5");
+      lines.forEach(function (s, i) {
+        box.appendChild(el("p", "text-body " + (i === 0 ? "font-semibold text-ink" : "text-ink-soft"), esc(s)));
       });
-    }, {threshold:0.12});
-    document.querySelectorAll(".reveal").forEach(function(el){ io.observe(el); });
+      c.appendChild(box);
+      return c;
+    }
+    var ev = DATA.evidence || {};
+    (ev.places || []).slice(0, 3).forEach(function (p) {
+      dc.appendChild(dataCard("常去的地方", [p.name, p.photos + " 张 · " + p.days + " 天"]));
+    });
+    if (ev.busiest && ev.busiest.day) {
+      dc.appendChild(dataCard("最密集的一天",
+        [fmtDay(ev.busiest.day), "拍了 " + ev.busiest.count + " 张" + (ev.busiest.same_place ? " · 都在同一个地方" : "")]));
+    }
+    if ((ev.weekday_kid || []).length) {
+      dc.appendChild(dataCard("带孩子的日子", ev.weekday_kid.map(function (w) { return w[0] + " " + w[1] + " 张"; })));
+    }
+    if ((ev.light || []).length) {
+      dc.appendChild(dataCard("画面里的光", ev.light.slice(0, 3).map(function (l) { return "「" + l[0] + "」出现 " + l[1] + " 次"; })));
+    }
+    var proof = $("proofGrid");
+    (ev.samples || []).forEach(function (s) {
+      var fig = el("figure");
+      var wrap = el("div", "frame frame-hover cursor-zoom-in aspect-square");
+      var img = el("img");
+      img.src = "/thumb/" + s.id; img.alt = ""; img.loading = "lazy";
+      wrap.appendChild(img);
+      wrap.addEventListener("click", function () {
+        var hit = null;
+        photos.forEach(function (p) { if (p.id === s.id) hit = p; });
+        if (hit) openLightbox(hit);
+      });
+      fig.appendChild(wrap);
+      var meta = el("figcaption", "mt-3");
+      meta.appendChild(el("p", "text-caption text-ink leading-relaxed", esc(s.caption)));
+      meta.appendChild(el("p", "mt-1.5 font-mono text-[11px] text-ink-faint", esc(fmtDay(s.day) + " " + (s.time || ""))));
+      fig.appendChild(meta);
+      proof.appendChild(fig);
+    });
+    if (!(ev.samples || []).length) {
+      $("proof").parentNode.removeChild($("proof"));
+    }
+    $("factList").textContent = DATA.facts || "";
+  }
+
+  /* ---------- 筛选 sheet ---------- */
+  var pickedYears = {}, pickedTags = {};
+  function allTags() {
+    var seen = {};
+    events.forEach(function (e) {
+      (e.tags || []).forEach(function (t) { seen[t] = 1; });
+    });
+    return Object.keys(seen);
+  }
+  function buildFilter() {
+    var years = (DATA.years || []).map(function (y) { return y.year; });
+    var yc = $("yearChips"), tc = $("tagChips");
+    yc.innerHTML = ""; tc.innerHTML = "";
+    years.forEach(function (y) {
+      var c = el("button", "chip", esc(y));
+      c.type = "button";
+      c.setAttribute("data-key", y);
+      c.addEventListener("click", function () { toggle(pickedYears, y, c); });
+      yc.appendChild(c);
+    });
+    allTags().forEach(function (t) {
+      var c = el("button", "chip", esc(t));
+      c.type = "button";
+      c.setAttribute("data-key", t);
+      c.addEventListener("click", function () { toggle(pickedTags, t, c); });
+      tc.appendChild(c);
+    });
+    $("filterBtn").addEventListener("click", openSheet);
+    $("filterClose").addEventListener("click", closeSheet);
+    $("filterDone").addEventListener("click", closeSheet);
+    $("filterVeil").addEventListener("click", closeSheet);
+    $("filterReset").addEventListener("click", function () {
+      pickedYears = {}; pickedTags = {};
+      Array.prototype.forEach.call(yc.children, function (c) { c.setAttribute("data-on", "0"); });
+      Array.prototype.forEach.call(tc.children, function (c) { c.setAttribute("data-on", "0"); });
+      applyFilter();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !$("filterSheet").classList.contains("hidden")) closeSheet();
+    });
+  }
+  function toggle(store, key, chip) {
+    if (store[key]) delete store[key]; else store[key] = 1;
+    chip.setAttribute("data-on", store[key] ? "1" : "0");
+    applyFilter();
+  }
+  function openSheet() { $("filterSheet").classList.remove("hidden"); }
+  function closeSheet() { $("filterSheet").classList.add("hidden"); }
+  function applyFilter() {
+    var hasYear = Object.keys(pickedYears).length > 0;
+    var hasTag = Object.keys(pickedTags).length > 0;
+    Array.prototype.forEach.call($("years").children, function (section) {
+      var y = section.getAttribute("data-year");
+      var yearOk = !hasYear || pickedYears[y];
+      var visible = 0;
+      Array.prototype.forEach.call(section.querySelectorAll("article"), function (art) {
+        var tags = (art.getAttribute("data-tags") || "").split(" ");
+        var ok = yearOk && (!hasTag || tags.some(function (t) { return pickedTags[t]; }));
+        art.style.display = ok ? "" : "none";
+        if (ok) visible++;
+      });
+      section.style.display = (yearOk && visible) ? "" : "none";
+    });
+    var chipBox = $("activeChips");
+    chipBox.innerHTML = "";
+    var picked = Object.keys(pickedYears).concat(Object.keys(pickedTags));
+    chipBox.classList.toggle("hidden", !picked.length);
+    picked.forEach(function (key) {
+      var c = el("button", "chip", esc(key) + ' <span class="x">✕</span>');
+      c.type = "button";
+      c.setAttribute("data-on", "1");
+      c.addEventListener("click", function () {
+        if (pickedYears[key]) delete pickedYears[key];
+        if (pickedTags[key]) delete pickedTags[key];
+        Array.prototype.forEach.call($("yearChips").children, function (x) {
+          if (x.getAttribute("data-key") === key) x.setAttribute("data-on", "0");
+        });
+        Array.prototype.forEach.call($("tagChips").children, function (x) {
+          if (x.getAttribute("data-key") === key) x.setAttribute("data-on", "0");
+        });
+        applyFilter();
+      });
+      chipBox.appendChild(c);
+    });
   }
 
   /* ---------- 灯箱 ---------- */
-  function openLightbox(photo){
-    var idx = 0;
-    photos.forEach(function(p, i){ if (p.id === photo.id) { idx = i; } });
-    paintLightbox(idx);
+  var lbIndex = 0;
+  function openLightbox(p) {
+    for (var i = 0; i < photos.length; i++) {
+      if (photos[i].id === p.id) { lbIndex = i; break; }
+    }
     $("lightbox").classList.remove("hidden");
-    $("lightbox").classList.add("flex");
     document.body.style.overflow = "hidden";
+    paintLightbox();
   }
-  function closeLightbox(){
+  function closeLightbox() {
     $("lightbox").classList.add("hidden");
-    $("lightbox").classList.remove("flex");
     document.body.style.overflow = "";
   }
-  function paintLightbox(idx){
-    var p = photos[idx];
-    if (!p) { return; }
+  function paintLightbox() {
+    var p = photos[lbIndex];
+    if (!p) return;
     $("lbImg").src = p.full;
-    $("lbDate").textContent = (p.day || "") + (p.time ? " " + p.time : "");
-    $("lbCap").textContent = p.caption || "";
-    var bits = [];
-    if (p.place && p.place !== "无") { bits.push("地点 " + p.place); }
-    if (p.activity) { bits.push("活动 " + p.activity); }
-    if (p.people) { bits.push("人物 " + p.people); }
-    if (p.tags && p.tags.length) { bits.push("标签 " + p.tags.join(" / ")); }
-    $("lbMeta").innerHTML = bits.join("<br>");
-    var film = $("film");
-    film.innerHTML = "";
-    photos.forEach(function(item, i){
-      var im = el("img", "h-14 rounded-[2px] transition-opacity " +
-        (i === idx ? "opacity-100 outline outline-1 outline-accent" : "opacity-30 hover:opacity-70"));
-      im.src = item.thumb;
-      im.alt = "";
-      im.addEventListener("click", function(){ paintLightbox(i); });
-      film.appendChild(im);
+    $("lbCaption").textContent = p.caption || "";
+    var meta = [];
+    if (p.day) meta.push(fmtDay(p.day) + (p.time ? " " + p.time : ""));
+    if (p.place && p.place !== "无") meta.push(p.place);
+    if (p.tags && p.tags.length) meta.push(p.tags.join(" · "));
+    $("lbMeta").textContent = meta.join("  ·  ");
+    $("lbCount").textContent = (lbIndex + 1) + " / " + photos.length;
+    var strip = $("lbStrip");
+    strip.innerHTML = "";
+    var from = Math.max(0, lbIndex - 12);
+    var to = Math.min(photos.length, from + 25);
+    for (var i = from; i < to; i++) {
+      (function (i) {
+        var item = el("button", "lb-strip-item" + (i === lbIndex ? " now" : ""));
+        item.type = "button";
+        var img = el("img");
+        img.src = photos[i].thumb; img.alt = ""; img.loading = "lazy";
+        item.appendChild(img);
+        item.addEventListener("click", function () { lbIndex = i; paintLightbox(); });
+        strip.appendChild(item);
+      })(i);
+    }
+    var now = strip.querySelector(".now");
+    if (now) now.scrollIntoView({ block: "nearest", inline: "center", behavior: REDUCED ? "auto" : "smooth" });
+  }
+  function stepLightbox(d) {
+    lbIndex = (lbIndex + d + photos.length) % photos.length;
+    paintLightbox();
+  }
+  function initLightbox() {
+    $("lbClose").addEventListener("click", closeLightbox);
+    $("lbPrev").addEventListener("click", function () { stepLightbox(-1); });
+    $("lbNext").addEventListener("click", function () { stepLightbox(1); });
+    $("lightbox").addEventListener("click", function (e) {
+      if (e.target === $("lightbox")) closeLightbox();
+    });
+    document.addEventListener("keydown", function (e) {
+      if ($("lightbox").classList.contains("hidden")) return;
+      if (e.key === "Escape") closeLightbox();
+      if (e.key === "ArrowLeft") stepLightbox(-1);
+      if (e.key === "ArrowRight") stepLightbox(1);
+    });
+    $("shuffleBtn").addEventListener("click", function () {
+      if (photos.length) openLightbox(photos[Math.floor(Math.random() * photos.length)]);
     });
   }
-  function stepLightbox(n){
-    var cur = 0;
-    photos.forEach(function(p, i){ if (p.id === $("lbImg").src.split("/").pop()) { cur = i; } });
-    paintLightbox((cur + n + photos.length) % photos.length);
+
+  /* ---------- 进场与顶栏 ---------- */
+  function initReveal() {
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        en.target.classList.add("in");
+        var counters = en.target.matches("[data-count]") ? [en.target]
+          : Array.prototype.slice.call(en.target.querySelectorAll("[data-count]"));
+        counters.forEach(function (n) {
+          countUp(n, Number(n.getAttribute("data-target")) || 0, n.getAttribute("data-suffix"));
+          n.removeAttribute("data-count");
+        });
+        obs.unobserve(en.target);
+      });
+    }, { threshold: 0.25 });
+    Array.prototype.forEach.call(document.querySelectorAll(".reveal"), function (n) { obs.observe(n); });
   }
-  $("lbClose").addEventListener("click", closeLightbox);
-  $("lbPrev").addEventListener("click", function(){ stepLightbox(-1); });
-  $("lbNext").addEventListener("click", function(){ stepLightbox(1); });
-  $("lightbox").addEventListener("click", function(ev){ if (ev.target === $("lightbox")) { closeLightbox(); } });
-  document.addEventListener("keydown", function(ev){
-    if ($("lightbox").classList.contains("hidden")) { return; }
-    if (ev.key === "Escape") { closeLightbox(); }
-    if (ev.key === "ArrowLeft") { stepLightbox(-1); }
-    if (ev.key === "ArrowRight") { stepLightbox(1); }
-  });
-  $("shuffle").addEventListener("click", function(){
-    openLightbox(photos[Math.floor(Math.random() * photos.length)]);
-  });
-
-  var only = /[?&]only=([a-z]+)/.exec(window.location.search);
-  if (only) {
-    var keep = {voices: "voices", evidence: "evidence", events: "events", tiles: "tiles"}[only[1]];
-    document.querySelectorAll("body > section").forEach(function(sec){
-      if (!(sec.querySelector("#" + keep) || sec.id === keep)) { sec.style.display = "none"; }
-    });
-    var hero = document.getElementById("top");
-    if (hero) { hero.style.display = "none"; }
+  function initBar() {
+    var bar = $("bar");
+    var obs = new IntersectionObserver(function (entries) {
+      if (!entries[0].isIntersecting) {
+        bar.classList.remove("-translate-y-2", "opacity-0");
+      } else {
+        bar.classList.add("-translate-y-2", "opacity-0");
+      }
+    }, { rootMargin: "-12% 0px 0px 0px" });
+    obs.observe($("top"));
+  }
+  function initFooter() {
+    var span = M.visible_span || [];
+    if (span.length === 2) {
+      $("footSpan").textContent = "数据范围 " + fmtDay(span[0]) + " — " + fmtDay(span[1]);
+    }
+    $("footMeta").textContent =
+      "generated " + (M.generated_at || "").replace("T", " ") +
+      " · MiniCPM-V-4.7-1B / 4.5-8B · llama.cpp";
   }
 
-  (function fillFacts() {
-    var span = (M.visible_span && M.visible_span.length === 2) ? M.visible_span : [];
-    var label = span.length ? span[0].slice(0, 7) + ' — ' + span[1].slice(0, 7) : (M.since_day || '');
-    var spanEl = document.getElementById("spanLabel");
-    var countEl = document.getElementById("countLabel");
-    if (spanEl) { spanEl.textContent = label; }
-    if (countEl) { countEl.textContent = M.described; }
-  })();
-
-  buildIntro();
-  buildTop();
-  buildSheet();
-  buildTiles();
+  initHero();
+  initFigures();
+  buildTimeline();
+  spyYears();
   buildVoices();
-  buildEvidence();
-  buildFigures();
-  observeReveals();
-  $("footMeta").textContent = "本页展示 " + M.described + " 张，自 " + (M.since_day || "") +
-    " 起；全库已识别 " + M.described_total + " 张。生成于 " + M.generated_at + "。";
+  buildPortrait();
+  buildFilter();
+  initLightbox();
+  initReveal();
+  initBar();
+  initFooter();
 })();
 </script>
 </body>

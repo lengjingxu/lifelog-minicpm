@@ -1,106 +1,234 @@
 @import "tailwindcss";
 
+/* ------------------------------------------------------------------
+   拾光 LifeLog 设计语言 · 苹果年度回顾风
+   浅底 #fbfbfd / 深色段 #1d1d1f / 暖金强调 #c9972c（拾光 = 拾起光）
+   层级靠字号与字重，不靠灰度；照片统一圆角容器 + 柔和阴影。
+------------------------------------------------------------------- */
+
 @theme {
-  /* 配色：取自相册本身（暮色湖面 + 暖金），保留 direction 给出的比例 */
-  --color-bg: #0b0a0c;
-  --color-surface: #15141a;
-  --color-ink: #ffffff;
-  --color-muted: #c0bbc7;
-  --color-faint: #6b6674;
-  --color-accent: #d8a657;
-  --color-accent-ink: #0b0a0c;
-  --color-field-1: #1d2733;   /* 暮色水面 */
-  --color-field-1-ink: #ffffff;
-  --color-field-2: #efe7dc;   /* 暖沙 */
-  --color-field-2-ink: #16130f;
+  /* 色板 */
+  --color-canvas: #fbfbfd;
+  --color-mist: #f2f2f5;
+  --color-surface: #ffffff;
+  --color-ink: #1d1d1f;
+  --color-ink-soft: #6e6e73;
+  --color-ink-faint: #86868b;
+  --color-gold: #c9972c;
+  --color-gold-deep: #a87c1f;
+  --color-gold-soft: #f6edda;
+  --color-night: #141416;
 
-  /* 字体：Schibsted Grotesk（拉丁/数字），中文回退苹方 */
-  --font-display: "Schibsted Grotesk", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
-  --font-text: "Schibsted Grotesk", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  /* 字体：系统栈，离线无外链 */
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  /* 字阶：全站四档 */
-  --text-small: clamp(0.8125rem, 0.79rem + 0.1vw, 0.875rem);
-  --text-body: clamp(1.0625rem, 1rem + 0.25vw, 1.1875rem);
-  --text-lead: clamp(1.25rem, 1.1rem + 0.7vw, 1.625rem);
-  --text-head: clamp(2rem, 1.3rem + 3.2vw, 4rem);
-  --text-slogan: clamp(3.5rem, 8.5vw, 8.25rem);
+  /* 字阶 */
+  --text-caption: 0.8125rem;   /* 13px */
+  --text-caption--line-height: 1.5;
+  --text-body: 1.0625rem;      /* 17px */
+  --text-body--line-height: 1.7;
+  --text-lead: 1.25rem;        /* 20px */
+  --text-lead--line-height: 1.65;
+  --text-title: 1.75rem;       /* 28px */
+  --text-title--line-height: 1.3;
+  --text-head: 2.5rem;         /* 40px */
+  --text-head--line-height: 1.15;
+  --text-display: clamp(3.25rem, 7.5vw, 5.5rem);
+  --text-display--line-height: 1.05;
+  --text-display--letter-spacing: -0.02em;
+  --text-figure: clamp(2.75rem, 5vw, 4.25rem);
+  --text-figure--line-height: 1;
+  --text-figure--letter-spacing: -0.03em;
 
-  --radius-card: 2px;
-  --spacing-gutter: clamp(16px, 1.4vw, 20px);
+  /* 圆角与阴影 */
+  --radius-card: 16px;
+  --radius-frame: 14px;
+  --radius-pill: 999px;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.06);
+  --shadow-float: 0 2px 6px rgb(0 0 0 / 0.06), 0 18px 48px rgb(0 0 0 / 0.14);
+
+  /* 节奏 */
+  --spacing-gutter: clamp(1.25rem, 5vw, 4.5rem);
 }
 
 @layer base {
-  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
-  body {
-    background-color: var(--color-bg);
-    color: var(--color-ink);
-    font-family: var(--font-text);
-    font-size: var(--text-body);
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-    overflow-x: hidden;
-  }
-  ::selection { background: var(--color-accent); color: var(--color-accent-ink); }
-  h1, h2, h3 {
-    font-family: var(--font-display);
-    font-weight: 800;
-    letter-spacing: -0.05em;
-    line-height: 0.88;
-  }
+  html { scroll-behavior: smooth; }
+  body { background: var(--color-canvas); }
+  ::selection { background: var(--color-gold-soft); }
 }
 
 @layer components {
-  .wrap { width: 100%; margin-inline: auto; padding-inline: var(--spacing-gutter); }
-  .sheet-label { font-size: var(--text-small); color: var(--color-muted); }
+  .wrap {
+    margin-inline: auto;
+    width: 100%;
+    max-width: 72rem;
+    padding-inline: var(--spacing-gutter);
+  }
+
+  /* 小节标签：金色小字 + 宽字距，统领每个区块 */
+  .sheet-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.625rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-caption);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--color-gold-deep);
+  }
+  .sheet-label::before {
+    content: "";
+    width: 1.75rem;
+    height: 1px;
+    background: var(--color-gold);
+  }
+
+  /* 照片容器：统一圆角 + 柔和阴影 + 溢出裁切 */
+  .frame {
+    border-radius: var(--radius-frame);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+    background: var(--color-mist);
+    isolation: isolate;
+  }
+  .frame > img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .frame-hover:hover > img { transform: scale(1.045); }
+
+  .card {
+    background: var(--color-surface);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+    padding: clamp(1.25rem, 2.5vw, 1.75rem);
+  }
+
   .btn {
-    font-size: var(--text-small);
-    padding: 0.45rem 0.9rem;
-    border: 1px solid color-mix(in oklab, var(--color-ink) 20%, transparent);
-    border-radius: var(--radius-card);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid rgb(0 0 0 / 0.12);
+    padding: 0.5rem 1.125rem;
+    font-size: var(--text-caption);
+    font-weight: 500;
     color: var(--color-ink);
-    background: transparent;
-    transition: border-color 0.2s, color 0.2s, background-color 0.2s;
+    background: rgb(255 255 255 / 0.72);
+    backdrop-filter: blur(14px);
+    transition: all 0.25s ease;
+    cursor: pointer;
   }
-  .btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
-  .btn-solid { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-accent-ink); }
-  .btn-solid:hover { background: #c3964c; border-color: #c3964c; color: var(--color-accent-ink); }
+  .btn:hover { border-color: var(--color-gold); color: var(--color-gold-deep); }
+
+  .btn-solid {
+    border: none;
+    background: var(--color-ink);
+    color: #fff;
+  }
+  .btn-solid:hover { background: var(--color-gold-deep); color: #fff; }
+
+  /* 筛选 chip */
   .chip {
-    font-size: var(--text-small);
-    padding: 0.3rem 0.75rem;
-    border: 1px solid color-mix(in oklab, var(--color-ink) 16%, transparent);
-    border-radius: var(--radius-card);
-    color: var(--color-muted);
-    white-space: nowrap;
-    transition: color 0.2s, border-color 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid rgb(0 0 0 / 0.12);
+    background: var(--color-surface);
+    padding: 0.3125rem 0.875rem;
+    font-size: var(--text-caption);
+    color: var(--color-ink-soft);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
   }
-  .chip:hover { color: var(--color-ink); border-color: color-mix(in oklab, var(--color-ink) 34%, transparent); }
-  .chip[aria-pressed="true"] { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-bg); }
-  .frame { overflow: hidden; border-radius: var(--radius-card); background: var(--color-surface); }
+  .chip:hover { border-color: var(--color-gold); color: var(--color-ink); }
+  .chip[data-on="1"] {
+    background: var(--color-ink);
+    border-color: var(--color-ink);
+    color: #fff;
+  }
+  .chip .x { opacity: 0.55; font-size: 0.75em; }
+
+  /* 叙事胶囊 tab（深色段内） */
+  .tab {
+    border-radius: var(--radius-pill);
+    padding: 0.5rem 1.25rem;
+    font-size: var(--text-caption);
+    font-weight: 500;
+    color: rgb(255 255 255 / 0.6);
+    transition: all 0.25s ease;
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .tab:hover { color: #fff; }
+  .tab[data-on="1"] {
+    background: var(--color-gold);
+    color: var(--color-night);
+    font-weight: 600;
+  }
 }
 
 @layer utilities {
-  .grain::after {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 60;
-    opacity: 0.22;
-    mix-blend-mode: soft-light;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/></filter><rect width='180' height='180' filter='url(%23n)' opacity='.4'/></svg>");
+  /* 进场渐入 */
+  .reveal {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.9s cubic-bezier(0.2, 0.7, 0.2, 1),
+      transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1);
   }
-  .reveal { opacity: 0; transform: translateY(26px); }
-  .reveal.in { opacity: 1; transform: none; transition: opacity .8s ease, transform .8s cubic-bezier(.2,.7,.2,1); }
-  .kenburns { animation: kenburns 26s ease-in-out infinite alternate; }
-}
+  .reveal.in { opacity: 1; transform: none; }
 
-@keyframes kenburns {
-  from { transform: scale(1.02) translate3d(0, 0, 0); }
-  to { transform: scale(1.12) translate3d(-1.5%, -1.5%, 0); }
+  /* 沉浸大图缓推 */
+  .kenburns { animation: kenburns 26s ease-in-out infinite alternate; }
+  @keyframes kenburns {
+    from { transform: scale(1) translate(0, 0); }
+    to { transform: scale(1.12) translate(-1.5%, -1.5%); }
+  }
+
+  /* hero 交叉淡化 */
+  .slide-fade { animation: slideFade 1.6s ease both; }
+  @keyframes slideFade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* 数字滚动结束的轻微落定感 */
+  .figure-pop { animation: figurePop 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  @keyframes figurePop {
+    0% { opacity: 0; transform: translateY(14px); }
+    100% { opacity: 1; transform: none; }
+  }
+
+  /* 毛玻璃顶栏 */
+  .glass {
+    background: rgb(251 251 253 / 0.78);
+    backdrop-filter: saturate(1.4) blur(18px);
+    -webkit-backdrop-filter: saturate(1.4) blur(18px);
+  }
+
+  /* 深色段上的照片框 */
+  .frame-night {
+    border-radius: var(--radius-frame);
+    overflow: hidden;
+    background: rgb(255 255 255 / 0.06);
+    box-shadow: 0 18px 48px rgb(0 0 0 / 0.4);
+  }
+
+  .tnum { font-variant-numeric: tabular-nums; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
   html { scroll-behavior: auto; }
-  .reveal { opacity: 1; transform: none; }
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .kenburns, .slide-fade, .figure-pop { animation: none; }
+  .frame > img, .frame-hover:hover > img { transition: none; }
 }
