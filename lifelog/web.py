@@ -222,22 +222,6 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 data = make_thumbnail(Path(row["path"]), asset_id)
                 self._send(data or b"", "image/jpeg" if data else "text/plain", 200 if data else 404)
-            elif path.startswith("/photo/"):
-                asset_id = path.split("/")[-1]
-                row = con.execute(
-                    """SELECT a.*, c.caption, c.tags, c.scene, c.place, c.activity, c.people, c.mood
-                       FROM assets a LEFT JOIN current_caption c ON c.asset_id=a.id AND c.prompt_version='describe-v1'
-                       WHERE a.id=?""", (asset_id,)).fetchone()
-                if not row:
-                    self._send(b"not found", "text/plain", 404)
-                    return
-                tags = " ".join(f"<span class='tag'>{t}</span>" for t in db.jload(row["tags"]))
-                body = (f"<h2>{row['day']} {row['taken_at'] or ''}</h2>"
-                        f"<img src='/thumb/{asset_id}' style='max-width:320px;border-radius:8px'>"
-                        f"<div class='story' style='margin-top:14px'>{row['caption'] or '（未识别）'}<br>{tags}</div>"
-                        f"<p style='color:#555'>场景 {row['scene'] or '-'} · 地点 {row['place'] or '-'} · "
-                        f"活动 {row['activity'] or '-'} · 人物 {row['people'] or '-'} · 氛围 {row['mood'] or '-'}</p>")
-                self._send(_html("lifelog · 照片", body))
             elif path == "/api/stats":
                 self._send(json.dumps(aggregate.compute_stats(), ensure_ascii=False), "application/json")
             else:

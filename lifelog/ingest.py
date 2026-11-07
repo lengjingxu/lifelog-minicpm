@@ -101,6 +101,7 @@ def ingest(roots: list[str], content_hash: bool = False, limit: int | None = Non
     stats = {"seen": 0, "new": 0, "updated": 0, "skipped": 0}
     with db.session() as con:
         for path in iter_media(roots):
+            path = path.resolve()  # 统一绝对路径，避免同一文件以两种 path 重复登记
             stats["seen"] += 1
             if limit and stats["seen"] > limit:
                 break

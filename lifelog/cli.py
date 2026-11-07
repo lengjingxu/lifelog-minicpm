@@ -98,7 +98,8 @@ def cmd_weekly(args) -> int:
     report["ingest"] = ingest.ingest([str(photos_dir)])
     print(json.dumps(report["ingest"], ensure_ascii=False))
     print("== 3/6 MiniCPM 逐张识别")
-    report["caption"] = caption.run_caption(args.model, sample=args.sample)
+    report["caption"] = caption.run_caption(args.model, sample=args.sample,
+                                            concurrency=args.concurrency)
     print(json.dumps(report["caption"], ensure_ascii=False))
     print("== 4/6 合并多模型描述")
     report["merge"] = merge_captions.run()
@@ -249,6 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", default="minicpm-v-4.7-1b")
     p.add_argument("--profile-model", default="minicpm-v-4.5-8b")
     p.add_argument("--sample", type=int, help="每次只识别 N 张（默认全量新增）")
+    p.add_argument("--concurrency", type=int, default=4, help="llama.cpp 多 slot 并发数")
     p.set_defaults(func=cmd_weekly)
 
     p = sub.add_parser("story", help="生成人生回顾（三种视角：回顾/给十年后的你/给家人的信）")

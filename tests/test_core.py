@@ -9,7 +9,46 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from lifelog import caption, config, db  # noqa: E402
+from lifelog import caption, config, db, query  # noqa: E402
+
+
+class RelativeDateTests(unittest.TestCase):
+    """相对时间解析：now 固定为 2026-11-07（周六）。"""
+
+    NOW = query.datetime(2026, 11, 7)
+
+    def df(self, text):
+        return query.date_filter(text, now=self.NOW)
+
+    def test_absolute_unchanged(self):
+        self.assertEqual(self.df("2023年12月那趟旅行"), ("2023-12-01", "2023-12-31"))
+        self.assertEqual(self.df("2024年"), ("2024-01-01", "2024-12-31"))
+
+    def test_no_time(self):
+        self.assertEqual(self.df("我一个人待着的时候在做什么"), (None, None))
+
+    def test_year_words(self):
+        self.assertEqual(self.df("今年的照片"), ("2026-01-01", "2026-12-31"))
+        self.assertEqual(self.df("去年常去哪"), ("2025-01-01", "2025-12-31"))
+        self.assertEqual(self.df("前年的夏天"), ("2024-06-01", "2024-08-31"))
+
+    def test_month_words(self):
+        self.assertEqual(self.df("上个月拍了什么"), ("2026-10-01", "2026-10-31"))
+        self.assertEqual(self.df("这个月都干了啥"), ("2026-11-01", "2026-11-30"))
+
+    def test_recent_ranges(self):
+        self.assertEqual(self.df("最近7天"), ("2026-11-01", "2026-11-07"))
+        self.assertEqual(self.df("近三个月"), ("2026-09-01", "2026-11-30"))
+        self.assertEqual(self.df("过去2周"), ("2026-10-26", "2026-11-07"))
+
+    def test_week_words(self):
+        self.assertEqual(self.df("上周"), ("2026-10-26", "2026-11-01"))
+        self.assertEqual(self.df("本周"), ("2026-11-02", "2026-11-08"))
+
+    def test_season(self):
+        self.assertEqual(self.df("去年冬天去哪了"), ("2025-12-01", "2026-02-28"))
+        self.assertEqual(self.df("2024年秋天"), ("2024-09-01", "2024-11-30"))
+        self.assertEqual(self.df("今年夏天"), ("2026-06-01", "2026-08-31"))
 
 
 class TagTaxonomyTests(unittest.TestCase):

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from . import db, models
 
@@ -37,19 +37,111 @@ def keywords(question: str) -> list[str]:
     return grams or [question.strip()]
 
 
-def date_filter(question: str) -> tuple[str | None, str | None]:
-    """从自然语言里认出年份/年月，自动限定检索区间。"""
+def date_filter(question: str, now: datetime | None = None) -> tuple[str | None, str | None]:
+    """从自然语言里认出时间表达，自动限定检索区间。
+
+    支持绝对时间（2023年、2024年3月）与相对时间（今年、去年、前年、上个月、
+    这个月、最近/近 N 天|周|个月、上周、这周、去年冬天 等季节表达）。
+    """
     import calendar
 
+    now = now or datetime.now()
+    y, m = now.year, now.month
+
+    def fmt(year: int, month: int, day: int) -> str:
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    def month_last(year: int, month: int) -> int:
+        return calendar.monthrange(year, month)[1]
+
+    # 季节（带锚年）：春 3-5 月、夏 6-8 月、秋 9-11 月、冬 12 月-次年 2 月
+    season = re.search(r"(前年|去年|今年|(20\d{2})\s*年)?的?\s*(春天|夏天|秋天|冬天|春季|夏季|秋季|冬季)", question)
+    if season:
+        anchor = season.group(1) or ""
+        if season.group(2):
+            year = int(season.group(2))
+        elif "前年" in anchor:
+            year = y - 2
+        elif "去年" in anchor:
+            year = y - 1
+        else:
+            year = y
+        name = season.group(3)[0]
+        if name == "冬":
+            return fmt(year, 12, 1), fmt(year + 1, 2, month_last(year + 1, 2))
+        first, last = {"春": (3, 5), "夏": (6, 8), "秋": (9, 11)}[name]
+        return fmt(year, first, 1), fmt(year, last, month_last(year, last))
+
+    # 绝对年 / 年月
     match = re.search(r"(20\d{2})\s*年\s*(\d{1,2})?\s*月?", question)
-    if not match:
-        return None, None
-    year = int(match.group(1))
-    month = int(match.group(2)) if match.group(2) else None
-    if month:
-        last = calendar.monthrange(year, month)[1]
-        return f"{year:04d}-{month:02d}-01", f"{year:04d}-{month:02d}-{last:02d}"
-    return f"{year:04d}-01-01", f"{year:04d}-12-31"
+    if match:
+        year = int(match.group(1))
+        month = int(match.group(2)) if match.group(2) else None
+        if month:
+            return fmt(year, month, 1), fmt(year, month, month_last(year, month))
+        return fmt(year, 1, 1), fmt(year, 12, 31)
+
+    def shift_months(base_year: int, base_month: int, delta: int) -> tuple[int, int]:
+        total = base_year * 12 + (base_month - 1) + delta
+        return total // 12, total % 12 + 1
+
+    def cn_num(text: str) -> int | None:
+        """中文/阿拉伯数字 → int（支持 一两…十、十一~九十九 的常用表达）。"""
+        table = {"零": 0, "一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5,
+                 "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+        if text.isdigit():
+            return int(text)
+        if "十" in text:
+            left, _, right = text.partition("十")
+            tens = table.get(left, 1) if left else 1
+            ones = table.get(right, 0) if right else 0
+            return tens * 10 + ones
+        if len(text) == 1 and text in table:
+            return table[text]
+        return None
+
+    num_pattern = r"(\d+|[零一二两三四五六七八九十]+)"
+
+    # 相对时间
+    n_months = re.search(r"(?:最近|近|过去|这)" + num_pattern + r"\s*个?月", question)
+    if n_months:
+        n = cn_num(n_months.group(1))
+        if n:
+            sy, sm = shift_months(y, m, -n + 1)
+            return fmt(sy, sm, 1), fmt(y, m, month_last(y, m))
+    n_weeks = re.search(r"(?:最近|近|过去)" + num_pattern + r"\s*(?:个?周|星期)", question)
+    if n_weeks:
+        n = cn_num(n_weeks.group(1))
+        if n:
+            start = now - timedelta(weeks=n - 1, days=now.weekday())
+            return fmt(start.year, start.month, start.day), fmt(y, m, now.day)
+    n_days = re.search(r"(?:最近|近|过去)" + num_pattern + r"\s*天", question)
+    if n_days:
+        n = cn_num(n_days.group(1))
+        if n:
+            start = now - timedelta(days=n - 1)
+            return fmt(start.year, start.month, start.day), fmt(y, m, now.day)
+
+    monday = now - timedelta(days=now.weekday())
+    if re.search(r"上(个)?周", question):
+        start = monday - timedelta(weeks=1)
+        end = start + timedelta(days=6)
+        return fmt(start.year, start.month, start.day), fmt(end.year, end.month, end.day)
+    if re.search(r"(这|本)周", question):
+        end = monday + timedelta(days=6)
+        return fmt(monday.year, monday.month, monday.day), fmt(end.year, end.month, end.day)
+    if re.search(r"上(个)?月", question):
+        sy, sm = shift_months(y, m, -1)
+        return fmt(sy, sm, 1), fmt(sy, sm, month_last(sy, sm))
+    if re.search(r"(这|本)个月", question):
+        return fmt(y, m, 1), fmt(y, m, month_last(y, m))
+    if "前年" in question:
+        return fmt(y - 2, 1, 1), fmt(y - 2, 12, 31)
+    if "去年" in question:
+        return fmt(y - 1, 1, 1), fmt(y - 1, 12, 31)
+    if "今年" in question:
+        return fmt(y, 1, 1), fmt(y, 12, 31)
+    return None, None
 
 
 def search(question: str, since_day: str | None = None, until_day: str | None = None,
