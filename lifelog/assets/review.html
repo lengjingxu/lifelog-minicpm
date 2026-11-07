@@ -386,9 +386,10 @@
     var tabs = $("voiceTabs");
     tabs.innerHTML = "";
     if (!VOICES.length) {
-      tabs.parentNode.removeChild(tabs);
-      $("voiceBody").innerHTML = "";
-      $("voiceNote").textContent = "";
+      // 没有叙事文本（未跑深度模型）时整段隐藏，导航锚点一并收起
+      $("voices").classList.add("hidden");
+      var nav = document.querySelector('#bar a[href="#voices"]');
+      if (nav) nav.classList.add("hidden");
       return;
     }
     VOICES.forEach(function (v, i) {
@@ -441,6 +442,10 @@
       card.appendChild(el("p", "mt-3 text-body text-ink-soft leading-relaxed", esc(c.body)));
       grid.appendChild(card);
     });
+    if (!(DATA.insight_cards || []).length) {
+      grid.classList.add("hidden");  // 无判断卡时收起空网格，数据卡直接跟在标题后
+      grid.classList.remove("mt-10");
+    }
     var dc = $("dataCards");
     function dataCard(label, lines) {
       var c = el("article", "rounded-card bg-mist p-5");
@@ -487,6 +492,10 @@
     });
     if (!(ev.samples || []).length) {
       $("proof").parentNode.removeChild($("proof"));
+    }
+    if (!dc.children.length) {
+      dc.classList.add("hidden");
+      dc.classList.remove("mt-5");
     }
     $("factList").textContent = DATA.facts || "";
   }

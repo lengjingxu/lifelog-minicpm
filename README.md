@@ -130,6 +130,10 @@ npm install          # Tailwind CSS v4
 
 **只想看看效果**：`bash scripts/demo.sh /path/to/photos 4`，抽样 100 张照片，5 分钟内跑完整条链路。
 
+本机没有相册也可以先看演示：`.venv/bin/python scripts/mock_data.py` 生成 142 张合成照片与配套描述，再打开 `/review`。
+
+**识别现场**：`http://127.0.0.1:8766/live` 把识别过程做成动画——杂乱的照片堆被 4 个 slot 并发「看清」（金色扫描线），每完成一张就飞入 17 类分类桶，底部滚动模型写下的描述，顶部实时统计张/秒。回放模式复用库里的真实识别结果、按实测节奏模拟；装好 llama.cpp 后同一页面可切真实推理。
+
 ---
 
 ## 多模型合并（这次修复的核心）
@@ -239,7 +243,7 @@ npm install          # Tailwind CSS v4
 
 ```
 lifelog-minicpm/
-|-- lifelog/            # config / db / ingest / sync_xiaomi / models / caption / ocr / aggregate / story / journey / query / mcp_server / web
+|-- lifelog/            # config / db / ingest / sync_xiaomi / models / caption / ocr / aggregate / story / journey / query / recognize / mcp_server / web
 |-- skills/lifelog/     # Agent Skill
 |-- scripts/            # fetch_models / demo.sh
 |-- tests/              # 问答测试套件
