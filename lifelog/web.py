@@ -159,6 +159,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(review.render().encode("utf-8"))
             elif path == "/journey-simple":
                 self._send(journey_view.render_html().encode("utf-8"))
+            elif path == "/live":
+                from . import recognize
+                self._send(recognize.render().encode("utf-8"))
+            elif path == "/api/live/state":
+                from . import recognize
+                self._send(json.dumps(recognize.state(), ensure_ascii=False), "application/json")
+            elif path == "/api/live/events":
+                from . import recognize
+                cursor = int((params.get("cursor") or ["0"])[0] or 0)
+                self._send(json.dumps(recognize.events(cursor), ensure_ascii=False),
+                           "application/json")
+            elif path == "/api/live/photos":
+                from . import recognize
+                self._send(json.dumps(recognize.session_photos(), ensure_ascii=False),
+                           "application/json")
             elif path == "/demo":
                 demo = Path(__file__).resolve().parent.parent / "reports" / "demo" / "qa-demo.html"
                 if demo.exists():
@@ -227,6 +242,29 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(json.dumps(aggregate.compute_stats(), ensure_ascii=False), "application/json")
             else:
                 self._send(b"not found", "text/plain", 404)
+
+    def do_POST(self):
+        from . import recognize
+
+        parsed = urlparse(self.path)
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            payload = json.loads(self.rfile.read(length) or b"{}")
+        except json.JSONDecodeError:
+            payload = {}
+        if parsed.path == "/api/live/start":
+            result = recognize.start(
+                mode=payload.get("mode", "sim"),
+                count=int(payload.get("count") or 40),
+                concurrency=int(payload.get("concurrency") or 4),
+                speed=float(payload.get("speed") or 2.0),
+            )
+            self._send(json.dumps(result, ensure_ascii=False), "application/json",
+                       200 if result.get("ok") else 409)
+        elif parsed.path == "/api/live/stop":
+            self._send(json.dumps(recognize.stop(), ensure_ascii=False), "application/json")
+        else:
+            self._send(b"not found", "text/plain", 404)
 
 
 def serve(port: int = 8766, host: str = "127.0.0.1"):

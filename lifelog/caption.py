@@ -240,14 +240,29 @@ def store_caption(con, asset_id: str, model: str, model_version: str, data: dict
 
 def run_caption(model_key: str, limit: int | None = None, since_day: str | None = None,
                 until_day: str | None = None, max_side: int = 1024,
-                sample: int | None = None, concurrency: int = 1) -> dict:
-    """对尚未描述的照片逐张跑 MiniCPM。可重复运行，自动续跑。"""
+                sample: int | None = None, concurrency: int = 1,
+                on_result: "callable | None" = None) -> dict:
+    """对尚未描述的照片逐张跑 MiniCPM。可重复运行，自动续跑。
+
+    on_result(asset, data, ok, elapsed_ms)：每张完成时回调（供实时可视化等场景）。
+    """
+    import time as _time
+
     db.init_db()
     model_version = config.MODELS[model_key]["title"]
     todo = pending_assets(model_key, PROMPT_VERSION, limit, since_day, until_day, sample)
     stats = {"todo": len(todo), "ok": 0, "failed": 0, "skipped": 0}
     if not todo:
         return stats
+
+    def report(asset: dict, data: dict, ok: bool, elapsed_ms: float) -> None:
+        if on_result is None:
+            return
+        try:
+            on_result(asset, data, ok, elapsed_ms)
+        except Exception:
+            pass
+
     def describe(asset: dict) -> tuple[dict, dict | None, str]:
         path = Path(asset["path"])
         if not path.exists():
@@ -258,36 +273,46 @@ def run_caption(model_key: str, limit: int | None = None, since_day: str | None 
             return asset, None, f"请求失败 {path.name}: {exc}"
         return asset, parse_json_object(raw) or {}, raw[:2000]
 
-    def save(asset: dict, data: dict, raw: str) -> None:
+    def save(asset: dict, data: dict, raw: str, elapsed_ms: float = 0.0) -> None:
         if raw.startswith("请求失败"):
             stats["failed"] += 1
             print(raw)
+            report(asset, {}, False, elapsed_ms)
             return
         if not data.get("caption"):
             stats["failed"] += 1
             with db.session() as con:
                 store_caption(con, asset["id"], model_key, model_version, {}, raw,
                               status="unparsed")
+            report(asset, data, False, elapsed_ms)
             return
         with db.session() as con:
             store_caption(con, asset["id"], model_key, model_version, data, raw)
         stats["ok"] += 1
+        report(asset, data, True, elapsed_ms)
 
     with models.Server(model_key, parallel=concurrency) as server:
         if concurrency > 1:
             from concurrent.futures import ThreadPoolExecutor, as_completed
 
+            def timed_describe(asset: dict):
+                t0 = _time.perf_counter()
+                result = describe(asset)
+                return result, (_time.perf_counter() - t0) * 1000
+
             with ThreadPoolExecutor(max_workers=concurrency) as pool:
-                futures = [pool.submit(describe, asset) for asset in todo]
+                futures = [pool.submit(timed_describe, asset) for asset in todo]
                 for index, future in enumerate(as_completed(futures), 1):
-                    asset, data, raw = future.result()
-                    save(asset, data, raw)
+                    (asset, data, raw), elapsed_ms = future.result()
+                    save(asset, data, raw, elapsed_ms)
                     if index % 20 == 0 or index == len(todo):
                         print(f"[{index}/{len(todo)}] 已完成 {stats['ok']} 张")
         else:
             for index, asset in enumerate(todo, 1):
+                t0 = _time.perf_counter()
                 asset, data, raw = describe(asset)
-                save(asset, data, raw)
+                elapsed_ms = (_time.perf_counter() - t0) * 1000
+                save(asset, data, raw, elapsed_ms)
                 if index % 20 == 0 or index == len(todo):
                     print(f"[{index}/{len(todo)}] {data.get('caption', '')[:60]}")
     return stats

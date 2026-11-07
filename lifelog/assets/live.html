@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>拾光 LifeLog · 识别现场</title>
+<link rel="stylesheet" href="/assets/tailwind.css">
+<style>
+  /* 舞台内照片：绝对定位，由 JS 驱动 FLIP 飞行 */
+  .live-photo {
+    position: absolute; width: 104px; height: 78px;
+    border-radius: 8px; object-fit: cover;
+    box-shadow: 0 6px 20px rgb(0 0 0 / .45);
+    will-change: transform, left, top, width, height;
+    z-index: 10;
+  }
+  /* 识别中：金色扫描线 + 呼吸边框 */
+  .live-photo.seeing { z-index: 30; }
+  .live-photo.seeing::after {
+    content: ""; position: absolute; inset: 0; border-radius: 8px;
+    box-shadow: 0 0 0 2px var(--color-gold);
+    animation: breathe 1.1s ease-in-out infinite;
+  }
+  .scanline {
+    position: absolute; left: 0; right: 0; height: 20%; top: -30%;
+    background: linear-gradient(to bottom, transparent, rgb(201 151 44 / .5), transparent);
+    animation: scan 1.05s linear infinite;
+    pointer-events: none;
+  }
+  /* 堆叠入场：从中心散开，像刚倒出来的一摞 */
+  @keyframes scatter {
+    from { left: var(--cx); top: var(--cy); transform: rotate(0deg) scale(.6); opacity: 0; }
+    to   { left: var(--tx); top: var(--ty); transform: rotate(var(--tr)) scale(1); opacity: 1; }
+  }
+  @keyframes scan { from { top: -40%; } to { top: 110%; } }
+  @keyframes breathe {
+    0%, 100% { box-shadow: 0 0 0 2px var(--color-gold), 0 0 18px rgb(201 151 44 / .35); }
+    50% { box-shadow: 0 0 0 2px var(--color-gold), 0 0 34px rgb(201 151 44 / .7); }
+  }
+  /* 桶计数跳动 */
+  .bucket-pop { animation: bucketPop .45s cubic-bezier(.2,.7,.2,1); }
+  @keyframes bucketPop {
+    0% { transform: scale(1); } 40% { transform: scale(1.28); } 100% { transform: scale(1); }
+  }
+  .bucket.flash { background: rgb(201 151 44 / .16); border-color: rgb(201 151 44 / .5); }
+  /* 弹幕条 */
+  .tick-in { animation: tickIn .5s cubic-bezier(.2,.7,.2,1) both; }
+  @keyframes tickIn { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
+  .fly-layer { position: absolute; inset: 0; pointer-events: none; z-index: 40; }
+</style>
+</head>
+<body class="bg-canvas font-body text-ink antialiased">
+
+<!-- 顶栏：标识 + 控制条 -->
+<header class="sticky top-0 z-40 border-b border-black/5 glass">
+  <div class="wrap flex h-14 items-center justify-between gap-3">
+    <div class="flex items-baseline gap-3">
+      <a href="/review" class="font-display text-body font-semibold tracking-wide">拾光</a>
+      <span class="font-mono text-caption tracking-[0.2em] text-gold-deep uppercase">Live · 识别现场</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="hidden items-center gap-1.5 text-caption text-ink-soft sm:flex">张数
+        <select id="countSel" class="rounded-pill border border-black/12 bg-surface px-3 py-1.5 text-caption text-ink">
+          <option value="20">20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+          <option value="0">全部</option>
+        </select>
+      </label>
+      <label class="hidden items-center gap-1.5 text-caption text-ink-soft sm:flex">并发
+        <select id="concSel" class="rounded-pill border border-black/12 bg-surface px-3 py-1.5 text-caption text-ink">
+          <option>2</option><option selected>4</option><option>6</option>
+        </select>
+      </label>
+      <label class="hidden items-center gap-1.5 text-caption text-ink-soft sm:flex">倍速
+        <select id="speedSel" class="rounded-pill border border-black/12 bg-surface px-3 py-1.5 text-caption text-ink">
+          <option value="1">1×</option><option value="2" selected>2×</option>
+          <option value="4">4×</option><option value="8">8×</option>
+        </select>
+      </label>
+      <button id="startBtn" class="btn btn-solid" type="button">▶ 开始识别</button>
+      <button id="stopBtn" class="btn hidden" type="button">■ 停止</button>
+    </div>
+  </div>
+  <!-- 统计条 -->
+  <div class="wrap flex items-center gap-4 pb-3">
+    <div class="h-1.5 flex-1 overflow-hidden rounded-pill bg-mist">
+      <div id="progBar" class="h-full w-0 rounded-pill bg-gold transition-[width] duration-300"></div>
+    </div>
+    <p class="font-mono text-caption text-ink-soft tnum whitespace-nowrap" id="statLine">待命</p>
+  </div>
+</header>
+
+<main class="wrap py-8">
+  <!-- 深色舞台 -->
+  <section id="stage" class="relative overflow-hidden rounded-3xl bg-night p-5 text-white md:p-7">
+    <div class="grid gap-5 md:grid-cols-[minmax(200px,1fr)_minmax(240px,1.15fr)_minmax(380px,1.55fr)] md:gap-6">
+
+      <!-- 待识别堆 -->
+      <div>
+        <p class="font-mono text-[11px] tracking-[0.18em] text-white/40 uppercase">待识别 <span id="pileCount" class="text-white/70 tnum"></span></p>
+        <div id="pile" class="relative mt-3 h-[300px] md:h-[460px]"></div>
+        <p class="mt-2 text-caption text-white/35">杂乱的一堆，等模型逐张看清</p>
+      </div>
+
+      <!-- 识别中 slots -->
+      <div>
+        <p class="font-mono text-[11px] tracking-[0.18em] text-white/40 uppercase">识别中 · <span class="text-gold">MiniCPM-V-4.7-1B</span></p>
+        <div id="slots" class="mt-3 flex flex-row gap-2.5 md:flex-col md:gap-3"></div>
+        <p class="mt-2 hidden text-caption text-white/35 md:block">llama.cpp 多 slot 并发，一张看完立刻下一张</p>
+      </div>
+
+      <!-- 分类桶 -->
+      <div>
+        <p class="font-mono text-[11px] tracking-[0.18em] text-white/40 uppercase">归入分类 · 17 类</p>
+        <div id="buckets" class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 md:gap-2.5"></div>
+      </div>
+    </div>
+
+    <!-- 弹幕条 -->
+    <div class="mt-5 border-t border-white/10 pt-3 md:mt-6">
+      <div id="ticker" class="flex items-baseline gap-5 overflow-hidden"></div>
+    </div>
+
+    <!-- 飞行层与完成面板 -->
+    <div id="flyLayer" class="fly-layer hidden"></div>
+    <div id="donePanel" class="absolute inset-0 z-50 hidden items-center justify-center bg-night/92">
+      <div class="px-6 text-center">
+        <p class="font-mono text-caption tracking-[0.24em] text-gold uppercase">Session Complete</p>
+        <p id="doneTotal" class="mt-4 font-display text-figure font-semibold tnum"></p>
+        <p id="doneDetail" class="mt-3 text-body text-white/70"></p>
+        <p id="doneTop" class="mt-4 font-mono text-caption text-white/50"></p>
+        <button id="againBtn" class="btn btn-solid mx-auto mt-8" type="button">再来一轮</button>
+      </div>
+    </div>
+  </section>
+
+  <p class="mt-5 text-caption leading-relaxed text-ink-faint">
+    回放模式：照片与分类来自库中 MiniCPM 的真实识别结果，识别节奏按实测分布模拟（4 并发 ≈ 1.2 张/秒）。
+    装好 llama.cpp 与模型后，同一页面可切真实推理。
+  </p>
+</main>
+
+<script id="live-data" type="application/json">{"placeholder":true}</script>
+<script>
+(function () {
+  "use strict";
+  var DATA = JSON.parse(document.getElementById("live-data").textContent);
+  var BUCKETS = DATA.buckets || [];
+  var PHOTOS = DATA.photos || [];
+  var REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function $(id) { return document.getElementById(id); }
+  function el(tag, cls, html) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (html !== undefined) n.innerHTML = html;
+    return n;
+  }
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  var state = { phase: "idle", cursor: 0, done: 0, total: 0, startedAt: 0, timer: null, poll: null };
+  var nodeOf = {};        // asset_id -> 照片元素
+  var photoOf = {};       // asset_id -> photo 数据
+  var bucketCount = {};
+  var bucketThumbs = {};
+  var slotsBusy = {};     // slot -> asset_id
+  var stage, pile, slotsBox, bucketsBox, flyLayer;
+
+  /* ---------- 布局：slots 与 buckets 骨架 ---------- */
+  function buildSlots(conc) {
+    slotsBox.innerHTML = "";
+    slotsBusy = {};
+    for (var i = 0; i < conc; i++) {
+      var slot = el("div", "relative h-[86px] overflow-hidden rounded-xl border border-white/10 bg-white/4 md:h-[104px]");
+      slot.id = "slot-" + i;
+      var idle = el("div", "flex h-full min-h-[72px] items-center justify-center font-mono text-[11px] text-white/25");
+      idle.textContent = "slot " + (i + 1);
+      slot.appendChild(idle);
+      slotsBox.appendChild(slot);
+    }
+  }
+  function buildBuckets() {
+    bucketsBox.innerHTML = "";
+    bucketCount = {}; bucketThumbs = {};
+    BUCKETS.forEach(function (name) {
+      bucketCount[name] = 0; bucketThumbs[name] = [];
+      var b = el("div", "bucket flex min-h-[64px] flex-col justify-between rounded-xl border border-white/8 bg-white/5 p-2.5 transition-colors duration-500");
+      b.id = "bucket-" + name;
+      b.appendChild(el("p", "text-[12px] leading-tight text-white/75", esc(name)));
+      var foot = el("div", "mt-1.5 flex items-center justify-between");
+      var thumbs = el("div", "flex gap-1");
+      thumbs.id = "thumbs-" + name;
+      foot.appendChild(thumbs);
+      foot.appendChild(el("p", "font-mono text-[13px] font-semibold text-gold tnum", "0"));
+      b.appendChild(foot);
+      bucketsBox.appendChild(b);
+    });
+  }
+
+  /* ---------- 待识别堆：随机角度与偏移，看起来杂乱 ---------- */
+  function seedPile(list) {
+    pile.innerHTML = "";
+    nodeOf = {}; photoOf = {};
+    var rect = pile.getBoundingClientRect();
+    if (rect.width < 40) rect = { width: 240, height: 300 };
+    var cx = rect.width / 2 - 52, cy = rect.height / 2 - 39;
+    list.forEach(function (p, i) {
+      photoOf[p.id] = p;
+      var img = document.createElement("img");
+      img.src = p.thumb;
+      img.className = "live-photo";
+      var tx = 8 + Math.random() * Math.max(rect.width - 116, 40);
+      var ty = 8 + Math.random() * Math.max(rect.height - 90, 40);
+      var tr = (Math.random() * 32 - 16).toFixed(1);
+      img.style.left = tx + "px";
+      img.style.top = ty + "px";
+      img.style.transform = "rotate(" + tr + "deg)";
+      img.style.zIndex = String(10 + i);
+      if (!REDUCED) {
+        img.style.setProperty("--cx", cx + "px");
+        img.style.setProperty("--cy", cy + "px");
+        img.style.setProperty("--tx", tx + "px");
+        img.style.setProperty("--ty", ty + "px");
+        img.style.setProperty("--tr", tr + "deg");
+        img.style.animation = "scatter .9s cubic-bezier(.2,.7,.2,1) both";
+        img.style.animationDelay = Math.min(i * 22, 900) + "ms";
+      }
+      pile.appendChild(img);
+      nodeOf[p.id] = img;
+    });
+    $("pileCount").textContent = list.length;
+  }
+
+  function rectIn(elNode, rootRect) {
+    var r = elNode.getBoundingClientRect();
+    return { x: r.left - rootRect.left, y: r.top - rootRect.top, w: r.width, h: r.height };
+  }
+  function setNode(node, r, rotate) {
+    node.style.left = r.x + "px";
+    node.style.top = r.y + "px";
+    node.style.width = r.w + "px";
+    node.style.height = r.h + "px";
+    node.style.transform = "rotate(" + (rotate || 0) + "deg)";
+  }
+
+  /* ---------- 事件处理 ---------- */
+  function onStart(ev) {
+    var node = nodeOf[ev.asset_id];
+    var slotEl = $("slot-" + ev.slot);
+    if (!node || !slotEl) return;
+    slotsBusy[ev.slot] = ev.asset_id;
+    slotEl.querySelector(".font-mono") && slotEl.querySelector(".font-mono").remove();
+    node.classList.add("seeing");
+    if (!node.parentElement || node.parentElement !== stage) {
+      // 从堆移动到舞台层，保留视觉位置
+      var rootRect = stage.getBoundingClientRect();
+      var cur = rectIn(node, rootRect);
+      pile.removeChild(node);
+      flyLayer.appendChild(node);
+      setNode(node, cur, 0);
+    }
+    var target = rectIn(slotEl, stage.getBoundingClientRect());
+    target.x += 10; target.y += 10; target.w -= 20; target.h -= 20;
+    node.animate(REDUCED ? [] : [
+      { left: node.style.left, top: node.style.top, width: node.style.width, height: node.style.height },
+      { left: target.x + "px", top: target.y + "px", width: target.w + "px", height: target.h + "px" }
+    ], { duration: REDUCED ? 0 : 520, fill: "forwards", easing: "cubic-bezier(.2,.7,.2,1)" });
+    setNode(node, target, 0);
+    var scan = el("div", "scanline rounded-lg");
+    node.dataset.scan = "1";
+    node.insertAdjacentElement("afterend", scan);
+    scan.style.left = target.x + "px";
+    scan.style.top = target.y + "px";
+    scan.style.width = target.w + "px";
+    scan.style.height = target.h + "px";
+    node._scan = scan;
+  }
+
+  function onDone(ev) {
+    var node = nodeOf[ev.asset_id];
+    if (node && node._scan) { node._scan.remove(); node._scan = null; }
+    state.done++;
+    var primary = (ev.tags && ev.tags[0]) || "未分类";
+    if (!(primary in bucketCount)) primary = BUCKETS[0];
+    bucketCount[primary]++;
+    var bucketEl = $("bucket-" + primary);
+    var thumbsEl = $("thumbs-" + primary);
+    if (bucketEl) {
+      bucketEl.classList.remove("bucket-pop", "flash");
+      void bucketEl.offsetWidth;
+      bucketEl.classList.add("bucket-pop", "flash");
+      setTimeout(function () { bucketEl.classList.remove("flash"); }, 900);
+      var counter = bucketEl.querySelector(".font-mono");
+      if (counter) counter.textContent = bucketCount[primary];
+    }
+    if (thumbsEl) {
+      var t = document.createElement("img");
+      t.src = "/thumb/" + ev.asset_id;
+      t.className = "h-5 w-5 rounded object-cover";
+      thumbsEl.appendChild(t);
+      while (thumbsEl.children.length > 3) thumbsEl.removeChild(thumbsEl.firstChild);
+    }
+    if (node) {
+      node.classList.remove("seeing");
+      var target = bucketEl ? rectIn(bucketEl, stage.getBoundingClientRect()) : null;
+      if (target) {
+        target.x = target.x + target.w / 2 - 13;
+        target.y = target.y + target.h * 0.38;
+        target.w = 26; target.h = 26;
+        node.animate(REDUCED ? [] : [
+          { left: node.style.left, top: node.style.top, width: node.style.width, height: node.style.height, opacity: 1 },
+          { left: target.x + "px", top: target.y + "px", width: target.w + "px", height: target.h + "px", opacity: .25 }
+        ], { duration: REDUCED ? 0 : 560, fill: "forwards", easing: "cubic-bezier(.3,.6,.2,1)" });
+      }
+      setTimeout(function () { node.remove(); delete nodeOf[ev.asset_id]; }, REDUCED ? 0 : 600);
+    }
+    delete slotsBusy[ev.slot];
+    var idleSlot = $("slot-" + ev.slot);
+    if (idleSlot && !slotsBusy[ev.slot]) {
+      var ph = el("div", "flex h-full min-h-[72px] items-center justify-center font-mono text-[11px] text-white/25");
+      ph.textContent = "slot " + (ev.slot + 1);
+      idleSlot.appendChild(ph);
+    }
+    tick(ev);
+  }
+
+  /* 弹幕：最新三条 */
+  function tick(ev) {
+    var box = $("ticker");
+    var item = el("p", "tick-in whitespace-nowrap text-caption text-white/70");
+    item.innerHTML = '<span class="text-gold">' + esc((ev.tags || [])[0] || "") + "</span>　" + esc(ev.caption || "");
+    box.insertBefore(item, box.firstChild);
+    while (box.children.length > 3) box.removeChild(box.lastChild);
+  }
+
+  /* ---------- 统计条 ---------- */
+  function paintStats(st) {
+    var line = $("statLine");
+    if (state.phase === "idle") { line.textContent = "待命"; $("progBar").style.width = "0"; return; }
+    var secs = st && st.elapsed_ms ? Math.round(st.elapsed_ms / 1000) : Math.round((Date.now() - state.startedAt) / 1000);
+    var mm = String(Math.floor(secs / 60)).padStart(2, "0");
+    var ss = String(secs % 60).padStart(2, "0");
+    var rate = st && st.rate ? st.rate.toFixed(2) : "—";
+    var total = st && st.total ? st.total : state.total;
+    var done = st && st.done != null ? st.done : state.done;
+    $("progBar").style.width = (total ? Math.round(done / total * 100) : 0) + "%";
+    line.textContent = done + " / " + total + " 张 · " + rate + " 张/秒 · " + mm + ":" + ss +
+      " · " + (state.conc || 4) + " 并发" + (state.label ? " · " + state.label : "");
+    $("pileCount").textContent = Math.max(0, total - done);
+  }
+
+  function sessionDone() {
+    state.phase = "done";
+    clearInterval(state.poll); clearInterval(state.timer); state.poll = null; state.timer = null;
+    $("startBtn").classList.remove("hidden");
+    $("stopBtn").classList.add("hidden");
+    var secs = Math.round((Date.now() - state.startedAt) / 1000);
+    var mm = String(Math.floor(secs / 60)).padStart(2, "0");
+    var ss = String(secs % 60).padStart(2, "0");
+    $("doneTotal").textContent = state.done + " 张";
+    var rate = secs > 0 ? (state.done / secs).toFixed(2) : "—";
+    $("doneDetail").textContent = "平均 " + rate + " 张/秒 · 用时 " + mm + ":" + ss;
+    var top = Object.keys(bucketCount)
+      .filter(function (k) { return bucketCount[k] > 0; })
+      .sort(function (a, b) { return bucketCount[b] - bucketCount[a]; })
+      .slice(0, 3)
+      .map(function (k) { return k + " ×" + bucketCount[k]; });
+    $("doneTop").textContent = top.join("　·　");
+    var panel = $("donePanel");
+    panel.classList.remove("hidden");
+    panel.classList.add("flex");
+  }
+
+  /* ---------- 轮询 ---------- */
+  async function pull() {
+    try {
+      var res = await fetch("/api/live/events?cursor=" + state.cursor);
+      var data = await res.json();
+      state.cursor = data.cursor;
+      (data.events || []).forEach(function (ev) {
+        if (ev.type === "start") onStart(ev);
+        else if (ev.type === "done") onDone(ev);
+        else if (ev.type === "session_done" || ev.type === "session_stopped") {
+          state.label = ev.type === "session_stopped" ? "已手动停止" : state.label;
+          setTimeout(sessionDone, 700);
+        }
+      });
+      var st = await (await fetch("/api/live/state")).json();
+      paintStats(st);
+    } catch (err) { /* 服务暂不可达时静默重试 */ }
+  }
+
+  async function start() {
+    var count = Number($("countSel").value) || 0;
+    var conc = Number($("concSel").value) || 4;
+    var speed = Number($("speedSel").value) || 2;
+    var res = await fetch("/api/live/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "sim", count: count, concurrency: conc, speed: speed })
+    });
+    var data = await res.json();
+    var st, queue;
+    if (!data.ok) {
+      if (res.status === 409) {
+        // 已有会话在跑（比如刷新了页面）：直接接入现场，从零重放事件
+        st = await (await fetch("/api/live/state")).json();
+        if (st.status !== "running") { return; }
+        queue = await (await fetch("/api/live/photos")).json();
+      } else {
+        alert(data.error || "启动失败");
+        return;
+      }
+    } else {
+      st = data.state;
+      queue = data.photos || [];
+    }
+    state = { phase: "running", cursor: 0, done: 0, total: st.total, startedAt: Date.now(),
+              conc: st.concurrency || conc, label: (st.extra && st.extra.label) || "",
+              poll: null, timer: null };
+    $("donePanel").classList.add("hidden");
+    $("donePanel").classList.remove("flex");
+    $("startBtn").classList.add("hidden");
+    $("stopBtn").classList.remove("hidden");
+    flyLayer.classList.remove("hidden");
+    flyLayer.innerHTML = "";
+    buildSlots(st.concurrency || conc);
+    buildBuckets();
+    $("ticker").innerHTML = "";
+    seedPile(queue.slice(0, st.total));
+    state.poll = setInterval(pull, 350);
+    state.timer = setInterval(function () { paintStats(null); }, 1000);
+    paintStats(st);
+  }
+
+  async function stop() {
+    await fetch("/api/live/stop", { method: "POST" });
+    $("stopBtn").classList.add("hidden");
+  }
+
+  stage = $("stage"); pile = $("pile"); slotsBox = $("slots");
+  bucketsBox = $("buckets"); flyLayer = $("flyLayer");
+  buildSlots(4);
+  buildBuckets();
+  seedPile(PHOTOS.slice(0, 40));
+  $("startBtn").addEventListener("click", start);
+  $("againBtn").addEventListener("click", start);
+  $("stopBtn").addEventListener("click", stop);
+})();
+</script>
+</body>
+</html>
