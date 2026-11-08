@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -241,7 +242,7 @@ def store_caption(con, asset_id: str, model: str, model_version: str, data: dict
 def run_caption(model_key: str, limit: int | None = None, since_day: str | None = None,
                 until_day: str | None = None, max_side: int = 1024,
                 sample: int | None = None, concurrency: int = 1,
-                on_result: "callable | None" = None) -> dict:
+                on_result: Callable | None = None) -> dict:
     """对尚未描述的照片逐张跑 MiniCPM。可重复运行，自动续跑。
 
     on_result(asset, data, ok, elapsed_ms)：每张完成时回调（供实时可视化等场景）。

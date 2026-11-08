@@ -135,7 +135,6 @@
       <div>
         <p class="font-mono text-[11px] tracking-[0.18em] text-white/40 uppercase">识别中 · <span class="text-gold">MiniCPM-V-4.7-1B</span></p>
         <div id="slots" class="mt-3 flex flex-row gap-2.5 md:flex-col md:gap-3"></div>
-        <p class="mt-2 hidden text-caption text-white/35 md:block">llama.cpp 多 slot 并发，一张看完立刻下一张</p>
       </div>
 
       <!-- 分类桶 -->
@@ -162,11 +161,6 @@
       </div>
     </div>
   </section>
-
-  <p class="mt-5 text-caption leading-relaxed text-ink-faint">
-    回放模式：照片与分类来自库中 MiniCPM 的真实识别结果，识别节奏按实测分布模拟（4 并发 ≈ 1.2 张/秒）。
-    装好 llama.cpp 与模型后，同一页面可切真实推理。
-  </p>
 </main>
 
 <script id="live-data" type="application/json">{"placeholder":true}</script>
@@ -192,9 +186,7 @@
 
   var state = { phase: "idle", cursor: 0, done: 0, total: 0, startedAt: 0, timer: null, poll: null };
   var nodeOf = {};        // asset_id -> 照片元素
-  var photoOf = {};       // asset_id -> photo 数据
   var bucketCount = {};
-  var bucketThumbs = {};
   var slotsBusy = {};     // slot -> asset_id
   var stage, pile, slotsBox, bucketsBox, flyLayer;
 
@@ -213,9 +205,9 @@
   }
   function buildBuckets() {
     bucketsBox.innerHTML = "";
-    bucketCount = {}; bucketThumbs = {};
+    bucketCount = {};
     BUCKETS.forEach(function (name) {
-      bucketCount[name] = 0; bucketThumbs[name] = [];
+      bucketCount[name] = 0;
       var b = el("div", "bucket flex min-h-[64px] flex-col justify-between rounded-xl border border-white/8 bg-white/5 p-2.5 transition-colors duration-500");
       b.id = "bucket-" + name;
       b.appendChild(el("p", "text-[12px] leading-tight text-white/75", esc(name)));
@@ -232,12 +224,11 @@
   /* ---------- 待识别堆：随机角度与偏移，看起来杂乱 ---------- */
   function seedPile(list) {
     pile.innerHTML = "";
-    nodeOf = {}; photoOf = {};
+    nodeOf = {};
     var rect = pile.getBoundingClientRect();
     if (rect.width < 40) rect = { width: 240, height: 300 };
     var cx = rect.width / 2 - 52, cy = rect.height / 2 - 39;
     list.forEach(function (p, i) {
-      photoOf[p.id] = p;
       var img = document.createElement("img");
       img.src = p.thumb;
       img.className = "live-photo";
@@ -248,7 +239,6 @@
       img.style.top = ty + "px";
       img.style.zIndex = String(10 + i);
       img.style.setProperty("--rot", tr + "deg");
-      img.dataset.rot = tr;
       if (!REDUCED) {
         img.animate([
           { left: cx + "px", top: cy + "px", transform: "rotate(0deg) scale(.6)", opacity: 0 },
@@ -280,17 +270,16 @@
     var slotEl = $("slot-" + ev.slot);
     if (!node || !slotEl) return;
     slotsBusy[ev.slot] = ev.asset_id;
-    slotEl.querySelector(".font-mono") && slotEl.querySelector(".font-mono").remove();
+    slotEl.querySelector("[data-idle]") && slotEl.querySelector("[data-idle]").remove();
     node.classList.add("seeing");
-    var rot = Number(node.dataset.rot || 0);
+    var rot = parseFloat(node.style.getPropertyValue("--rot")) || 0;
     if (!node.parentElement || node.parentElement !== stage) {
       // 从堆「抽出」：抬升 + 阴影加深，再飞向 slot
       var rootRect = stage.getBoundingClientRect();
       var cur = rectIn(node, rootRect);
       pile.removeChild(node);
       flyLayer.appendChild(node);
-      setNode(node, cur, 0);
-      node.style.transform = "rotate(" + rot + "deg)";
+      setNode(node, cur, rot);
     }
     var target = rectIn(slotEl, stage.getBoundingClientRect());
     target.x += 10; target.y += 10; target.w -= 20; target.h -= 20;
@@ -306,7 +295,6 @@
     ], { duration: REDUCED ? 0 : 520, fill: "forwards", easing: "cubic-bezier(.2,.7,.2,1)" });
     setNode(node, target, 0);
     var scan = el("div", "scanline rounded-lg");
-    node.dataset.scan = "1";
     node.insertAdjacentElement("afterend", scan);
     scan.style.left = target.x + "px";
     scan.style.top = target.y + "px";
@@ -358,8 +346,9 @@
     }
     delete slotsBusy[ev.slot];
     var idleSlot = $("slot-" + ev.slot);
-    if (idleSlot && !slotsBusy[ev.slot]) {
+    if (idleSlot) {
       var ph = el("div", "flex h-full min-h-[72px] items-center justify-center font-mono text-[11px] text-white/25");
+      ph.setAttribute("data-idle", "1");
       ph.textContent = "slot " + (ev.slot + 1);
       idleSlot.appendChild(ph);
       // 速度可感知：完成瞬间显示这张的真实识别耗时
@@ -382,17 +371,18 @@
   }
 
   /* ---------- 统计条 ---------- */
+  function fmtClock(secs) {
+    return String(Math.floor(secs / 60)).padStart(2, "0") + ":" + String(secs % 60).padStart(2, "0");
+  }
   function paintStats(st) {
     var line = $("statLine");
     if (state.phase === "idle") { line.textContent = "待命"; $("progBar").style.width = "0"; return; }
     var secs = st && st.elapsed_ms ? Math.round(st.elapsed_ms / 1000) : Math.round((Date.now() - state.startedAt) / 1000);
-    var mm = String(Math.floor(secs / 60)).padStart(2, "0");
-    var ss = String(secs % 60).padStart(2, "0");
     var rate = st && st.rate ? st.rate.toFixed(2) : "—";
     var total = st && st.total ? st.total : state.total;
     var done = st && st.done != null ? st.done : state.done;
     $("progBar").style.width = (total ? Math.round(done / total * 100) : 0) + "%";
-    line.textContent = done + " / " + total + " 张 · " + rate + " 张/秒 · " + mm + ":" + ss +
+    line.textContent = done + " / " + total + " 张 · " + rate + " 张/秒 · " + fmtClock(secs) +
       " · " + (state.conc || 4) + " 并发" + (state.label ? " · " + state.label : "");
     $("pileCount").textContent = Math.max(0, total - done);
   }
@@ -404,10 +394,8 @@
     $("stopBtn").classList.add("hidden");
     setCtl(false);
     var secs = Math.round((Date.now() - state.startedAt) / 1000);
-    var mm = String(Math.floor(secs / 60)).padStart(2, "0");
-    var ss = String(secs % 60).padStart(2, "0");
     var rate = secs > 0 ? (state.done / secs).toFixed(2) : "—";
-    $("doneDetail").textContent = "平均 " + rate + " 张/秒 · 用时 " + mm + ":" + ss;
+    $("doneDetail").textContent = "平均 " + rate + " 张/秒 · 用时 " + fmtClock(secs);
     var top = Object.keys(bucketCount)
       .filter(function (k) { return bucketCount[k] > 0; })
       .sort(function (a, b) { return bucketCount[b] - bucketCount[a]; })

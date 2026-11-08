@@ -125,12 +125,10 @@ class SimSession(Session):
 class LiveSession(Session):
     """真实识别：llama.cpp 在位后启用。事件来自 run_caption 的 on_result 回调。"""
 
-    def __init__(self, total: int, concurrency: int, model_key: str,
-                 sample: int | None, count: int | None):
+    def __init__(self, total: int, concurrency: int, model_key: str, count: int | None):
         super().__init__("live", total, concurrency,
                          {"model": model_key, "label": "真实推理 · llama.cpp"})
         self.model_key = model_key
-        self.sample = sample
         self.count = count
 
     def run(self) -> None:  # pragma: no cover - 依赖 llama-server
@@ -138,19 +136,17 @@ class LiveSession(Session):
 
         def on_result(asset: dict, data: dict, ok: bool, elapsed_ms: float) -> None:
             self.done_count += 1
-            seq = len(self._events) + 1
             self.push({
-                "seq": seq, "type": "done", "asset_id": asset["id"], "slot": 0,
+                "type": "done", "asset_id": asset["id"], "slot": 0,
                 "elapsed_ms": int(elapsed_ms), "tags": data.get("tags") or [],
                 "caption": data.get("caption") or "",
             })
 
         try:
             caption.run_caption(self.model_key, limit=self.count,
-                                sample=self.sample, concurrency=self.concurrency,
-                                on_result=on_result)
+                                concurrency=self.concurrency, on_result=on_result)
         except Exception as exc:
-            self.push({"seq": len(self._events) + 1, "type": "error", "message": str(exc)})
+            self.push({"type": "error", "message": str(exc)})
         self.finish("done")
 
 
@@ -160,22 +156,23 @@ _lock = threading.Lock()
 _session: Session | None = None
 
 
-def current() -> Session | None:
-    return _session
-
-
-def _sim_photos(count: int | None) -> list[dict]:
+def _fetch_captioned(order: str, limit: int) -> list[dict]:
+    """库里已识别照片（含描述与标签），回放与页面共用。"""
     db.init_db()
     with db.session() as con:
         rows = con.execute(
-            """SELECT a.id, c.caption, c.tags
-               FROM assets a JOIN current_caption c ON c.asset_id = a.id
-               WHERE c.status = 'ok' AND a.kind = 'image'
-               ORDER BY RANDOM() LIMIT ?""",
-            (count or 500,),
+            f"""SELECT a.id, c.caption, c.tags
+                FROM assets a JOIN current_caption c ON c.asset_id = a.id
+                WHERE c.status = 'ok' AND a.kind = 'image'
+                ORDER BY {order} LIMIT ?""",
+            (limit,),
         ).fetchall()
     return [{"id": r["id"], "caption": r["caption"] or "",
              "tags": db.jload(r["tags"]) or []} for r in rows]
+
+
+def _sim_photos(count: int | None) -> list[dict]:
+    return _fetch_captioned("RANDOM()", count or 500)
 
 
 def start(mode: str = "sim", count: int | None = 40, concurrency: int = DEFAULT_CONCURRENCY,
@@ -199,8 +196,7 @@ def start(mode: str = "sim", count: int | None = 40, concurrency: int = DEFAULT_
             from . import caption as caption_mod
             todo = caption_mod.pending_assets("minicpm-v-4.7-1b", caption_mod.PROMPT_VERSION,
                                               limit=count)
-            session = LiveSession(len(todo), concurrency, "minicpm-v-4.7-1b",
-                                  sample=None, count=count)
+            session = LiveSession(len(todo), concurrency, "minicpm-v-4.7-1b", count)
         else:
             return {"ok": False, "error": f"未知模式 {mode}"}
         session.thread = threading.Thread(target=session.run, daemon=True)
@@ -240,26 +236,9 @@ def events(cursor: int = 0) -> dict:
 
 def build_page_data() -> dict:
     """live 页初始注入：照片清单 + 17 类桶定义。"""
-    db.init_db()
-    with db.session() as con:
-        rows = con.execute(
-            """SELECT a.id, c.caption, c.tags
-               FROM assets a JOIN current_caption c ON c.asset_id = a.id
-               WHERE c.status = 'ok' AND a.kind = 'image'
-               ORDER BY a.taken_at, a.path LIMIT 600"""
-        ).fetchall()
-    photos = [{"id": r["id"], "thumb": f"/thumb/{r['id']}",
-               "tags": db.jload(r["tags"]) or [], "caption": r["caption"] or ""}
-              for r in rows]
-    return {
-        "buckets": config.TAXONOMY_ORDER,
-        "photos": photos,
-        "meta": {
-            "model": "MiniCPM-V-4.7-1B",
-            "concurrency": DEFAULT_CONCURRENCY,
-            "measured_rate": 1.2,
-        },
-    }
+    photos = [{"id": p["id"], "thumb": f"/thumb/{p['id']}", **p}
+              for p in _fetch_captioned("a.taken_at, a.path", 600)]
+    return {"buckets": config.TAXONOMY_ORDER, "photos": photos}
 
 
 def render() -> str:
