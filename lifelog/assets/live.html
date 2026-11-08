@@ -27,12 +27,7 @@
     animation: scan 1.05s linear infinite;
     pointer-events: none;
   }
-  /* 堆叠入场：从中心散开，像刚倒出来的一摞 */
-  @keyframes scatter {
-    from { left: var(--cx); top: var(--cy); transform: rotate(0deg) scale(.6); opacity: 0; }
-    to   { left: var(--tx); top: var(--ty); transform: rotate(var(--tr)) scale(1); opacity: 1; }
-  }
-  @keyframes scan { from { top: -40%; } to { top: 110%; } }
+  /* 堆叠入场改由 WAAPI 驱动（见 seedPile），CSS keyframes 已移除 */  @keyframes scan { from { top: -40%; } to { top: 110%; } }
   @keyframes breathe {
     0%, 100% { box-shadow: 0 0 0 2px var(--color-gold), 0 0 18px rgb(201 151 44 / .35); }
     50% { box-shadow: 0 0 0 2px var(--color-gold), 0 0 34px rgb(201 151 44 / .7); }
@@ -47,6 +42,39 @@
   .tick-in { animation: tickIn .5s cubic-bezier(.2,.7,.2,1) both; }
   @keyframes tickIn { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
   .fly-layer { position: absolute; inset: 0; pointer-events: none; z-index: 40; }
+  /* 堆内照片：轻微浮动，像在等模型来看 */
+  #pile .live-photo {
+    --rot: 0deg;
+    transform: rotate(var(--rot));
+    animation: floaty 5.4s ease-in-out infinite alternate;
+  }
+  @keyframes floaty {
+    from { transform: rotate(var(--rot)) translate(0, 0); }
+    to { transform: rotate(var(--rot)) translate(2px, -6px); }
+  }
+  /* 单张识别耗时提示：完成瞬间在 slot 上浮出 */
+  .done-chip {
+    position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    color: var(--color-gold); background: rgb(20 20 22 / .85);
+    border: 1px solid rgb(201 151 44 / .45); border-radius: 999px;
+    padding: 1px 8px; pointer-events: none; white-space: nowrap;
+    animation: chipUp 1.5s ease-out both;
+  }
+  @keyframes chipUp {
+    0% { opacity: 0; transform: translateX(-50%) translateY(6px); }
+    18% { opacity: 1; transform: translateX(-50%) translateY(0); }
+    72% { opacity: 1; }
+    100% { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  }
+  /* 完成面板淡入 */
+  #donePanel { opacity: 0; transition: opacity .5s ease; }
+  #donePanel.show { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    #pile .live-photo { animation: none; }
+    .done-chip { animation: none; opacity: 1; }
+    #donePanel { transition: none; opacity: 1; }
+  }
 </style>
 </head>
 <body class="bg-canvas font-body text-ink antialiased">
@@ -94,7 +122,7 @@
 <main class="wrap py-8">
   <!-- 深色舞台 -->
   <section id="stage" class="relative overflow-hidden rounded-3xl bg-night p-5 text-white md:p-7">
-    <div class="grid gap-5 md:grid-cols-[minmax(200px,1fr)_minmax(240px,1.15fr)_minmax(380px,1.55fr)] md:gap-6">
+    <div class="grid gap-5 md:grid-cols-[minmax(200px,1fr)_minmax(240px,1.15fr)_minmax(380px,1.55fr)] md:gap-8">
 
       <!-- 待识别堆 -->
       <div>
@@ -218,16 +246,15 @@
       var tr = (Math.random() * 32 - 16).toFixed(1);
       img.style.left = tx + "px";
       img.style.top = ty + "px";
-      img.style.transform = "rotate(" + tr + "deg)";
       img.style.zIndex = String(10 + i);
+      img.style.setProperty("--rot", tr + "deg");
+      img.dataset.rot = tr;
       if (!REDUCED) {
-        img.style.setProperty("--cx", cx + "px");
-        img.style.setProperty("--cy", cy + "px");
-        img.style.setProperty("--tx", tx + "px");
-        img.style.setProperty("--ty", ty + "px");
-        img.style.setProperty("--tr", tr + "deg");
-        img.style.animation = "scatter .9s cubic-bezier(.2,.7,.2,1) both";
-        img.style.animationDelay = Math.min(i * 22, 900) + "ms";
+        img.animate([
+          { left: cx + "px", top: cy + "px", transform: "rotate(0deg) scale(.6)", opacity: 0 },
+          { left: tx + "px", top: ty + "px", transform: "rotate(" + tr + "deg) scale(1)", opacity: 1 }
+        ], { duration: 900, delay: Math.min(i * 22, 900), fill: "backwards",
+             easing: "cubic-bezier(.2,.7,.2,1)" });
       }
       pile.appendChild(img);
       nodeOf[p.id] = img;
@@ -255,19 +282,27 @@
     slotsBusy[ev.slot] = ev.asset_id;
     slotEl.querySelector(".font-mono") && slotEl.querySelector(".font-mono").remove();
     node.classList.add("seeing");
+    var rot = Number(node.dataset.rot || 0);
     if (!node.parentElement || node.parentElement !== stage) {
-      // 从堆移动到舞台层，保留视觉位置
+      // 从堆「抽出」：抬升 + 阴影加深，再飞向 slot
       var rootRect = stage.getBoundingClientRect();
       var cur = rectIn(node, rootRect);
       pile.removeChild(node);
       flyLayer.appendChild(node);
       setNode(node, cur, 0);
+      node.style.transform = "rotate(" + rot + "deg)";
     }
     var target = rectIn(slotEl, stage.getBoundingClientRect());
     target.x += 10; target.y += 10; target.w -= 20; target.h -= 20;
     node.animate(REDUCED ? [] : [
-      { left: node.style.left, top: node.style.top, width: node.style.width, height: node.style.height },
-      { left: target.x + "px", top: target.y + "px", width: target.w + "px", height: target.h + "px" }
+      { left: node.style.left, top: node.style.top,
+        width: node.style.width, height: node.style.height,
+        transform: "rotate(" + rot + "deg) scale(1.08)",
+        boxShadow: "0 14px 34px rgb(0 0 0 / .55)", zIndex: 60 },
+      { left: target.x + "px", top: target.y + "px",
+        width: target.w + "px", height: target.h + "px",
+        transform: "rotate(0deg) scale(1)",
+        boxShadow: "0 6px 20px rgb(0 0 0 / .45)" }
     ], { duration: REDUCED ? 0 : 520, fill: "forwards", easing: "cubic-bezier(.2,.7,.2,1)" });
     setNode(node, target, 0);
     var scan = el("div", "scanline rounded-lg");
@@ -312,8 +347,11 @@
         target.y = target.y + target.h * 0.38;
         target.w = 26; target.h = 26;
         node.animate(REDUCED ? [] : [
-          { left: node.style.left, top: node.style.top, width: node.style.width, height: node.style.height, opacity: 1 },
-          { left: target.x + "px", top: target.y + "px", width: target.w + "px", height: target.h + "px", opacity: .25 }
+          { left: node.style.left, top: node.style.top, width: node.style.width, height: node.style.height,
+            transform: "rotate(0deg) scale(1)", opacity: 1 },
+          { transform: "rotate(6deg) scale(.9)", opacity: 1, offset: 0.4 },
+          { left: target.x + "px", top: target.y + "px", width: target.w + "px", height: target.h + "px",
+            transform: "rotate(0deg) scale(.5)", opacity: .25 }
         ], { duration: REDUCED ? 0 : 560, fill: "forwards", easing: "cubic-bezier(.3,.6,.2,1)" });
       }
       setTimeout(function () { node.remove(); delete nodeOf[ev.asset_id]; }, REDUCED ? 0 : 600);
@@ -324,6 +362,12 @@
       var ph = el("div", "flex h-full min-h-[72px] items-center justify-center font-mono text-[11px] text-white/25");
       ph.textContent = "slot " + (ev.slot + 1);
       idleSlot.appendChild(ph);
+      // 速度可感知：完成瞬间显示这张的真实识别耗时
+      if (!REDUCED && ev.elapsed_ms) {
+        var chip = el("span", "done-chip", (ev.elapsed_ms / 1000).toFixed(1) + "s");
+        idleSlot.appendChild(chip);
+        setTimeout(function () { chip.remove(); }, 1600);
+      }
     }
     tick(ev);
   }
@@ -358,10 +402,10 @@
     clearInterval(state.poll); clearInterval(state.timer); state.poll = null; state.timer = null;
     $("startBtn").classList.remove("hidden");
     $("stopBtn").classList.add("hidden");
+    setCtl(false);
     var secs = Math.round((Date.now() - state.startedAt) / 1000);
     var mm = String(Math.floor(secs / 60)).padStart(2, "0");
     var ss = String(secs % 60).padStart(2, "0");
-    $("doneTotal").textContent = state.done + " 张";
     var rate = secs > 0 ? (state.done / secs).toFixed(2) : "—";
     $("doneDetail").textContent = "平均 " + rate + " 张/秒 · 用时 " + mm + ":" + ss;
     var top = Object.keys(bucketCount)
@@ -373,6 +417,25 @@
     var panel = $("donePanel");
     panel.classList.remove("hidden");
     panel.classList.add("flex");
+    requestAnimationFrame(function () { panel.classList.add("show"); });
+    countUp($("doneTotal"), state.done, " 张");
+  }
+  function countUp(node, target, suffix) {
+    if (REDUCED) { node.textContent = target + (suffix || ""); return; }
+    var t0 = null, dur = 900;
+    function tick(t) {
+      if (!t0) t0 = t;
+      var k = Math.min((t - t0) / dur, 1);
+      k = 1 - Math.pow(1 - k, 3);
+      node.textContent = Math.round(target * k) + (suffix || "");
+      if (k < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+  function setCtl(disabled) {
+    ["countSel", "concSel", "speedSel"].forEach(function (id) {
+      $(id).disabled = disabled;
+    });
   }
 
   /* ---------- 轮询 ---------- */
@@ -422,8 +485,10 @@
     state = { phase: "running", cursor: 0, done: 0, total: st.total, startedAt: Date.now(),
               conc: st.concurrency || conc, label: (st.extra && st.extra.label) || "",
               poll: null, timer: null };
+    setCtl(true);
     $("donePanel").classList.add("hidden");
     $("donePanel").classList.remove("flex");
+    $("donePanel").classList.remove("show");
     $("startBtn").classList.add("hidden");
     $("stopBtn").classList.remove("hidden");
     flyLayer.classList.remove("hidden");
@@ -450,6 +515,11 @@
   $("startBtn").addEventListener("click", start);
   $("againBtn").addEventListener("click", start);
   $("stopBtn").addEventListener("click", stop);
+  document.addEventListener("keydown", function (e) {
+    if (e.code !== "Space" || e.target.matches("select,input,textarea")) return;
+    e.preventDefault();
+    if (state.phase === "running") { stop(); } else { start(); }
+  });
 })();
 </script>
 </body>
