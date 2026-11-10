@@ -9,10 +9,15 @@
 ## 跑起来
 
 ```bash
-npm install
+npm ci
+python3 scripts/gen_thumbs.py                        # 生成 thumbs/{id}.jpg (360px) 与 thumbs/full/{id}.jpg (1600px)
 LIFELOG_HOME="$PWD/sample-data" npm run tauri dev   # 24 张示例库
 # 或指向真实库：LIFELOG_HOME=../data npm run tauri dev
 ```
+
+**顺序不能省**：缩略图产物不入库（见 `.gitignore`），全新克隆里 `thumbs/full/` 是空的。跳过 `gen_thumbs.py` 时详情页会回落到 `photos/` 原图——示例库还看不出来，真库里的 HEIC/RAW 会明显变慢，容易被误判成性能问题。
+
+`gen_thumbs.py` 默认处理 `desktop/sample-data`，也接受 `--home` 或 `LIFELOG_HOME` 指向别的库；已存在的图会跳过，可反复增量跑。
 
 Rust 首次编译约 3–5 分钟。构建产物：`npm run tauri build`。
 
