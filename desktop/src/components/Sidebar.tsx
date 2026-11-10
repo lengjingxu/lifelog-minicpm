@@ -1,0 +1,160 @@
+import {
+  Clock,
+  Database,
+  Images,
+  MapPin,
+  Search,
+  Tags,
+  Users,
+} from "lucide-react";
+import clsx from "clsx";
+import type { Facets, Health, Stats } from "../api";
+import { formatBytes, type View } from "../utils";
+
+type Props = {
+  stats: Stats | null;
+  facets: Facets | null;
+  healthInfo: Health | null;
+  view: View;
+  activeTags: string[];
+  activePerson: string | null;
+  activePlace: string | null;
+  placeTotal: number;
+  onNavigate: (view: View) => void;
+  onTag: (tag: string) => void;
+  onPerson: (person: string) => void;
+  onPlace: (place: string) => void;
+  onSearch: () => void;
+};
+
+const NAV = [
+  { id: "library" as const, label: "全部照片", icon: Images },
+  { id: "timeline" as const, label: "时间线", icon: Clock },
+  { id: "tags" as const, label: "标签", icon: Tags },
+  { id: "people" as const, label: "人物", icon: Users },
+  { id: "places" as const, label: "地点", icon: MapPin },
+];
+
+export function Sidebar({
+  stats,
+  facets,
+  healthInfo,
+  view,
+  activeTags,
+  activePerson,
+  activePlace,
+  placeTotal,
+  onNavigate,
+  onTag,
+  onPerson,
+  onPlace,
+  onSearch,
+}: Props) {
+  const tags = facets?.tags ?? [];
+  const people = (facets?.people ?? []).filter(([name]) => name !== "无" && name !== "未知").slice(0, 3);
+
+  return (
+    <aside className="sidebar">
+      <div className="drag-strip" />
+      <div className="brand">
+        <div className="brand-mark">拾</div>
+        <div>
+          <div className="brand-name">拾光</div>
+          <div className="brand-sub">Local Library</div>
+        </div>
+      </div>
+
+      <button type="button" className="sidebar-search" onClick={onSearch}>
+        <Search size={13} strokeWidth={1.8} />
+        <span>搜索照片</span>
+        <kbd>⌘K</kbd>
+      </button>
+
+      <div className="sidebar-scroll">
+        <div className="nav-group-label">资料库</div>
+        {NAV.map((item) => {
+          const Icon = item.icon;
+          const count =
+            item.id === "library" || item.id === "timeline"
+              ? stats?.assets
+              : item.id === "tags"
+                ? tags.length
+                : item.id === "people"
+                  ? facets?.people.length
+                  : placeTotal || undefined;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={clsx("nav-item", view === item.id && "active")}
+              onClick={() => onNavigate(item.id)}
+              aria-current={view === item.id ? "page" : undefined}
+            >
+              <Icon size={15} strokeWidth={1.7} />
+              <span>{item.label}</span>
+              {count ? <span className="count">{count}</span> : null}
+              <span className="dot" />
+            </button>
+          );
+        })}
+
+        <div className="nav-group-label">标签</div>
+        {tags.length === 0 ? (
+          <div className="sidebar-empty">还没有 AI 标签</div>
+        ) : (
+          tags.map(([tag, count]) => (
+            <button
+              key={tag}
+              type="button"
+              className={clsx("tag-pill", activeTags.includes(tag) && "active")}
+              onClick={() => onTag(tag)}
+            >
+              <span className="tag-dot" />
+              <span className="tag-name">{tag}</span>
+              <span className="count">{count}</span>
+            </button>
+          ))
+        )}
+
+        {people.length > 0 && (
+          <>
+            <div className="nav-group-label">人物</div>
+            {people.map(([person, count]) => (
+              <button
+                key={person}
+                type="button"
+                className={clsx("tag-pill", activePerson === person && "active")}
+                onClick={() => onPerson(person)}
+              >
+                <span className="tag-dot person" />
+                <span className="tag-name">{person}</span>
+                <span className="count">{count}</span>
+              </button>
+            ))}
+          </>
+        )}
+
+        {activePlace && (
+          <>
+            <div className="nav-group-label">地点</div>
+            <button type="button" className="tag-pill active" onClick={() => onPlace(activePlace)}>
+              <span className="tag-dot place" />
+              <span className="tag-name">{activePlace}</span>
+            </button>
+          </>
+        )}
+      </div>
+
+      <div className="sidebar-foot">
+        <div className="lib-line">
+          <Database size={12} strokeWidth={1.7} />
+          <span>{stats ? `${stats.assets} 张照片` : "正在读取…"}</span>
+          <span className="lib-size">{stats?.db_size ? formatBytes(stats.db_size) : "本地库"}</span>
+        </div>
+        <div className="lib-sub" title={stats?.db_path || healthInfo?.data_dir || ""}>
+          只读 SQLite · 本地优先
+        </div>
+      </div>
+    </aside>
+  );
+}

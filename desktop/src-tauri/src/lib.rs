@@ -95,6 +95,7 @@ struct Stats {
     first_day: Option<String>,
     last_day: Option<String>,
     db_path: String,
+    db_size: u64,
 }
 
 #[derive(Serialize, Default)]
@@ -134,6 +135,7 @@ fn library_stats(db: State<'_, Db>) -> Result<Stats, String> {
         first_day: first,
         last_day: last,
         db_path: db.path.to_string_lossy().to_string(),
+        db_size: std::fs::metadata(&db.path).map(|meta| meta.len()).unwrap_or(0),
     })
 }
 
@@ -157,7 +159,7 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
         );
         args.push(rusqlite::types::Value::Text(format!("%{q}%")));
     }
-    let mut next_index = |sql: &mut String, args: &mut Vec<rusqlite::types::Value>, value: Option<&str>, clause: &str| {
+    let next_index = |sql: &mut String, args: &mut Vec<rusqlite::types::Value>, value: Option<&str>, clause: &str| {
         if let Some(v) = value.filter(|v| !v.is_empty()) {
             args.push(rusqlite::types::Value::Text(v.to_string()));
             sql.push_str(&clause.replace("{n}", &args.len().to_string()));

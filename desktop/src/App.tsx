@@ -1,51 +1,703 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import clsx from "clsx";
+import { AlertCircle, LoaderCircle, Search, X } from "lucide-react";
+import {
+  getFacets,
+  health,
+  libraryStats,
+  queryAssets,
+  type Asset,
+  type Facets,
+  type Health,
+  type Stats,
+} from "./api";
+import { Sidebar } from "./components/Sidebar";
+import { Topbar } from "./components/Topbar";
+import { VirtualGrid } from "./components/VirtualGrid";
+import { Timeline } from "./components/Timeline";
+import { Categories } from "./components/Categories";
+import { Detail } from "./components/Detail";
+import { EmptyState } from "./components/EmptyState";
+import {
+  buildCategories,
+  gridColumnCount,
+  matchesFilters,
+  matchesSearch,
+  peopleList,
+  splitList,
+  unique,
+  yearRange,
+  type CategoryKind,
+  type Drilldown,
+  type View,
+} from "./utils";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+type Density = "comfort" | "compact";
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+const PAGE_SIZE = 200;
+const ALL_LIMIT = 100000;
+const APP_START = performance.now();
+
+function readRoute() {
+  const params = new URLSearchParams(window.location.search);
+  const requestedView = params.get("view");
+  const view: View =
+    requestedView === "timeline" || requestedView === "tags" || requestedView === "people" || requestedView === "places"
+      ? requestedView
+      : "library";
+  return {
+    view,
+    query: params.get("q")?.trim() ?? "",
+    assetId: params.get("asset"),
+    tags: (params.get("tag") ?? "").split(",").map((tag) => tag.trim()).filter(Boolean),
+    person: params.get("person"),
+    place: params.get("place"),
+    density: (params.get("density") === "compact" ? "compact" : "comfort") as Density,
+  };
+}
+
+const CATEGORY_LABEL: Record<CategoryKind, string> = {
+  tags: "标签",
+  people: "人物",
+  places: "地点",
+};
+
+export default function App() {
+  const route = useMemo(readRoute, []);
+  const [view, setView] = useState<View>(route.query ? "library" : route.view);
+  const [drilldown, setDrilldown] = useState<Drilldown>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [facets, setFacets] = useState<Facets | null>(null);
+  const [healthInfo, setHealthInfo] = useState<Health | null>(null);
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [allAssets, setAllAssets] = useState<Asset[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [allLoading, setAllLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [queryInput, setQueryInput] = useState(route.query);
+  const [query, setQuery] = useState(route.query);
+  const [tags, setTags] = useState<string[]>(route.tags);
+  const [scene, setScene] = useState<string | null>(null);
+  const [person, setPerson] = useState<string | null>(route.person);
+  const [place, setPlace] = useState<string | null>(route.place);
+  const [density, setDensity] = useState<Density>(route.density);
+  const [selection, setSelection] = useState<string[]>(route.assetId ? [route.assetId] : []);
+  const [anchorId, setAnchorId] = useState<string | null>(route.assetId);
+  const [detailId, setDetailId] = useState<string | null>(route.assetId);
+  const [toast, setToast] = useState<string | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+
+  const searchRef = useRef<HTMLInputElement>(null);
+  const searchTimer = useRef<number | null>(null);
+  const toastTimer = useRef<number | null>(null);
+  const pendingSearch = useRef<{ start: number; value: string } | null>(null);
+  const firstGridMarked = useRef(false);
+
+  const tagKey = tags.join("\u0001");
+  const active = Boolean(query || tags.length || scene || person || place);
+  const columns = gridColumnCount(viewportWidth, density);
+
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 2400);
+  }, []);
+
+  useEffect(() => () => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    if (searchTimer.current) window.clearTimeout(searchTimer.current);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([libraryStats(), getFacets()])
+      .then(([nextStats, nextFacets]) => {
+        if (!alive) return;
+        setStats(nextStats);
+        setFacets(nextFacets);
+      })
+      .catch((reason: unknown) => {
+        if (alive) setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    health()
+      .then((value) => alive && setHealthInfo(value))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (view !== "library") return;
+    let cancelled = false;
+    const filterActive = Boolean(query || tags.length || scene || person || place);
+    setLoading(true);
+    setError(null);
+    setSelection([]);
+    setAnchorId(null);
+    queryAssets({
+      query: query || undefined,
+      tag: tags[0],
+      scene: scene || undefined,
+      limit: filterActive ? 1000 : PAGE_SIZE,
+      offset: 0,
+    })
+      .then((list) => {
+        if (cancelled) return;
+        setAssets(list);
+        setHasMore(!filterActive && list.length === PAGE_SIZE);
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, query, tagKey, tags.length, scene, person, place]);
+
+  const needsAll = view === "timeline" || view === "tags" || view === "people" || view === "places";
+
+  useEffect(() => {
+    if (!needsAll || allAssets !== null) return;
+    let cancelled = false;
+    setAllLoading(true);
+    queryAssets({ limit: ALL_LIMIT })
+      .then((list) => {
+        if (!cancelled) setAllAssets(list);
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+      })
+      .finally(() => {
+        if (!cancelled) setAllLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [needsAll, allAssets]);
+
+  const filteredAssets = useMemo(
+    () =>
+      assets.filter(
+        (asset) => matchesFilters(asset, { tags, scene, person, place }) && matchesSearch(asset, query),
+      ),
+    [assets, tags, scene, person, place, query],
+  );
+
+  const categoryAssets = useMemo(() => {
+    if (!drilldown || !allAssets) return [];
+    return allAssets.filter((asset) => {
+      if (drilldown.kind === "tags") return asset.tags.includes(drilldown.name);
+      if (drilldown.kind === "people") return peopleList(asset.people).includes(drilldown.name);
+      return splitList(asset.place).includes(drilldown.name);
+    });
+  }, [allAssets, drilldown]);
+
+  const currentList = useMemo(() => {
+    if (view === "library") return filteredAssets;
+    if (view === "timeline") return allAssets ?? [];
+    if (drilldown) return categoryAssets;
+    return [];
+  }, [view, filteredAssets, allAssets, drilldown, categoryAssets]);
+
+  const detailAsset = useMemo(() => {
+    if (!detailId) return null;
+    return (
+      currentList.find((asset) => asset.id === detailId) ??
+      assets.find((asset) => asset.id === detailId) ??
+      allAssets?.find((asset) => asset.id === detailId) ??
+      null
+    );
+  }, [detailId, currentList, assets, allAssets]);
+
+  const detailIndex = detailAsset ? currentList.findIndex((asset) => asset.id === detailAsset.id) : -1;
+  const detailTotal = currentList.length || (detailAsset ? 1 : 0);
+
+  const placeTotal = useMemo(
+    () => (allAssets ? buildCategories(allAssets, "places").length : 0),
+    [allAssets],
+  );
+  const openDetail = useCallback((asset: Asset) => {
+    setDetailId(asset.id);
+    setSelection([asset.id]);
+    setAnchorId(asset.id);
+  }, []);
+
+  const handleSelect = useCallback(
+    (asset: Asset, event: React.MouseEvent) => {
+      const meta = event.metaKey || event.ctrlKey;
+      if (event.shiftKey && anchorId) {
+        const from = currentList.findIndex((item) => item.id === anchorId);
+        const to = currentList.findIndex((item) => item.id === asset.id);
+        if (from >= 0 && to >= 0) {
+          const [start, end] = from < to ? [from, to] : [to, from];
+          setSelection(currentList.slice(start, end + 1).map((item) => item.id));
+          return;
+        }
+      }
+      if (meta) {
+        setSelection((previous) =>
+          previous.includes(asset.id)
+            ? previous.filter((id) => id !== asset.id)
+            : [...previous, asset.id],
+        );
+        setAnchorId(asset.id);
+        return;
+      }
+      setSelection([asset.id]);
+      setAnchorId(asset.id);
+    },
+    [anchorId, currentList],
+  );
+
+  const navigateDetail = useCallback(
+    (delta: number) => {
+      if (!detailAsset || !currentList.length) return;
+      const index = currentList.findIndex((asset) => asset.id === detailAsset.id);
+      const next = currentList[index + delta];
+      if (!next) return;
+      setDetailId(next.id);
+      setSelection([next.id]);
+      setAnchorId(next.id);
+    },
+    [currentList, detailAsset],
+  );
+
+  const applyTag = useCallback((tag: string) => {
+    setView("library");
+    setDrilldown(null);
+    setTags((previous) => unique([...previous, tag]));
+    setDetailId(null);
+  }, []);
+
+  const handleSearchChange = useCallback((value: string) => {
+    setQueryInput(value);
+    if (value.trim()) {
+      setView("library");
+      setDrilldown(null);
+    }
+    if (searchTimer.current) window.clearTimeout(searchTimer.current);
+    searchTimer.current = window.setTimeout(() => {
+      pendingSearch.current = { start: performance.now(), value: value.trim() };
+      setQuery(value.trim());
+    }, 200);
+  }, []);
+
+  const clearSearch = useCallback(() => {
+    if (searchTimer.current) window.clearTimeout(searchTimer.current);
+    pendingSearch.current = null;
+    setQueryInput("");
+    setQuery("");
+    searchRef.current?.focus();
+  }, []);
+
+  const clearAll = useCallback(() => {
+    if (searchTimer.current) window.clearTimeout(searchTimer.current);
+    pendingSearch.current = null;
+    setQueryInput("");
+    setQuery("");
+    setTags([]);
+    setScene(null);
+    setPerson(null);
+    setPlace(null);
+    setDrilldown(null);
+  }, []);
+
+  const navigate = useCallback(
+    (next: View) => {
+      clearAll();
+      setView(next);
+    },
+    [clearAll],
+  );
+
+  const loadMore = useCallback(() => {
+    if (loadingMore || !hasMore || view !== "library" || active) return;
+    setLoadingMore(true);
+    queryAssets({ limit: PAGE_SIZE, offset: assets.length })
+      .then((list) => {
+        setAssets((previous) => [...previous, ...list]);
+        setHasMore(list.length === PAGE_SIZE);
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)))
+      .finally(() => setLoadingMore(false));
+  }, [loadingMore, hasMore, view, active, assets.length]);
+
+  useEffect(() => {
+    if (view !== "library" || loading || firstGridMarked.current) return;
+    if (assets.length === 0 && stats === null) return;
+    firstGridMarked.current = true;
+    requestAnimationFrame(() => {
+      const elapsed = performance.now() - APP_START;
+      document.documentElement.dataset.firstGridMs = elapsed.toFixed(1);
+      console.log(`[perf] first-grid ${elapsed.toFixed(1)}ms · ${filteredAssets.length} 张`);
+    });
+  }, [view, loading, assets.length, stats, filteredAssets.length]);
+
+  useEffect(() => {
+    const pending = pendingSearch.current;
+    if (!pending || loading || pending.value !== query) return;
+    const frame = requestAnimationFrame(() => {
+      const elapsed = performance.now() - pending.start;
+      document.documentElement.dataset.searchMs = elapsed.toFixed(1);
+      console.log(`[perf] search-render ${elapsed.toFixed(1)}ms · “${pending.value}” · ${filteredAssets.length} 条`);
+      pendingSearch.current = null;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [loading, query, filteredAssets.length, assets]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
+      const meta = event.metaKey || event.ctrlKey;
+
+      if (meta && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+        return;
+      }
+      if (meta && event.key === "1") {
+        event.preventDefault();
+        navigate("library");
+        return;
+      }
+      if (meta && event.key === "2") {
+        event.preventDefault();
+        navigate("timeline");
+        return;
+      }
+      if (meta && event.key === "3") {
+        event.preventDefault();
+        setView("library");
+        searchRef.current?.focus();
+        return;
+      }
+      if (meta && (event.key === "+" || event.key === "=")) {
+        event.preventDefault();
+        setDensity("comfort");
+        return;
+      }
+      if (meta && event.key === "-") {
+        event.preventDefault();
+        setDensity("compact");
+        return;
+      }
+      if (meta && event.key.toLowerCase() === "a" && !typing && view === "library") {
+        event.preventDefault();
+        setSelection(filteredAssets.map((asset) => asset.id));
+        return;
+      }
+
+      if (detailAsset) {
+        if (event.key === "Escape" || event.key === " ") {
+          event.preventDefault();
+          setDetailId(null);
+        } else if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          navigateDetail(-1);
+        } else if (event.key === "ArrowRight") {
+          event.preventDefault();
+          navigateDetail(1);
+        }
+        return;
+      }
+
+      if (typing) {
+        if (event.key === "Escape") {
+          if (queryInput) clearSearch();
+          target?.blur();
+        }
+        return;
+      }
+
+      if (event.key === "Escape") {
+        if (active) clearAll();
+        else setSelection([]);
+        return;
+      }
+
+      if (view !== "library" || filteredAssets.length === 0) return;
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Enter"].includes(event.key)) return;
+      event.preventDefault();
+
+      if (event.key === "Enter") {
+        const asset = filteredAssets.find((item) => item.id === anchorId) ?? filteredAssets[0];
+        openDetail(asset);
+        return;
+      }
+
+      const currentIndex = Math.max(0, filteredAssets.findIndex((asset) => asset.id === anchorId));
+      let nextIndex = currentIndex;
+      if (event.key === "ArrowLeft") nextIndex = Math.max(0, currentIndex - 1);
+      if (event.key === "ArrowRight") nextIndex = Math.min(filteredAssets.length - 1, currentIndex + 1);
+      if (event.key === "ArrowUp") nextIndex = Math.max(0, currentIndex - columns);
+      if (event.key === "ArrowDown") nextIndex = Math.min(filteredAssets.length - 1, currentIndex + columns);
+      const nextAsset = filteredAssets[nextIndex];
+      if (!nextAsset) return;
+      if (event.shiftKey) {
+        const from = Math.min(currentIndex, nextIndex);
+        const to = Math.max(currentIndex, nextIndex);
+        setSelection(filteredAssets.slice(from, to + 1).map((asset) => asset.id));
+      } else {
+        setSelection([nextAsset.id]);
+      }
+      setAnchorId(nextAsset.id);
+      requestAnimationFrame(() => {
+        document
+          .querySelector(`[data-asset-id="${nextAsset.id}"]`)
+          ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      });
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    detailAsset,
+    navigateDetail,
+    queryInput,
+    clearSearch,
+    active,
+    clearAll,
+    view,
+    filteredAssets,
+    anchorId,
+    columns,
+    openDetail,
+    navigate,
+  ]);
+
+  const range = yearRange(stats);
+  const categoryCount = drilldown ? categoryAssets.length : (allAssets?.length ?? stats?.assets ?? 0);
+  const title = (() => {
+    if (query) return `搜索 “${query}”`;
+    if (drilldown) return `${CATEGORY_LABEL[drilldown.kind]} · ${drilldown.name}`;
+    if (view === "timeline") return "时间线";
+    if (view === "tags") return "标签";
+    if (view === "people") return "人物";
+    if (view === "places") return "地点";
+    if (person) return `人物 · ${person}`;
+    if (place) return `地点 · ${place}`;
+    if (scene) return `场景 · ${scene}`;
+    if (tags.length === 1) return `标签 · ${tags[0]}`;
+    if (tags.length > 1) return `标签 · ${tags[0]} 等 ${tags.length} 个`;
+    return "全部照片";
+  })();
+
+  const count = view === "library" ? (active ? filteredAssets.length : (stats?.assets ?? assets.length)) : categoryCount;
+  const subtitle = [
+    `${count} 张`,
+    range || null,
+    active && view === "library" ? "结果" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const conditions: { key: string; label: string; remove: () => void }[] = [];
+  if (query) conditions.push({ key: "query", label: `搜索 “${query}”`, remove: clearSearch });
+  for (const tag of tags) {
+    conditions.push({
+      key: `tag-${tag}`,
+      label: `标签 · ${tag}`,
+      remove: () => setTags((previous) => previous.filter((item) => item !== tag)),
+    });
+  }
+  if (scene) conditions.push({ key: "scene", label: `场景 · ${scene}`, remove: () => setScene(null) });
+  if (person) conditions.push({ key: "person", label: `人物 · ${person}`, remove: () => setPerson(null) });
+  if (place) conditions.push({ key: "place", label: `地点 · ${place}`, remove: () => setPlace(null) });
+  if (drilldown) {
+    conditions.push({
+      key: "drilldown",
+      label: `${CATEGORY_LABEL[drilldown.kind]} · ${drilldown.name}`,
+      remove: () => setDrilldown(null),
+    });
   }
 
-  return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+  const content = (() => {
+    if (error) {
+      return (
+        <div className="error-state">
+          <AlertCircle size={22} strokeWidth={1.7} />
+          <h2>读取本地库失败</h2>
+          <p>{error}</p>
+        </div>
+      );
+    }
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
+    if (view === "tags" || view === "people" || view === "places") {
+      if (!drilldown) {
+        return (
+          <Categories
+            kind={view}
+            assets={allAssets ?? []}
+            loading={allLoading || allAssets === null}
+            onPick={(name) => setDrilldown({ kind: view, name })}
+          />
+        );
+      }
+      if (allLoading || allAssets === null) return <LoadingState label="正在读取分类照片…" />;
+      if (categoryAssets.length === 0) {
+        return <EmptyState mode="search" onChoose={showToast} onReset={() => setDrilldown(null)} />;
+      }
+      return (
+        <VirtualGrid
+          key={`${view}-${drilldown.kind}-${drilldown.name}`}
+          assets={categoryAssets}
+          columns={columns}
+          selection={new Set(selection)}
+          multi={selection.length > 1}
+          onSelect={handleSelect}
+          onOpen={openDetail}
         />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+      );
+    }
+
+    if (view === "timeline") {
+      if (allLoading || allAssets === null) return <LoadingState label="正在整理时间线…" />;
+      if (allAssets.length === 0) return <EmptyState onChoose={showToast} />;
+      return (
+        <Timeline
+          assets={allAssets}
+          compact={density === "compact"}
+          selection={new Set(selection)}
+          multi={selection.length > 1}
+          onSelect={handleSelect}
+          onOpen={openDetail}
+        />
+      );
+    }
+
+    if (loading && assets.length === 0) return <LoadingState label="正在读取本地相册…" />;
+    if (!loading && (stats?.assets === 0 || (assets.length === 0 && !active))) return <EmptyState onChoose={showToast} />;
+    if (!loading && active && filteredAssets.length === 0) {
+      return <EmptyState mode="search" onChoose={showToast} onReset={clearAll} />;
+    }
+    return (
+      <div className="grid-wrap">
+        {loading && <div className="content-loading-bar" />}
+        <VirtualGrid
+          key={`library-${query}-${tagKey}-${scene}-${person}-${place}`}
+          assets={filteredAssets}
+          columns={columns}
+          selection={new Set(selection)}
+          multi={selection.length > 1}
+          onSelect={handleSelect}
+          onOpen={openDetail}
+          onLoadMore={loadMore}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+        />
+      </div>
+    );
+  })();
+
+  return (
+    <div className="app">
+      <Sidebar
+        stats={stats}
+        facets={facets}
+        healthInfo={healthInfo}
+        view={view}
+        activeTags={tags}
+        activePerson={person}
+        activePlace={place}
+        placeTotal={placeTotal}
+        onNavigate={navigate}
+        onTag={applyTag}
+        onPerson={(name) => {
+          setView("library");
+          setDrilldown(null);
+          setPerson(name);
+          setDetailId(null);
+        }}
+        onPlace={(name) => {
+          setView("library");
+          setDrilldown(null);
+          setPlace(name);
+          setDetailId(null);
+        }}
+        onSearch={() => searchRef.current?.focus()}
+      />
+
+      <main className="main">
+        <Topbar
+          title={title}
+          subtitle={subtitle}
+          searchValue={queryInput}
+          onSearchChange={handleSearchChange}
+          onSearchClear={clearSearch}
+          searchRef={searchRef}
+          density={density}
+          onDensity={setDensity}
+          view={view}
+          onView={navigate}
+        />
+
+        {conditions.length > 0 && (
+          <div className="condition-bar">
+            <div className="result-count">
+              <Search size={12} strokeWidth={1.8} />
+              <span>{count}{active && assets.length >= 1000 && view === "library" ? "+" : ""} 张结果</span>
+            </div>
+            <div className="chip-row">
+              {conditions.map((condition) => (
+                <span className="chip" key={condition.key}>
+                  {condition.label}
+                  <button type="button" onClick={condition.remove} aria-label={`移除 ${condition.label}`}>
+                    <X size={11} strokeWidth={2} />
+                  </button>
+                </span>
+              ))}
+              {conditions.length > 1 && (
+                <button type="button" className="clear-all" onClick={clearAll}>清除全部</button>
+              )}
+            </div>
+            <div className="sort-note">按拍摄时间 · 最新优先</div>
+          </div>
+        )}
+
+        <section className={clsx("content", view === "timeline" && "timeline-content")}>{content}</section>
+      </main>
+
+      {detailAsset && (
+        <Detail
+          asset={detailAsset}
+          index={Math.max(0, detailIndex)}
+          total={detailTotal}
+          onClose={() => setDetailId(null)}
+          onPrev={() => navigateDetail(-1)}
+          onNext={() => navigateDetail(1)}
+          onTag={applyTag}
+          onAction={(label) => showToast(`${label}将在 P2 接入`)}
+        />
+      )}
+
+      {toast && (
+        <div className="toast" role="status">
+          {toast}
+        </div>
+      )}
+    </div>
   );
 }
 
-export default App;
+function LoadingState({ label }: { label: string }) {
+  return (
+    <div className="loading-state">
+      <LoaderCircle size={20} strokeWidth={1.6} className="spin" />
+      <span>{label}</span>
+    </div>
+  );
+}
