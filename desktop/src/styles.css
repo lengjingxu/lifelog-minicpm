@@ -1,14 +1,15 @@
 :root {
-  --bg: #0a0a0c;
+  --bg: #08080A;
   --bg-elevated: rgba(255, 255, 255, 0.045);
   --bg-hover: rgba(255, 255, 255, 0.075);
   --line: rgba(255, 255, 255, 0.08);
   --line-strong: rgba(255, 255, 255, 0.14);
-  --text: #f2f1ee;
-  --text-dim: rgba(242, 241, 238, 0.62);
-  --text-faint: rgba(242, 241, 238, 0.38);
-  --accent: #e6c079;
-  --accent-soft: rgba(230, 192, 121, 0.14);
+  --text: #F5F3F2;
+  --text-dim: rgba(245, 243, 242, 0.62);
+  --text-faint: rgba(245, 243, 242, 0.38);
+  --accent: #FF4A4A;
+  --accent-soft: rgba(255, 74, 74, 0.14);
+  --accent-line: rgba(255, 74, 74, 0.30);
   --radius: 14px;
   color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
@@ -22,7 +23,7 @@
 html, body, #root { height: 100%; margin: 0; }
 
 body {
-  background: radial-gradient(1200px 700px at 12% -10%, rgba(230, 192, 121, 0.09), transparent 60%),
+  background: radial-gradient(1200px 700px at 12% -10%, rgba(255, 74, 74, 0.13), transparent 60%),
     radial-gradient(900px 600px at 100% 0%, rgba(120, 150, 255, 0.07), transparent 55%), var(--bg);
   color: var(--text);
   overflow: hidden;
@@ -49,9 +50,9 @@ input { font: inherit; color: inherit; }
 .brand { display: flex; align-items: center; gap: 9px; padding: 2px 8px 12px; }
 .brand-mark {
   width: 26px; height: 26px; border-radius: 8px;
-  background: linear-gradient(145deg, #e6c079, #b98c3f);
-  display: grid; place-items: center; color: #241a08; font-weight: 700; font-size: 13px;
-  box-shadow: 0 1px 0 rgba(255,255,255,0.35) inset, 0 6px 16px rgba(230,192,121,0.18);
+  background: linear-gradient(145deg, #FF6B6B, #B02A2A);
+  display: grid; place-items: center; color: #2A0C0C; font-weight: 700; font-size: 13px;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.35) inset, 0 6px 16px rgba(255,74,74,0.20);
 }
 .brand-name { font-size: 14px; font-weight: 600; letter-spacing: 0.02em; }
 .brand-sub { font-size: 10.5px; color: var(--text-faint); letter-spacing: 0.08em; text-transform: uppercase; }
@@ -113,7 +114,7 @@ input { font: inherit; color: inherit; }
   min-width: 260px; max-width: 420px; flex: 0 1 360px;
   transition: box-shadow 160ms ease, background 160ms ease;
 }
-.search:focus-within { box-shadow: 0 0 0 1px var(--line-strong) inset, 0 0 0 3px rgba(230,192,121,0.12); background: rgba(255,255,255,0.06); }
+.search:focus-within { box-shadow: 0 0 0 1px var(--line-strong) inset, 0 0 0 3px rgba(255,74,74,0.12); background: rgba(255,255,255,0.06); }
 .search input { flex: 1; background: none; border: 0; outline: none; font-size: 13px; padding: 0; }
 .search input::placeholder { color: var(--text-faint); }
 .kbd {
@@ -125,7 +126,7 @@ input { font: inherit; color: inherit; }
 .chip {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11.5px; padding: 3px 9px; border-radius: 999px;
-  background: var(--accent-soft); color: var(--accent); border: 1px solid rgba(230,192,121,0.25);
+  background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line);
 }
 .chip button { color: inherit; opacity: 0.7; display: inline-flex; }
 .chip button:hover { opacity: 1; }
@@ -188,7 +189,7 @@ input { font: inherit; color: inherit; }
 .meta-grid dt { color: var(--text-faint); }
 .meta-grid dd { margin: 0; color: var(--text-dim); }
 .tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
-.tag-cloud button { font-size: 11.5px; padding: 3px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); border: 1px solid rgba(230,192,121,0.22); }
+.tag-cloud button { font-size: 11.5px; padding: 3px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line); }
 .ocr { font-size: 11.5px; line-height: 1.6; color: var(--text-faint); white-space: pre-wrap; background: rgba(255,255,255,0.03); border-radius: 10px; padding: 10px; max-height: 180px; overflow: auto; }
 .section-label { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); margin: 0 0 8px; }
 
