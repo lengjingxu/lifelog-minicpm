@@ -96,7 +96,7 @@
 
 ![portrait](marketing/shots/04-portrait.png)
 
-**动态版本**见 `marketing/promo-slideshow.mp4`（19s 循环，3 MB）。**苹果风宣传片**见 `marketing/lifelog-apple-promo.mp4`（52 秒，1080p）。
+**动态版本**见 `marketing/promo-slideshow.mp4`（19s 循环，3 MB）。**苹果风宣传片**见 `marketing/lifelog-apple-promo.mp4`（52 秒，1080p）。**英文版介绍视频**见 `marketing/lifelog-promo-en.mp4`（105 秒，17.7 MB）。
 
 ---
 
