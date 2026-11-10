@@ -256,6 +256,9 @@ health() -> { data_dir, db_exists }
   - 示例库（推荐先跑通）：`cd desktop && LIFELOG_HOME="$PWD/sample-data" npm run tauri dev` —— 24 张真实照片 + 真实 AI 描述，含缩略图
   - 真实库：把 `LIFELOG_HOME` 指到 `../data`（239 张，25 天）
 - 启动：`cd desktop && npm install && npm run tauri dev`（Rust 首次编译 3–5 分钟）
-- 已完成：SQLite 只读连接、`library_stats` / `query_assets` / `facets`、虚拟网格骨架、详情面板、搜索防抖
+- **当前真实状态（勿高估）**：
+  - Rust 侧：SQLite 只读连接 + `library_stats` / `query_assets` / `facets` / `health` 四个 command（可用）
+  - 前端：`src/api.ts`（类型与调用封装）、`src/styles.css`（设计令牌）已有；**`src/App.tsx` 仍是 Tauri 模板，网格/详情/搜索都还没实现**
+  - 注意：`assetProtocol` 已开启，因此 `Cargo.toml` 的 `tauri` 依赖必须带 `protocol-asset` feature，否则 `cargo check` 直接失败
 - 待办：P1 起的功能（时间线/分类/整理视图/导入进度/设置）、缩略图预生成、接 `recognize.py` 的 `/api/live/*` 事件流
 - 验收：见 §1 指标与 §7 阶段表；每阶段结束跑 `npm run build` 且无 TS 报错
