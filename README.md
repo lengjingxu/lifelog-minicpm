@@ -4,6 +4,8 @@
 
 **本地相册经 MiniCPM 逐张理解后，生成的一份可以回头看的人生回顾**
 
+**中文** | [English](README.en.md)
+
 [![Tailwind CSS v4](https://img.shields.io/badge/TailwindCSS-v4-38bdf8)](https://tailwindcss.com) [![MiniCPM](https://img.shields.io/badge/Model-MiniCPM--V--4.7--1B-c9a45a)](https://github.com/OpenBMB/MiniCPM-V) [![llama.cpp](https://img.shields.io/badge/Inference-llama.cpp--0.8-8f8a84)](https://github.com/ggml-org/llama.cpp) [![MCP](https://img.shields.io/badge/Interface-MCP-6d8cff)](https://modelcontextprotocol.io)
 
 [快速开始](#快速开始) · [三种叙事](#三种叙事视角) · [自我画像](#自我画像与依据) · [报名材料](docs/报名材料.md)
