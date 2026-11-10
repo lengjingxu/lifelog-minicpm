@@ -34,3 +34,16 @@ sample-data/     24 张示例照片 + 真实 AI 描述 + 缩略图
 
 识别、导入、打标都在仓库根目录的 Python 侧：`lifelog/sync_xiaomi.py`、`lifelog/caption.py`、`lifelog/recognize.py`。
 桌面端不重写这些，只负责：读库展示、消费 `/api/live/*` 事件流做「整理视图」、把长任务状态显示出来。
+
+## 浏览器预览（无 Tauri）
+
+```bash
+python3 scripts/export_fixture.py   # public/sample-fixture.json
+npm run dev
+```
+
+`src/api.ts` 会按 `window.__TAURI_INTERNALS__` 自动切换：Tauri 里走 `invoke` + asset protocol，浏览器里读同一份 fixture，图片由 Vite 的 `/__fixture/*` 中间件映射到 `sample-data/`。界面组件只有一套。
+
+## 技术待办
+
+- **FTS5**：当前搜索用 SQL `LIKE`，示例库 24 条、真实库 239 条下足够快。单库超过 5000 条时再上 FTS5 虚表（覆盖 `caption / tags / scene / place / ocr_text`，`content=sync` 跟随主表），现在不建。
