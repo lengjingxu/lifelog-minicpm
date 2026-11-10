@@ -3,3 +3,7 @@ dist/
 src-tauri/target/
 src-tauri/gen/
 .DS_Store
+
+# 缩略图产物：脚本入库，产物不入库
+sample-data/thumbs/full/
+sample-data/thumbs/generate.log
