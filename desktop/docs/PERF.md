@@ -10,8 +10,9 @@
 # 先在另一个终端起 dev server（浏览器 fixture 模式，不依赖 Tauri）
 npm run dev -- --port 5176
 
-# 再跑采样
-python3 scripts/measure_fps.py --url http://localhost:5176 --scenario both --seconds 3
+# 再跑采样（--theme 会给 URL 加 ?theme=dark|light，只影响本次会话）
+python3 scripts/measure_fps.py --url http://localhost:5176 --scenario both --seconds 4 --theme dark
+python3 scripts/measure_fps.py --url http://localhost:5176 --scenario both --seconds 4 --theme light
 ```
 
 测量方式：页面内 `requestAnimationFrame` 逐帧记录时间戳，统计 3 秒内的帧数、平均 fps、最长帧、以及 >20ms 的帧数。脚本会自动进入对应界面再采样：
@@ -24,10 +25,33 @@ python3 scripts/measure_fps.py --url http://localhost:5176 --scenario both --sec
 
 ## 基线（2026-11-11，Apple M6 / 16GB，headless Chrome 157）
 
+### 主题化玻璃之前（d13fda5 之前）
+
 | 场景 | fps | 采样时长 | 最长帧 | >20ms 帧 |
 | --- | ---: | ---: | ---: | ---: |
 | 整理视图（整理中） | 60.05 | 3.014s | 16.8ms | 0 |
 | 详情打开（含检查器） | 60.52 | 3.007s | 16.8ms | 0 |
+
+### 两套主题（c9c3d43，玻璃只压在照片相关的 5 个面上）
+
+每格是同一配置下 3 次 4 秒采样；fps 三次数值、最长帧取三次里最大。
+
+| 主题 | 场景 | fps（3 次） | 最长帧 | >20ms 帧 |
+| --- | --- | --- | ---: | ---: |
+| 暗色（烟熏底 30,30,34 / 0.68 / 0.86） | 整理视图 | 60.00 / 60.10 / 60.18 | 16.8ms | 0 / 0 / 0 |
+| 暗色 | 详情打开 | 59.93 / 60.23 / 60.28 | 33.4ms | 2 / 0 / 0 |
+| 亮色（白雾 255,255,255 / 0.72） | 整理视图 | 60.04 / 60.21 / 60.02 | 16.8ms | 0 / 0 / 0 |
+| 亮色 | 详情打开 | 59.63 / 60.26 / 60.37 | 49.9ms | 2 / 0 / 0 |
+
+结论：两种主题的整理视图都稳定 60fps、`>20ms` 全为 0；详情打开稳定在 60fps 附近，只有首次那一轮偶发 1–2 帧超标（见下）。暗/亮之间没有可见成本差，说明当前 glass 参数下 `backdrop-filter` 不是瓶颈，暂时不需要收敛 blur 半径。
+
+## 已知异常：详情首开偶发掉帧
+
+现象：详情场景大约每 4 次采样有 1 次出现 1–2 帧 `>20ms`（观测到 33.4ms 与 49.9ms 各一次），发生在双击打开、1600px 原图首次解码的那一瞬间；同一轮之后的所有帧仍是 16.8ms。
+
+判断：这是图片首帧解码的一次性开销，不是玻璃材质的持续成本——后续 3 次复跑（同配置、同主题）全部为 0 帧超标。
+
+处理约定：报告里保留这条异常，不抹掉；如果以后 `>20ms` 帧不再只在首开出现、而是持续出现，才按回退处理并走「只给详情检查器开 backdrop-filter」的归因 diff。
 
 补充：P1 阶段用同一套方法测过网格连续滚动，60.32fps / 3.017s / 最长帧 16.8ms / >20ms 帧数 0。
 
