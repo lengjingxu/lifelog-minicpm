@@ -5,6 +5,7 @@
 - 栈：Tauri 2 + React 19 + TypeScript + Vite 8
 - 数据：只读 `lifelog.sqlite`；写入一律交给仓库根目录的 Python CLI
 - 设计稿与规格：[docs/ui-review.html](docs/ui-review.html) · [docs/PRODUCT-SPEC.md](docs/PRODUCT-SPEC.md)
+- 性能与基准：[docs/PERF.md](docs/PERF.md)（帧率） · [docs/THUMBS.md](docs/THUMBS.md)（缩略图管线）
 
 ## 跑起来
 
