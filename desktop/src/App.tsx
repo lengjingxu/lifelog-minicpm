@@ -11,6 +11,8 @@ import {
   type Facets,
   type Health,
   type Stats,
+  pickFolder,
+  importFolder,
 } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
@@ -149,6 +151,27 @@ export default function App() {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2400);
   }, []);
+
+  const handleEmptyChoice = async (label: string) => {
+    if (!label.includes("扫描")) {
+      showToast(`${label}将在后续版本接入`);
+      return;
+    }
+    try {
+      const folder = await pickFolder();
+      if (!folder) return;
+      showToast("正在导入，缩略图会随后自动生成…");
+      const result = await importFolder(folder);
+      if (result.ok) {
+        showToast("导入完成，正在刷新…");
+        window.location.reload();
+      } else {
+        showToast("导入失败，请查看设置页或日志");
+      }
+    } catch (err) {
+      showToast(`导入失败：${String(err)}`);
+    }
+  };
 
   useEffect(() => () => {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
@@ -697,7 +720,7 @@ export default function App() {
       }
       if (allLoading || allAssets === null) return <LoadingState label="正在读取分类照片…" />;
       if (categoryAssets.length === 0) {
-        return <EmptyState mode="search" onChoose={showToast} onReset={() => setDrilldown(null)} />;
+        return <EmptyState mode="search" onChoose={handleEmptyChoice} onReset={() => setDrilldown(null)} />;
       }
       return (
         <VirtualGrid
@@ -714,7 +737,7 @@ export default function App() {
 
     if (view === "timeline") {
       if (allLoading || allAssets === null) return <LoadingState label="正在整理时间线…" />;
-      if (allAssets.length === 0) return <EmptyState onChoose={showToast} />;
+      if (allAssets.length === 0) return <EmptyState onChoose={handleEmptyChoice} />;
       return (
         <Timeline
           assets={allAssets}
@@ -728,9 +751,9 @@ export default function App() {
     }
 
     if (loading && assets.length === 0) return <LoadingState label="正在读取本地相册…" />;
-    if (!loading && (stats?.assets === 0 || (assets.length === 0 && !active))) return <EmptyState onChoose={showToast} />;
+    if (!loading && (stats?.assets === 0 || (assets.length === 0 && !active))) return <EmptyState onChoose={handleEmptyChoice} />;
     if (!loading && active && filteredAssets.length === 0) {
-      return <EmptyState mode="search" onChoose={showToast} onReset={clearAll} />;
+      return <EmptyState mode="search" onChoose={handleEmptyChoice} onReset={clearAll} />;
     }
     return (
       <div className="grid-wrap">

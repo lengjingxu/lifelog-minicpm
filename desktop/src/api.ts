@@ -490,3 +490,12 @@ export type ThumbStatus = { assets: number; thumbs: number; full: number; missin
 
 export const thumbStatus = () => invoke<ThumbStatus>("thumb_status");
 export const generateThumbs = (force = false) => invoke<{ ok: boolean }>("generate_thumbs", { force });
+
+import { open } from "@tauri-apps/plugin-dialog";
+
+export const pickFolder = async (): Promise<string | null> => {
+  const picked = await open({ directory: true, multiple: false, title: "选择要导入的文件夹" });
+  return typeof picked === "string" ? picked : null;
+};
+
+export const importFolder = (path: string) => invoke<{ ok: boolean; stats?: unknown }>("import_folder", { path });

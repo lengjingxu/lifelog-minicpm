@@ -442,6 +442,67 @@ async fn generate_thumbs(
     .map_err(|err| err.to_string())?
 }
 
+/// 导入本地文件夹：先跑 Python 的 ingest，再补齐缩略图，两步都流式回报。
+#[tauri::command]
+async fn import_folder(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    path: String,
+) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = desktop_root();
+        let _ = app.emit("import-progress", serde_json::json!({"stage": "ingest", "message": "正在扫描文件夹"}));
+        let output = std::process::Command::new("python3")
+            .arg("-c")
+            .arg("from lifelog.cli import main; main()")
+            .arg("ingest")
+            .arg(&path)
+            .current_dir(&root)
+            .env("PYTHONPATH", &root)
+            .env("LIFELOG_HOME", &home)
+            .output()
+            .map_err(|err| format!("启动导入失败：{err}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if !output.status.success() {
+            let _ = app.emit("import-progress", serde_json::json!({"stage": "failed", "message": stderr.trim()}));
+            return Ok(serde_json::json!({"ok": false, "stderr": stderr.trim(), "stdout": stdout.trim()}));
+        }
+        let stats: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap_or(serde_json::Value::Null);
+        let _ = app.emit("import-progress", serde_json::json!({"stage": "ingest-done", "stats": stats}));
+
+        // 导入完成后自动补齐缩略图
+        let script = root.join("scripts/gen_thumbs.py");
+        if script.exists() {
+            let _ = app.emit("import-progress", serde_json::json!({"stage": "thumbs", "message": "正在生成缩略图"}));
+            if let Ok(mut child) = std::process::Command::new("python3")
+                .arg(&script)
+                .arg("--json")
+                .arg("--jobs")
+                .arg("6")
+                .current_dir(&root)
+                .env("LIFELOG_HOME", &home)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                if let Some(stdout) = child.stdout.take() {
+                    for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+                            let _ = app.emit("thumbs-progress", value);
+                        }
+                    }
+                }
+                let _ = child.wait();
+            }
+        }
+        Ok(serde_json::json!({"ok": true, "stats": stats}))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
 #[tauri::command]
 async fn rebuild_thumbs(db: State<'_, Db>) -> Result<serde_json::Value, String> {
     let home = db.data_dir.clone();
@@ -487,6 +548,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(Db {
             path: db_path,
             data_dir,
@@ -502,6 +564,7 @@ pub fn run() {
             rebuild_thumbs,
             thumb_status,
             generate_thumbs,
+            import_folder,
             live::live_health,
             live::live_start,
             live::live_state,
