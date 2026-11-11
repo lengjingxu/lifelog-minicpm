@@ -48,3 +48,13 @@ npm run dev
 ## 技术待办
 
 - **FTS5**：当前搜索用 SQL `LIKE`，示例库 24 条、真实库 239 条下足够快。单库超过 5000 条时再上 FTS5 虚表（覆盖 `caption / tags / scene / place / ocr_text`，`content=sync` 跟随主表），现在不建。
+
+## 装不上或构建报缺类型时
+
+本机反复出现过 `npm ci` 之后 `node_modules` 不完整的情况（`react`、`lucide-react` 的 `.d.ts`、`vite/package.json` 时有时无），表现为 `tsc` 报 `TS2307` / `TS7016`，重跑 `npm run build` 有时又能过。
+
+```bash
+rm -rf node_modules && bun install   # 用 bun 的安装器，一次就正常
+```
+
+这不是代码问题，换一台机器不一定复现；但遇到「明明装了却找不到模块」，先按上面重装，不要先去改 `tsconfig`。
