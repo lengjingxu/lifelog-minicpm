@@ -426,7 +426,7 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
   return (
     <div className="organize-shell">
       {phase === "idle" && (
-        <div className="organize-top">
+        <div className="organize-top organize-phase" key="idle">
           <button type="button" className="start-organize" onClick={() => void start()} disabled={starting}>
             {starting ? <LoaderCircle size={15} className="spin" /> : <Sparkles size={15} />}
             开始整理
@@ -438,7 +438,7 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
       )}
 
       {phase === "running" && (
-        <div className="organize-hud">
+        <div className="organize-hud organize-phase" key="running">
           <div className="hud-live">
             <span className={clsx("live-dot", paused && "paused")} />
             {paused ? "已暂停" : "整理中"}
@@ -495,7 +495,7 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
       )}
 
       {phase === "done" ? (
-        <div className="organize-complete">
+        <div className="organize-complete organize-phase" key="done">
           <header className="complete-head">
             <div>
               <div className="eyebrow">SORTED IN MEMORY</div>

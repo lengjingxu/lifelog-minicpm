@@ -1104,3 +1104,6 @@ button:focus-visible, input:focus-visible {
 }
 .closing .stage-image { animation: detail-out 200ms var(--ease-in) both; }
 .closing.dialog, .dialog.closing { animation: dialog-out 180ms var(--ease-in) both; }
+
+/* 整理视图三态：每次换态时内容从下方 6px 淡入，避免整块硬切 */
+.organize-phase { animation: view-in var(--duration-md) var(--ease-out) both; }
