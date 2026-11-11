@@ -77,6 +77,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", help="按行输出 JSON 进度，便于 UI/脚本消费")
     parser.add_argument("--full-quality", type=int, default=86, help="1600px 大图的 JPEG 质量，默认 86（降到 78 可省约三分之一磁盘）")
     parser.add_argument("--no-ffmpeg", action="store_true", help="不调用 ffmpeg（视频将没有封面）")
+    parser.add_argument("--retry-broken", action="store_true", help="重试 thumbs/broken.json 里记录过的失败项")
     parser.add_argument("--image-encoder", choices=["sips", "ffmpeg"], default="sips",
                         help="图片编码器：sips 两遍（默认）或 ffmpeg 一次解码出两档（HEIC 更快，待实测确认）")
     return parser.parse_args()
@@ -150,8 +151,11 @@ def ffmpeg_two_sizes(source: Path, thumb: Path, full: Path, full_quality: int) -
     return ok
 
 def process(row, home: Path, thumbs_dir: Path, full_dir: Path, force: bool,
-            full_quality: int, use_ffmpeg: bool, image_encoder: str) -> tuple[str, str]:
+            full_quality: int, use_ffmpeg: bool, image_encoder: str,
+            broken: set, retry_broken: bool) -> tuple[str, str]:
     asset_id = row["id"]
+    if asset_id in broken and not retry_broken:
+        return "broken", asset_id
     kind = (row["kind"] or "image").lower()
     source = Path(row["path"])
     if not source.is_absolute():
@@ -222,9 +226,15 @@ def main() -> int:
     ).fetchall()
     conn.close()
 
+    broken_path = thumbs_dir / "broken.json"
+    try:
+        broken_ids = set(json.loads(broken_path.read_text(encoding="utf-8")).keys())
+    except (OSError, ValueError):
+        broken_ids = set()
+
     total = len(rows)
     started_at = time.time()
-    counts = {"ok": 0, "poster": 0, "skipped": 0, "failed": 0}
+    counts = {"ok": 0, "poster": 0, "skipped": 0, "broken": 0, "failed": 0}
     failures: list[str] = []
     jobs = max(1, min(args.jobs, 16))
 
@@ -246,7 +256,7 @@ def main() -> int:
             log_file.write(line + chr(10))
 
         record(f"[{datetime.now().isoformat(timespec='seconds')}] 开始 {total} 张 · jobs={jobs} · home={home}")
-        futures = [pool.submit(process, row, home, thumbs_dir, full_dir, args.force, args.full_quality, not args.no_ffmpeg, args.image_encoder) for row in rows]
+        futures = [pool.submit(process, row, home, thumbs_dir, full_dir, args.force, args.full_quality, not args.no_ffmpeg, args.image_encoder, broken_ids, args.retry_broken) for row in rows]
         for done, future in enumerate(as_completed(futures), 1):
             status, detail = future.result()
             counts[status] += 1
@@ -259,6 +269,16 @@ def main() -> int:
             else:
                 emit(done)
         record(f"[{datetime.now().isoformat(timespec='seconds')}] 完成 ok={counts['ok']} skip={counts['skipped']} fail={counts['failed']}")
+
+    if failures:
+        try:
+            existing = json.loads(broken_path.read_text(encoding="utf-8")) if broken_path.exists() else {}
+        except ValueError:
+            existing = {}
+        for line in failures:
+            asset_id = line.split(":", 1)[0]
+            existing[asset_id] = line
+        broken_path.write_text(json.dumps(existing, ensure_ascii=False, indent=1), encoding="utf-8")
 
     summary = {
         "total": total, **counts, "jobs": jobs,
