@@ -17,7 +17,7 @@ fn resolve_data_dir() -> PathBuf {
     }
     let fallback = dirs::home_dir()
         .unwrap_or_default()
-        .join("Desktop/codepro/minicpm/lifelog-minicpm/data");
+        .join("dev/lifelog-minicpm/data");
     fallback
 }
 
