@@ -290,5 +290,14 @@ class XiaomiImportTests(unittest.TestCase):
         # 失败信息里不能带 token
         self.assertNotIn(self.TOKEN, json.dumps(stats, ensure_ascii=False))
 
+    def test_sanitize_masks_token_and_query(self):
+        from lifelog import sync_xiaomi
+
+        raw = "GET https://i.mi.com/gallery/user/timeline?serviceToken=SECRET-123&userId=42 failed"
+        clean = sync_xiaomi._sanitize(raw, "SECRET-123")
+        self.assertNotIn("SECRET-123", clean)
+        self.assertNotIn("serviceToken=SECRET-123", clean)
+        self.assertNotIn("i.mi.com", clean)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

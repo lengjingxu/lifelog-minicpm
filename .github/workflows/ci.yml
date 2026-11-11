@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python 单测
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 跑测试
+        run: PYTHONPATH=. python3 -m unittest discover -s tests -p 'test_*.py'
+
+  desktop:
+    name: 桌面端构建与单测
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 装前端依赖
+        run: npm ci
+        working-directory: desktop
+      - name: 类型检查与打包
+        run: npm run build
+        working-directory: desktop
+      - name: Rust 单测
+        run: cargo test
+        working-directory: desktop/src-tauri

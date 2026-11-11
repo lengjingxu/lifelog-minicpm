@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.error
@@ -292,6 +293,30 @@ def incremental(start: str | None = None, end: str | None = None,
 
 # ---------------------------------------------------------------- 桌面端导入
 
+def _sanitize(text: str, secret: str | None = None) -> str:
+    """把可能带凭据的文本洗干净：去掉 token 值、查询串和 Cookie。"""
+    out = str(text)
+    if secret:
+        out = out.replace(secret, "***")
+    out = re.sub(r"""(serviceToken|token|userId)=[^&\s"']+""", r"\1=***", out)
+    out = re.sub(r"""https?://[^\s"']*\?[^\s"']*""", "<url>", out)
+    out = re.sub(r"Cookie:[^\n]*", "Cookie: ***", out)
+    return out[:500]
+
+
+def _log_failure(name: str, reason: str, cred: dict | None = None) -> None:
+    """失败原因写本地日志（脱敏），事件里只放计数。"""
+    try:
+        log_dir = config.DATA_DIR / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        line = "%s %s :: %s" % (stamp, name, _sanitize(reason, (cred or {}).get("token")))
+        with (log_dir / "xiaomi-import.log").open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except Exception:
+        pass
+
+
 def _target_path(item: dict, dest_dir: Path) -> Path:
     """条目的本地落盘路径（与 download 保持一致）。"""
     name = item.get("fileName") or f"{item.get('id')}.bin"
@@ -319,13 +344,24 @@ def plan(cred: dict, start_date: str, end_date: str, dest_dir: Path,
     if limit:
         items = items[-limit:]
 
+    # 只读地看一眼 state 里的 sha1 索引：文件被改名/搬走后不至于重复下载。
+    try:
+        known = set((load_state().get("index") or {}).keys())
+    except Exception:
+        known = set()
+
     new_items: list[dict] = []
     existing = 0
     total_bytes = 0
     for item in items:
         target = _target_path(item, dest_dir)
         size = int(item.get("size") or 0)
+        sha1 = str(item.get("sha1") or "")
         if target.exists() and (not size or target.stat().st_size == size):
+            existing += 1
+            continue
+        if sha1 and sha1 in known:
+            # 记账里已有（文件被挪走或改名），不重复下载。
             existing += 1
             continue
         new_items.append({"id": item.get("id"), "name": target.name, "size": size,
@@ -407,8 +443,6 @@ def sync_import(cred: dict, start_date: str, end_date: str, dest_dir: Path,
 
     with ThreadPoolExecutor(max_workers=max(1, min(jobs, 2))) as pool:
         futures = {pool.submit(one, item): item for item in todo}
-        for future in futures:
-            pass
         for future in list(futures):
             item = futures[future]
             if should_cancel and should_cancel():
@@ -432,6 +466,7 @@ def sync_import(cred: dict, start_date: str, end_date: str, dest_dir: Path,
                     state["index"] = index
                 else:
                     stats["failed"] += 1
+                    _log_failure(str(item.get("fileName") or item.get("id") or ""), err, cred)
                 save_state(state)
                 if progress:
                     progress({"stage": "xiaomi-download", "done": done, "total": total,
