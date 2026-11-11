@@ -13,6 +13,8 @@ import {
   type Stats,
   pickFolder,
   importFolder,
+  bulkTag,
+  albumAdd,
 } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
@@ -20,6 +22,7 @@ import { VirtualGrid } from "./components/VirtualGrid";
 import { Timeline } from "./components/Timeline";
 import { Categories } from "./components/Categories";
 import { Detail } from "./components/Detail";
+import { SelectionBar } from "./components/SelectionBar";
 import { EmptyState } from "./components/EmptyState";
 import { OrganizeView } from "./components/OrganizeView";
 import { RecognitionDialog } from "./components/RecognitionDialog";
@@ -104,6 +107,7 @@ export default function App() {
   const [detailId, setDetailId] = useState<string | null>(route.assetId);
   const [toast, setToast] = useState<string | null>(null);
   const [dialogOrigin, setDialogOrigin] = useState<string>("50% 100%");
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [detailClosing, setDetailClosing] = useState(false);
   const [dialogClosing, setDialogClosing] = useState(false);
   const [detailOrigin, setDetailOrigin] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -151,6 +155,26 @@ export default function App() {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2400);
   }, []);
+
+  const runBulk = async (kind: "tag" | "album", value: string) => {
+    if (!selection.length || bulkBusy) return;
+    setBulkBusy(true);
+    try {
+      if (kind === "tag") {
+        await bulkTag(selection, value);
+        showToast(`已给 ${selection.length} 张加标签「${value}」`);
+      } else {
+        await albumAdd(value, selection);
+        showToast(`已把 ${selection.length} 张加入相册「${value}」`);
+      }
+      setSelection([]);
+      window.setTimeout(() => window.location.reload(), 500);
+    } catch (err) {
+      showToast(`批量操作失败：${String(err)}`);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const handleEmptyChoice = async (label: string) => {
     if (!label.includes("扫描")) {
@@ -886,6 +910,16 @@ export default function App() {
         onClose={closeRecognition}
         closing={dialogClosing}
       />
+
+      {selection.length > 0 && (
+        <SelectionBar
+          count={selection.length}
+          busy={bulkBusy}
+          onTag={(tag) => void runBulk("tag", tag)}
+          onAlbum={(name) => void runBulk("album", name)}
+          onClear={() => setSelection([])}
+        />
+      )}
 
       {toast && (
         <div className="toast glass-surface" role="status">

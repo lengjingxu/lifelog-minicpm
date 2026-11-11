@@ -31,6 +31,7 @@ export type Stats = {
 
 export type Facets = {
   tags: [string, number][];
+  albums: [string, number][];
   scenes: [string, number][];
   people: [string, number][];
   months: [string, number][];
@@ -42,6 +43,7 @@ export type Health = {
 };
 
 export type Filter = {
+  album?: string;
   query?: string;
   tag?: string;
   scene?: string;
@@ -499,3 +501,13 @@ export const pickFolder = async (): Promise<string | null> => {
 };
 
 export const importFolder = (path: string) => invoke<{ ok: boolean; stats?: unknown }>("import_folder", { path });
+
+export type Album = { id: string; name: string; count: number };
+
+export const bulkTag = (ids: string[], tag: string, remove = false) =>
+  invoke<{ ok: boolean; added?: number; removed?: number }>("bulk_tag", { ids, tag, remove });
+
+export const albumList = () => invoke<{ ok: boolean; albums: Album[] }>("album_list");
+export const albumCreate = (name: string) => invoke<{ ok: boolean; album: Album }>("album_create", { name });
+export const albumAdd = (name: string, ids: string[], remove = false) =>
+  invoke<{ ok: boolean; added?: number; removed?: number }>("album_add", { name, ids, remove });

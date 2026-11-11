@@ -126,6 +126,7 @@ struct AssetRow {
 struct Filter {
     query: Option<String>,
     tag: Option<String>,
+    album: Option<String>,
     scene: Option<String>,
     kind: Option<String>,
     day_from: Option<String>,
@@ -149,6 +150,7 @@ struct Stats {
 #[derive(Serialize, Default)]
 struct Facets {
     tags: Vec<(String, i64)>,
+    albums: Vec<(String, i64)>,
     scenes: Vec<(String, i64)>,
     people: Vec<(String, i64)>,
     months: Vec<(String, i64)>,
@@ -213,7 +215,14 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
             sql.push_str(&clause.replace("{n}", &args.len().to_string()));
         }
     };
-    next_index(&mut sql, &mut args, filter.tag.as_deref(), " AND c.tags LIKE '%' || ?{n} || '%'");
+    if let Some(tag) = filter.tag.as_deref().filter(|value| !value.is_empty()) {
+        args.push(rusqlite::types::Value::Text(tag.to_string()));
+        let index = args.len();
+        sql.push_str(&format!(
+            " AND ((c.tags LIKE '%' || ?{index} || '%') OR EXISTS (SELECT 1 FROM asset_tags ut WHERE ut.asset_id = a.id AND ut.tag = ?{index}))"
+        ));
+    }
+    next_index(&mut sql, &mut args, filter.album.as_deref(), " AND EXISTS (SELECT 1 FROM album_assets aa JOIN albums al ON al.id = aa.album_id WHERE aa.asset_id = a.id AND al.name = ?{n})");
     next_index(&mut sql, &mut args, filter.scene.as_deref(), " AND c.scene = ?{n}");
     next_index(&mut sql, &mut args, filter.kind.as_deref(), " AND a.kind = ?{n}");
     next_index(&mut sql, &mut args, filter.day_from.as_deref(), " AND a.day >= ?{n}");
@@ -309,6 +318,14 @@ fn facets(db: State<'_, Db>) -> Result<Facets, String> {
         .flatten()
         .collect();
     facets.months = months;
+
+    facets.albums = conn
+        .prepare("SELECT al.name, count(aa.asset_id) FROM albums al LEFT JOIN album_assets aa ON aa.album_id = al.id GROUP BY al.id ORDER BY al.created_at DESC")
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+                .map(|rows| rows.flatten().collect())
+        })
+        .unwrap_or_default();
     Ok(facets)
 }
 
@@ -443,6 +460,87 @@ async fn generate_thumbs(
 }
 
 /// 导入本地文件夹：先跑 Python 的 ingest，再补齐缩略图，两步都流式回报。
+fn run_python_cli(home: &Path, args: &[String]) -> Result<serde_json::Value, String> {
+    let root = desktop_root();
+    let output = std::process::Command::new("python3")
+        .arg("-c")
+        .arg("from lifelog.cli import main; main()")
+        .args(args)
+        .current_dir(&root)
+        .env("PYTHONPATH", &root)
+        .env("LIFELOG_HOME", home)
+        .output()
+        .map_err(|err| format!("启动 Python 侧失败：{err}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(stdout.trim())
+        .map_err(|err| format!("解析 Python 输出失败：{err}｜{stdout}"))
+}
+
+#[tauri::command]
+async fn bulk_tag(
+    db: State<'_, Db>,
+    ids: Vec<String>,
+    tag: String,
+    remove: bool,
+) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let args = vec![
+            if remove { "tag-remove" } else { "tag-add" }.to_string(),
+            tag,
+            "--ids".to_string(),
+            ids.join(","),
+        ];
+        run_python_cli(&home, &args)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn album_create(db: State<'_, Db>, name: String) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        run_python_cli(&home, &["album-create".to_string(), name])
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn album_add(
+    db: State<'_, Db>,
+    name: String,
+    ids: Vec<String>,
+    remove: bool,
+) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let args = vec![
+            if remove { "album-remove" } else { "album-add" }.to_string(),
+            name,
+            "--ids".to_string(),
+            ids.join(","),
+        ];
+        run_python_cli(&home, &args)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn album_list(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        run_python_cli(&home, &["album-list".to_string()])
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
 #[tauri::command]
 async fn import_folder(
     app: tauri::AppHandle,
@@ -565,6 +663,10 @@ pub fn run() {
             thumb_status,
             generate_thumbs,
             import_folder,
+            bulk_tag,
+            album_create,
+            album_add,
+            album_list,
             live::live_health,
             live::live_start,
             live::live_state,

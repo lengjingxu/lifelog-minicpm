@@ -182,6 +182,47 @@ def cmd_serve_web(args) -> int:
     return 0
 
 
+
+def _ids(raw: str) -> list[str]:
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def cmd_tag_add(args) -> int:
+    from . import ops
+    print(json.dumps(ops.add_tag(_ids(args.ids), args.tag), ensure_ascii=False))
+    return 0
+
+
+def cmd_tag_remove(args) -> int:
+    from . import ops
+    print(json.dumps(ops.remove_tag(_ids(args.ids), args.tag), ensure_ascii=False))
+    return 0
+
+
+def cmd_album_create(args) -> int:
+    from . import ops
+    print(json.dumps(ops.create_album(args.name), ensure_ascii=False))
+    return 0
+
+
+def cmd_album_add(args) -> int:
+    from . import ops
+    print(json.dumps(ops.add_to_album(args.name, _ids(args.ids)), ensure_ascii=False))
+    return 0
+
+
+def cmd_album_remove(args) -> int:
+    from . import ops
+    print(json.dumps(ops.remove_from_album(args.name, _ids(args.ids)), ensure_ascii=False))
+    return 0
+
+
+def cmd_album_list(args) -> int:
+    from . import ops
+    print(json.dumps(ops.list_albums(), ensure_ascii=False))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lifelog", description="本地相册 → MiniCPM → 生活档案")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -276,6 +317,33 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("serve-web", help="启动本地网页查看")
     p.add_argument("--port", type=int, default=8766)
     p.set_defaults(func=cmd_serve_web)
+
+    p = sub.add_parser("tag-add", help="给照片加用户标签（不动 AI 描述）")
+    p.add_argument("tag")
+    p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
+    p.set_defaults(func=cmd_tag_add)
+
+    p = sub.add_parser("tag-remove", help="移除用户标签")
+    p.add_argument("tag")
+    p.add_argument("--ids", required=True)
+    p.set_defaults(func=cmd_tag_remove)
+
+    p = sub.add_parser("album-create", help="新建相册")
+    p.add_argument("name")
+    p.set_defaults(func=cmd_album_create)
+
+    p = sub.add_parser("album-add", help="把照片加入相册")
+    p.add_argument("name")
+    p.add_argument("--ids", required=True)
+    p.set_defaults(func=cmd_album_add)
+
+    p = sub.add_parser("album-remove", help="从相册移除照片")
+    p.add_argument("name")
+    p.add_argument("--ids", required=True)
+    p.set_defaults(func=cmd_album_remove)
+
+    p = sub.add_parser("album-list", help="列出相册")
+    p.set_defaults(func=cmd_album_list)
 
     return parser
 
