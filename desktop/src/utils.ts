@@ -1,7 +1,7 @@
 import type { Asset, Stats } from "./api";
 
 export type View = "library" | "timeline" | "tags" | "people" | "places" | "organize" | "settings";
-export type CategoryKind = "tags" | "people" | "places";
+export type CategoryKind = "tags" | "people" | "places" | "scenes";
 export type Drilldown = { kind: CategoryKind; name: string } | null;
 
 export type AssetFilters = {
@@ -114,7 +114,9 @@ export function buildCategories(assets: Asset[], kind: CategoryKind): CategoryGr
         ? asset.tags
         : kind === "people"
           ? peopleList(asset.people)
-          : splitList(asset.place);
+          : kind === "scenes"
+            ? (asset.scene ? [asset.scene] : [])
+            : splitList(asset.place);
     for (const name of new Set(names)) {
       const current = groups.get(name);
       if (current) current.count += 1;
