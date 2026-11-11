@@ -145,6 +145,13 @@ def click_by_text(cdp: Cdp, text: str, selector: str = "button,a,div,li") -> str
     return cdp.eval(expr)
 
 
+def with_theme(url: str, theme: str | None) -> str:
+    if not theme:
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}theme={theme}"
+
+
 def run_scenario(cdp: Cdp, scenario: str, seconds: float) -> dict:
     if scenario == "organize":
         enter = cdp.eval(
@@ -183,6 +190,8 @@ def main() -> int:
     parser.add_argument("--url", default="http://localhost:5174")
     parser.add_argument("--scenario", choices=["organize", "detail", "both"], default="both")
     parser.add_argument("--seconds", type=float, default=3.0)
+    parser.add_argument("--theme", choices=["dark", "light"],
+                        help="append ?theme=<value> so the app renders that theme for this run")
     args = parser.parse_args()
 
     if not shutil.which(CHROME) and not os.path.exists(CHROME):
@@ -213,16 +222,17 @@ def main() -> int:
             print("could not reach Chrome devtools", file=sys.stderr)
             return 2
 
+        url = with_theme(args.url, args.theme)
         cdp = Cdp(ws)
-        cdp.call("Page.navigate", {"url": args.url})
+        cdp.call("Page.navigate", {"url": url})
         time.sleep(3)
 
         scenarios = ["organize", "detail"] if args.scenario == "both" else [args.scenario]
         results = []
         for scenario in scenarios:
-            cdp.call("Page.navigate", {"url": args.url})
+            cdp.call("Page.navigate", {"url": url})
             time.sleep(2.5)
-            results.append(run_scenario(cdp, scenario, args.seconds))
+            results.append({"theme": args.theme or "default", **run_scenario(cdp, scenario, args.seconds)})
         print(json.dumps(results, ensure_ascii=False, indent=1))
         return 0
     finally:
