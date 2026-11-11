@@ -4,6 +4,7 @@ import { AlertCircle, LoaderCircle, Search, X } from "lucide-react";
 import {
   getFacets,
   health,
+  isFixture,
   libraryStats,
   queryAssets,
   type Asset,
@@ -18,6 +19,10 @@ import { Timeline } from "./components/Timeline";
 import { Categories } from "./components/Categories";
 import { Detail } from "./components/Detail";
 import { EmptyState } from "./components/EmptyState";
+import { OrganizeView } from "./components/OrganizeView";
+import { RecognitionDialog } from "./components/RecognitionDialog";
+import { SettingsView } from "./components/SettingsView";
+import { useLiveController } from "./live";
 import {
   buildCategories,
   gridColumnCount,
@@ -42,7 +47,12 @@ function readRoute() {
   const params = new URLSearchParams(window.location.search);
   const requestedView = params.get("view");
   const view: View =
-    requestedView === "timeline" || requestedView === "tags" || requestedView === "people" || requestedView === "places"
+    requestedView === "timeline" ||
+    requestedView === "tags" ||
+    requestedView === "people" ||
+    requestedView === "places" ||
+    requestedView === "organize" ||
+    requestedView === "settings"
       ? requestedView
       : "library";
   return {
@@ -53,6 +63,10 @@ function readRoute() {
     person: params.get("person"),
     place: params.get("place"),
     density: (params.get("density") === "compact" ? "compact" : "comfort") as Density,
+    modal: params.get("modal"),
+    demo: params.get("demo"),
+    demoSpeed: Number(params.get("speed") ?? 0),
+    demoCount: Number(params.get("count") ?? 0),
   };
 }
 
@@ -88,6 +102,9 @@ export default function App() {
   const [detailId, setDetailId] = useState<string | null>(route.assetId);
   const [toast, setToast] = useState<string | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const [recognitionOpen, setRecognitionOpen] = useState(route.modal === "recognize");
+  const live = useLiveController();
+  const demoStarted = useRef(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const searchTimer = useRef<number | null>(null);
@@ -166,7 +183,33 @@ export default function App() {
     };
   }, [view, query, tagKey, tags.length, scene, person, place]);
 
-  const needsAll = view === "timeline" || view === "tags" || view === "people" || view === "places";
+  const needsAll =
+    view === "timeline" || view === "tags" || view === "people" || view === "places" || view === "organize";
+
+  useEffect(() => {
+    if (view === "organize" || recognitionOpen) void live.activate();
+  }, [view, recognitionOpen, live.activate]);
+
+  useEffect(() => {
+    if (!isFixture || demoStarted.current) return;
+    if (route.demo !== "running" && route.demo !== "done" && route.demo !== "background") return;
+    demoStarted.current = true;
+    const count = route.demoCount > 0
+      ? route.demoCount
+      : route.demo === "done"
+        ? 16
+        : route.demo === "background"
+          ? 24
+          : 18;
+    const speed = route.demoSpeed > 0
+      ? route.demoSpeed
+      : route.demo === "done"
+        ? 12
+        : route.demo === "background"
+          ? 2.5
+          : 3.5;
+    void live.start({ mode: "sim", count, concurrency: 4, speed });
+  }, [route.demo, route.demoCount, route.demoSpeed, live.start]);
 
   useEffect(() => {
     if (!needsAll || allAssets !== null) return;
@@ -314,6 +357,16 @@ export default function App() {
     setDrilldown(null);
   }, []);
 
+  const viewAlbumTag = useCallback(
+    (tag: string) => {
+      clearAll();
+      setTags([tag]);
+      setView("library");
+      showToast(`已按标签「${tag}」查看相册 · 未写入数据库`);
+    },
+    [clearAll, showToast],
+  );
+
   const navigate = useCallback(
     (next: View) => {
       clearAll();
@@ -363,6 +416,14 @@ export default function App() {
       const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
       const meta = event.metaKey || event.ctrlKey;
 
+      if (recognitionOpen) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setRecognitionOpen(false);
+        }
+        return;
+      }
+
       if (meta && event.key.toLowerCase() === "k") {
         event.preventDefault();
         searchRef.current?.focus();
@@ -395,6 +456,11 @@ export default function App() {
         setDensity("compact");
         return;
       }
+      if (meta && event.key === ",") {
+        event.preventDefault();
+        navigate("settings");
+        return;
+      }
       if (meta && event.key.toLowerCase() === "a" && !typing && view === "library") {
         event.preventDefault();
         setSelection(filteredAssets.map((asset) => asset.id));
@@ -412,6 +478,11 @@ export default function App() {
           event.preventDefault();
           navigateDetail(1);
         }
+        return;
+      }
+
+      if (view === "organize" || view === "settings") {
+        if (event.key === "Escape") setRecognitionOpen(false);
         return;
       }
 
@@ -477,11 +548,14 @@ export default function App() {
     columns,
     openDetail,
     navigate,
+    recognitionOpen,
   ]);
 
   const range = yearRange(stats);
   const categoryCount = drilldown ? categoryAssets.length : (allAssets?.length ?? stats?.assets ?? 0);
   const title = (() => {
+    if (view === "organize") return "整理视图";
+    if (view === "settings") return "设置";
     if (query) return `搜索 “${query}”`;
     if (drilldown) return `${CATEGORY_LABEL[drilldown.kind]} · ${drilldown.name}`;
     if (view === "timeline") return "时间线";
@@ -498,11 +572,16 @@ export default function App() {
 
   const count = view === "library" ? (active ? filteredAssets.length : (stats?.assets ?? assets.length)) : categoryCount;
   const subtitle = [
-    `${count} 张`,
+    view === "organize"
+      ? "AI 归位过程 · 只在内存预演"
+      : view === "settings"
+        ? "本地库 · 模型 · 缓存"
+        : `${count} 张`,
     range || null,
     active && view === "library" ? "结果" : null,
   ]
     .filter(Boolean)
+    .filter((value, index, list) => list.indexOf(value) === index)
     .join(" · ");
 
   const conditions: { key: string; label: string; remove: () => void }[] = [];
@@ -526,7 +605,7 @@ export default function App() {
   }
 
   const content = (() => {
-    if (error) {
+    if (error && view !== "organize" && view !== "settings") {
       return (
         <div className="error-state">
           <AlertCircle size={22} strokeWidth={1.7} />
@@ -534,6 +613,27 @@ export default function App() {
           <p>{error}</p>
         </div>
       );
+    }
+
+    if (view === "organize") {
+      return (
+        <OrganizeView
+          live={live}
+          assets={allAssets ?? []}
+          demo={{
+            autostart: route.demo === "running" || route.demo === "done",
+            speed: route.demoSpeed,
+            count: route.demoCount,
+          }}
+          onViewAlbum={viewAlbumTag}
+          onOpenRecognition={() => setRecognitionOpen(true)}
+          onToast={showToast}
+        />
+      );
+    }
+
+    if (view === "settings") {
+      return <SettingsView onToast={showToast} />;
     }
 
     if (view === "tags" || view === "people" || view === "places") {
@@ -629,6 +729,15 @@ export default function App() {
           setDetailId(null);
         }}
         onSearch={() => searchRef.current?.focus()}
+        liveStatus={{
+          status: live.view.status,
+          done: Math.min(live.view.total, live.view.done),
+          total: Math.max(0, live.view.total),
+          rate: live.view.rate,
+          paused: live.view.paused,
+        }}
+        onRecognition={() => setRecognitionOpen(true)}
+        onSettings={() => navigate("settings")}
       />
 
       <main className="main">
@@ -643,9 +752,10 @@ export default function App() {
           onDensity={setDensity}
           view={view}
           onView={navigate}
+          minimal={view === "organize" || view === "settings"}
         />
 
-        {conditions.length > 0 && (
+        {conditions.length > 0 && view !== "organize" && view !== "settings" && (
           <div className="condition-bar">
             <div className="result-count">
               <Search size={12} strokeWidth={1.8} />
@@ -675,7 +785,7 @@ export default function App() {
         <Detail
           asset={detailAsset}
           index={Math.max(0, detailIndex)}
-          total={detailTotal}
+          total={view === "library" ? Math.max(detailTotal, stats?.assets ?? 0) : detailTotal}
           onClose={() => setDetailId(null)}
           onPrev={() => navigateDetail(-1)}
           onNext={() => navigateDetail(1)}
@@ -683,6 +793,13 @@ export default function App() {
           onAction={(label) => showToast(`${label}将在 P2 接入`)}
         />
       )}
+
+      <RecognitionDialog
+        open={recognitionOpen}
+        live={live}
+        assets={new Map((allAssets ?? assets).map((asset) => [asset.id, asset]))}
+        onClose={() => setRecognitionOpen(false)}
+      />
 
       {toast && (
         <div className="toast" role="status">

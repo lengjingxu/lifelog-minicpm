@@ -16,6 +16,7 @@ type Props = {
   onDensity: (density: Density) => void;
   view: View;
   onView: (view: View) => void;
+  minimal?: boolean;
 };
 
 export function Topbar({
@@ -29,6 +30,7 @@ export function Topbar({
   onDensity,
   view,
   onView,
+  minimal = false,
 }: Props) {
   return (
     <header className="toolbar">
@@ -39,6 +41,8 @@ export function Topbar({
 
       <div className="toolbar-spacer" />
 
+      {!minimal && (
+        <>
       <div className="search">
         <Search size={14} strokeWidth={1.8} />
         <input
@@ -99,6 +103,8 @@ export function Topbar({
           8
         </button>
       </div>
+        </>
+      )}
     </header>
   );
 }

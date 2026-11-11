@@ -4,11 +4,13 @@ import {
   Images,
   MapPin,
   Search,
+  Settings,
+  Sparkles,
   Tags,
   Users,
 } from "lucide-react";
 import clsx from "clsx";
-import type { Facets, Health, Stats } from "../api";
+import type { Facets, Health, LiveStatus, Stats } from "../api";
 import { formatBytes, type View } from "../utils";
 
 type Props = {
@@ -25,6 +27,9 @@ type Props = {
   onPerson: (person: string) => void;
   onPlace: (place: string) => void;
   onSearch: () => void;
+  liveStatus: { status: LiveStatus; done: number; total: number; rate: number | null; paused: boolean } | null;
+  onRecognition: () => void;
+  onSettings: () => void;
 };
 
 const NAV = [
@@ -33,6 +38,7 @@ const NAV = [
   { id: "tags" as const, label: "标签", icon: Tags },
   { id: "people" as const, label: "人物", icon: Users },
   { id: "places" as const, label: "地点", icon: MapPin },
+  { id: "organize" as const, label: "整理视图", icon: Sparkles },
 ];
 
 export function Sidebar({
@@ -49,6 +55,9 @@ export function Sidebar({
   onPerson,
   onPlace,
   onSearch,
+  liveStatus,
+  onRecognition,
+  onSettings,
 }: Props) {
   const tags = facets?.tags ?? [];
   const people = (facets?.people ?? []).filter(([name]) => name !== "无" && name !== "未知").slice(0, 3);
@@ -81,7 +90,9 @@ export function Sidebar({
                 ? tags.length
                 : item.id === "people"
                   ? facets?.people.length
-                  : placeTotal || undefined;
+                  : item.id === "places"
+                    ? placeTotal || undefined
+                    : undefined;
           return (
             <button
               key={item.id}
@@ -146,6 +157,26 @@ export function Sidebar({
       </div>
 
       <div className="sidebar-foot">
+        {liveStatus && liveStatus.status !== "idle" && (
+          <button type="button" className="sidebar-live" onClick={onRecognition}>
+            <span className={clsx("live-dot", liveStatus.paused && "paused")} />
+            <span className="sidebar-live-copy">
+              <strong>{liveStatus.paused ? "识别已暂停" : liveStatus.status === "running" ? "识别中 · 后台运行" : "识别已完成"}</strong>
+              <em>
+                {liveStatus.done}/{liveStatus.total}
+                {liveStatus.rate ? ` · ${liveStatus.rate.toFixed(2)} 张/秒` : ""}
+              </em>
+            </span>
+          </button>
+        )}
+        <button type="button" className="sidebar-action" onClick={onRecognition}>
+          <Sparkles size={13} strokeWidth={1.7} />
+          <span>{liveStatus?.status === "running" ? "打开识别进度" : "识别进度"}</span>
+        </button>
+        <button type="button" className={clsx("sidebar-action", view === "settings" && "active")} onClick={onSettings}>
+          <Settings size={13} strokeWidth={1.7} />
+          <span>设置</span>
+        </button>
         <div className="lib-line">
           <Database size={12} strokeWidth={1.7} />
           <span>{stats ? `${stats.assets} 张照片` : "正在读取…"}</span>

@@ -15,11 +15,23 @@ type Props = {
 export function Thumb({ asset, selected, multi, onSelect, onOpen }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [useOriginal, setUseOriginal] = useState(false);
 
   useEffect(() => {
     setLoaded(false);
     setFailed(false);
+    setUseOriginal(false);
   }, [asset.id, asset.thumb]);
+
+  // 缩略图缺失（大库很常见）时回落到原图，再失败才显示占位。
+  const src = useOriginal ? asset.original : asset.thumb;
+  const handleError = () => {
+    if (!useOriginal && asset.original && asset.original !== asset.thumb) {
+      setUseOriginal(true);
+      return;
+    }
+    setFailed(true);
+  };
 
   return (
     <button
@@ -40,14 +52,14 @@ export function Thumb({ asset, selected, multi, onSelect, onOpen }: Props) {
           </span>
         ) : (
           <img
-            src={assetSrc(asset.thumb)}
+            src={assetSrc(src)}
             alt=""
             draggable={false}
             loading="lazy"
             decoding="async"
             className={clsx("thumb-img", loaded && "loaded")}
             onLoad={() => setLoaded(true)}
-            onError={() => setFailed(true)}
+            onError={handleError}
           />
         )}
       </span>

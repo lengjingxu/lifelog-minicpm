@@ -1,6 +1,6 @@
 import type { Asset, Stats } from "./api";
 
-export type View = "library" | "timeline" | "tags" | "people" | "places";
+export type View = "library" | "timeline" | "tags" | "people" | "places" | "organize" | "settings";
 export type CategoryKind = "tags" | "people" | "places";
 export type Drilldown = { kind: CategoryKind; name: string } | null;
 

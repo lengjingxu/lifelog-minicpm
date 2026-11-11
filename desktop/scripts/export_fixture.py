@@ -85,7 +85,19 @@ def main() -> None:
             months_count[clean(row["day"])[:7]] += 1
         thumb = home / "thumbs" / f"{asset_id}.jpg"
         full = home / "thumbs" / "full" / f"{asset_id}.jpg"
-        original_url = f"thumbs/full/{asset_id}.jpg" if full.exists() else row["path"]
+        if full.exists():
+            original_url = f"thumbs/full/{asset_id}.jpg"
+        else:
+            # 浏览器模式只能读 home 下的相对路径；原图在 home 外就退回缩略图，
+            # 否则会拼出 /__fixture/<绝对路径> 变成破图。
+            raw = Path(row["path"])
+            if not raw.is_absolute():
+                original_url = raw.as_posix()
+            else:
+                try:
+                    original_url = raw.resolve().relative_to(home.resolve()).as_posix()
+                except (ValueError, OSError):
+                    original_url = f"thumbs/{asset_id}.jpg" if thumb.exists() else ""
         asset = {
             "id": asset_id,
             "path": row["path"],
