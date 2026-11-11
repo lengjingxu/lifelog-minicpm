@@ -1,0 +1,565 @@
+{
+  "stats": {
+    "assets": 24,
+    "captions": 24,
+    "days": 0,
+    "events": 0,
+    "first_day": "2026-11-03",
+    "last_day": "2026-11-06",
+    "db_path": "/Users/leng/lifelog-minicpm/desktop/sample-data/lifelog.sqlite",
+    "db_size": 69632
+  },
+  "assets": [
+    {
+      "id": "e93fbb99630a6aee",
+      "path": "photos/截屏2026-11-06 18.58.57.png",
+      "thumb": "thumbs/e93fbb99630a6aee.jpg",
+      "original": "thumbs/full/e93fbb99630a6aee.jpg",
+      "day": "2026-11-06",
+      "taken_at": "2026-11-06T18:58:59",
+      "kind": "image",
+      "caption": "照片中无人，场景为室内居家环境。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息",
+      "mood": "平静",
+      "tags": [
+        "室内居家"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "e1093ef6eeba5dd3",
+      "path": "photos/截屏2026-11-06 18.52.00.png",
+      "thumb": "thumbs/e1093ef6eeba5dd3.jpg",
+      "original": "thumbs/full/e1093ef6eeba5dd3.jpg",
+      "day": "2026-11-06",
+      "taken_at": "2026-11-06T18:52:07",
+      "kind": "image",
+      "caption": "一张包含技术文档和代码分析的文本页面，涉及 Python 版本、AI Review 测试及代码状态。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "办公/文档整理/技术分析",
+      "mood": "冷静/专业",
+      "tags": [
+        "文档票据",
+        "文字排版",
+        "人物"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "2c06b97a99db698b",
+      "path": "photos/微信图片_20261106183554_617_308.jpg",
+      "thumb": "thumbs/2c06b97a99db698b.jpg",
+      "original": "thumbs/full/2c06b97a99db698b.jpg",
+      "day": "2026-11-06",
+      "taken_at": "2026-11-06T18:37:15",
+      "kind": "image",
+      "caption": "办公室监控画面显示多名员工在工作台前忙碌。",
+      "scene": "办公室",
+      "people": "多人",
+      "place": "办公室",
+      "activity": "工作",
+      "mood": "忙碌",
+      "tags": [
+        "室内居家",
+        "文档票据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "5c6ea00657b5f32a",
+      "path": "photos/截屏2026-11-06 18.14.08.png",
+      "thumb": "thumbs/5c6ea00657b5f32a.jpg",
+      "original": "thumbs/full/5c6ea00657b5f32a.jpg",
+      "day": "2026-11-06",
+      "taken_at": "2026-11-06T18:14:11",
+      "kind": "image",
+      "caption": "一张空白照片，可能是用于整理私人相册的待处理画面。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/整理",
+      "mood": "平静",
+      "tags": [
+        "室内居家",
+        "文档票据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "c3427f691fbf8d28",
+      "path": "photos/截屏2026-11-06 15.13.57.png",
+      "thumb": "thumbs/c3427f691fbf8d28.jpg",
+      "original": "thumbs/full/c3427f691fbf8d28.jpg",
+      "day": "2026-11-06",
+      "taken_at": "2026-11-06T15:14:03",
+      "kind": "image",
+      "caption": "一张显示自动更新提示框的文档页面，标题为“新的一天，从这里开始”。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/阅读",
+      "mood": "平静",
+      "tags": [
+        "室内居家",
+        "文档票据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "58428c6671ba0f0b",
+      "path": "photos/截屏2026-11-06 14.27.47.png",
+      "thumb": "thumbs/58428c6671ba0f0b.jpg",
+      "original": "thumbs/full/58428c6671ba0f0b.jpg",
+      "day": "2026-11-06",
+      "taken_at": "2026-11-06T14:27:49",
+      "kind": "image",
+      "caption": "一张无人出现的室内居家照片，氛围安静。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/拍照",
+      "mood": "平静",
+      "tags": [],
+      "ocr_text": null
+    },
+    {
+      "id": "26c3be7bac02b1b7",
+      "path": "photos/截屏2026-11-06 11.46.20.png",
+      "thumb": "thumbs/26c3be7bac02b1b7.jpg",
+      "original": "thumbs/full/26c3be7bac02b1b7.jpg",
+      "day": "2026-11-06",
+      "taken_at": "2026-11-06T11:46:21",
+      "kind": "image",
+      "caption": "照片显示手机屏幕上的应用图标，带有 ChatGPT 提示。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/拍照",
+      "mood": "温馨",
+      "tags": [
+        "室内居家",
+        "文档票据",
+        "屏幕截图"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "6a372580c3c5362d",
+      "path": "photos/截屏2026-11-06 11.30.48.png",
+      "thumb": "thumbs/6a372580c3c5362d.jpg",
+      "original": "thumbs/full/6a372580c3c5362d.jpg",
+      "day": "2026-11-06",
+      "taken_at": "2026-11-06T11:30:52",
+      "kind": "image",
+      "caption": "一张展示木质家具和台灯的个人相册界面照片",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/拍照",
+      "mood": "温馨",
+      "tags": [
+        "室内居家"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "7732bd48945b25cd",
+      "path": "photos/截屏2026-11-06 11.30.30.png",
+      "thumb": "thumbs/7732bd48945b25cd.jpg",
+      "original": "thumbs/full/7732bd48945b25cd.jpg",
+      "day": "2026-11-06",
+      "taken_at": "2026-11-06T11:30:31",
+      "kind": "image",
+      "caption": "画面展示了一个温馨的室内角落，配有台灯和木质家具，标注有人物 Cindy。",
+      "scene": "室内居家",
+      "people": "出现的人：Cindy",
+      "place": "无",
+      "activity": "休息/拍照",
+      "mood": "温馨",
+      "tags": [
+        "室内居家",
+        "人物",
+        "风景"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "e6c87c649ac3238c",
+      "path": "photos/截屏2026-11-06 11.28.21.png",
+      "thumb": "thumbs/e6c87c649ac3238c.jpg",
+      "original": "thumbs/full/e6c87c649ac3238c.jpg",
+      "day": "2026-11-06",
+      "taken_at": "2026-11-06T11:28:22",
+      "kind": "image",
+      "caption": "室内台灯旁有文字 'Cindy'，氛围温馨静谧。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "木质家具/书桌",
+      "activity": "休息/阅读",
+      "mood": "宁静",
+      "tags": [
+        "室内居家",
+        "文字排版",
+        "风景"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "1c1f8d23f677a366",
+      "path": "photos/截屏2026-11-06 11.28.17.png",
+      "thumb": "thumbs/1c1f8d23f677a366.jpg",
+      "original": "thumbs/full/1c1f8d23f677a366.jpg",
+      "day": "2026-11-06",
+      "taken_at": "2026-11-06T11:28:18",
+      "kind": "image",
+      "caption": "照片展示木质家具上的物品，可能是私人相册界面。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/拍照",
+      "mood": "温馨",
+      "tags": [
+        "室内居家",
+        "人物",
+        "文档票据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "5f3859986e2491d0",
+      "path": "photos/截屏2026-11-05 10.23.35.png",
+      "thumb": "thumbs/5f3859986e2491d0.jpg",
+      "original": "thumbs/full/5f3859986e2491d0.jpg",
+      "day": "2026-11-05",
+      "taken_at": "2026-11-05T10:23:37",
+      "kind": "image",
+      "caption": "照片内容为一张空白或无具体内容的列表页面，未展示人物或场景。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/记录",
+      "mood": "平静",
+      "tags": [
+        "室内居家",
+        "文档票据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "46f44c8d40e38ef0",
+      "path": "photos/截屏2026-11-05 10.15.47.png",
+      "thumb": "thumbs/46f44c8d40e38ef0.jpg",
+      "original": "thumbs/full/46f44c8d40e38ef0.jpg",
+      "day": "2026-11-05",
+      "taken_at": "2026-11-05T10:15:53",
+      "kind": "image",
+      "caption": "展示了一个 AI 应用的用户额度与消费统计页面。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/查看数据",
+      "mood": "平静",
+      "tags": [
+        "室内居家",
+        "文档票据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "282ed349ee25a367",
+      "path": "photos/截屏2026-11-05 10.15.40.png",
+      "thumb": "thumbs/282ed349ee25a367.jpg",
+      "original": "thumbs/full/282ed349ee25a367.jpg",
+      "day": "2026-11-05",
+      "taken_at": "2026-11-05T10:15:46",
+      "kind": "image",
+      "caption": "展示了一个 AI 应用界面，包含用户数据图表和消耗排行信息。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/查看数据",
+      "mood": "平静",
+      "tags": [
+        "室内居家",
+        "文档票据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "239af972933d084e",
+      "path": "photos/截屏2026-11-04 18.27.32.png",
+      "thumb": "thumbs/239af972933d084e.jpg",
+      "original": "thumbs/full/239af972933d084e.jpg",
+      "day": "2026-11-04",
+      "taken_at": "2026-11-04T18:27:35",
+      "kind": "image",
+      "caption": "照片显示一个电脑屏幕，显示代码编辑界面。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/工作",
+      "mood": "平静",
+      "tags": [
+        "室内居家",
+        "文档票据",
+        "屏幕截图"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "f1fd6c160203bb21",
+      "path": "photos/截屏2026-11-04 17.14.12.png",
+      "thumb": "thumbs/f1fd6c160203bb21.jpg",
+      "original": "thumbs/full/f1fd6c160203bb21.jpg",
+      "day": "2026-11-04",
+      "taken_at": "2026-11-04T17:14:18",
+      "kind": "image",
+      "caption": "照片中显示一个人正在忙碌于工作，可能是在处理事务。",
+      "scene": "室内居家",
+      "people": "一人",
+      "place": "无",
+      "activity": "办公/工作/处理事务",
+      "mood": "专注/忙碌",
+      "tags": [
+        "室内居家",
+        "文字排版",
+        "文档票据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "9b7d904d92c08487",
+      "path": "photos/截屏2026-11-04 17.08.37.png",
+      "thumb": "thumbs/9b7d904d92c08487.jpg",
+      "original": "thumbs/full/9b7d904d92c08487.jpg",
+      "day": "2026-11-04",
+      "taken_at": "2026-11-04T17:08:43",
+      "kind": "image",
+      "caption": "照片未显示，仅包含岗位薪资参考表。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/整理相册",
+      "mood": "平静",
+      "tags": [
+        "室内居家",
+        "文档票据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "40a9e15abb165329",
+      "path": "photos/03-optimization.png",
+      "thumb": "thumbs/40a9e15abb165329.jpg",
+      "original": "thumbs/full/40a9e15abb165329.jpg",
+      "day": "2026-11-03",
+      "taken_at": "2026-11-03T20:49:22",
+      "kind": "image",
+      "caption": "展示股票投资调整概率的表格数据",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "文档票据",
+      "mood": "冷静",
+      "tags": [
+        "文档票据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "88d9253ac9603894",
+      "path": "photos/01-investment.png",
+      "thumb": "thumbs/88d9253ac9603894.jpg",
+      "original": "thumbs/full/88d9253ac9603894.jpg",
+      "day": "2026-11-03",
+      "taken_at": "2026-11-03T20:49:22",
+      "kind": "image",
+      "caption": "一张股票拆分表，展示了不同投资组合的占比数据。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/记录",
+      "mood": "平静/数据化",
+      "tags": [
+        "室内居家",
+        "文档票据",
+        "图表数据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "a167f07093e0a0da",
+      "path": "photos/04-monthly-roi.png",
+      "thumb": "thumbs/a167f07093e0a0da.jpg",
+      "original": "thumbs/full/a167f07093e0a0da.jpg",
+      "day": "2026-11-03",
+      "taken_at": "2026-11-03T20:49:22",
+      "kind": "image",
+      "caption": "照片中无人，场景为室内居家，无具体活动或人物出现。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息",
+      "mood": "平静",
+      "tags": [],
+      "ocr_text": null
+    },
+    {
+      "id": "b52c07b355294200",
+      "path": "photos/00-version-bar.png",
+      "thumb": "thumbs/b52c07b355294200.jpg",
+      "original": "thumbs/full/b52c07b355294200.jpg",
+      "day": "2026-11-03",
+      "taken_at": "2026-11-03T20:49:22",
+      "kind": "image",
+      "caption": "照片显示一个文档表格界面，包含日期和时间信息。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/查看",
+      "mood": "平静",
+      "tags": [
+        "室内居家",
+        "文档票据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "efcbeece0070f50d",
+      "path": "photos/02-composition.png",
+      "thumb": "thumbs/efcbeece0070f50d.jpg",
+      "original": "thumbs/full/efcbeece0070f50d.jpg",
+      "day": "2026-11-03",
+      "taken_at": "2026-11-03T20:49:22",
+      "kind": "image",
+      "caption": "展示模型估算的 GMV 构成比例图表，包含 TTL、NPC70 等项目的具体数值。",
+      "scene": "室内/数据图表",
+      "people": "无",
+      "place": "无",
+      "activity": "数据展示/分析",
+      "mood": "客观",
+      "tags": [
+        "人物",
+        "城市建筑",
+        "图表数据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "c4118c8445fcd90a",
+      "path": "photos/截屏2026-11-03 17.57.56.png",
+      "thumb": "thumbs/c4118c8445fcd90a.jpg",
+      "original": "thumbs/full/c4118c8445fcd90a.jpg",
+      "day": "2026-11-03",
+      "taken_at": "2026-11-03T17:57:58",
+      "kind": "image",
+      "caption": "一张显示登录账号选择的界面截图。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "休息/拍照",
+      "mood": "平静",
+      "tags": [
+        "室内居家",
+        "文档票据"
+      ],
+      "ocr_text": null
+    },
+    {
+      "id": "e831ec74d6804a13",
+      "path": "photos/截屏2026-11-03 16.51.50.png",
+      "thumb": "thumbs/e831ec74d6804a13.jpg",
+      "original": "thumbs/full/e831ec74d6804a13.jpg",
+      "day": "2026-11-03",
+      "taken_at": "2026-11-03T16:51:52",
+      "kind": "image",
+      "caption": "对话中关于奥维思维和全网结算系统费用的讨论。",
+      "scene": "室内居家",
+      "people": "无",
+      "place": "无",
+      "activity": "聊天/讨论",
+      "mood": "平静",
+      "tags": [
+        "室内居家",
+        "文档票据",
+        "文字排版"
+      ],
+      "ocr_text": null
+    }
+  ],
+  "facets": {
+    "tags": [
+      [
+        "室内居家",
+        19
+      ],
+      [
+        "文档票据",
+        17
+      ],
+      [
+        "人物",
+        4
+      ],
+      [
+        "文字排版",
+        4
+      ],
+      [
+        "图表数据",
+        2
+      ],
+      [
+        "屏幕截图",
+        2
+      ],
+      [
+        "风景",
+        2
+      ],
+      [
+        "城市建筑",
+        1
+      ]
+    ],
+    "scenes": [
+      [
+        "室内居家",
+        22
+      ],
+      [
+        "办公室",
+        1
+      ],
+      [
+        "室内/数据图表",
+        1
+      ]
+    ],
+    "people": [
+      [
+        "一人",
+        1
+      ],
+      [
+        "出现的人：Cindy",
+        1
+      ],
+      [
+        "多人",
+        1
+      ]
+    ],
+    "months": [
+      [
+        "2026-11",
+        24
+      ]
+    ]
+  }
+}
