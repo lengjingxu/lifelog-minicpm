@@ -16,6 +16,7 @@ import {
   importFolder,
   bulkTag,
   exportAssets,
+  deleteRecords,
   revealInFinder,
   albumAdd,
 } from "./api";
@@ -26,6 +27,7 @@ import { Timeline } from "./components/Timeline";
 import { Categories } from "./components/Categories";
 import { Detail } from "./components/Detail";
 import { SelectionBar } from "./components/SelectionBar";
+import { DeleteDialog } from "./components/DeleteDialog";
 import { EmptyState } from "./components/EmptyState";
 import { OrganizeView } from "./components/OrganizeView";
 import { RecognitionDialog } from "./components/RecognitionDialog";
@@ -310,6 +312,8 @@ const route = useMemo(readRoute, []);
   };
 
   const [exporting, setExporting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const handleExport = useCallback(async () => {
     if (exporting) return;
     // 全库一键导出必须是明确行为：没有选中、也没有任何筛选时拒绝，避免误触。
@@ -355,6 +359,24 @@ const route = useMemo(readRoute, []);
       setExporting(false);
     }
   }, [exporting, selection, active, query, tagKey, tags, album, scene, person, place, showToast]);
+
+  const confirmDelete = useCallback(async () => {
+    if (deleting || !selection.length) return;
+    setDeleting(true);
+    try {
+      const result = await deleteRecords(selection);
+      setDeleteOpen(false);
+      setSelection([]);
+      refreshData();
+      showToast(
+        `已移除 ${result.removed.assets} 条记录（磁盘文件未动）`,
+      );
+    } catch (err) {
+      showToast(`移除失败：${String(err)}`);
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleting, selection, refreshData, showToast]);
 
   const handleEmptyChoice = async (label: string) => {
     if (!label.includes("扫描")) {
@@ -1141,7 +1163,17 @@ const route = useMemo(readRoute, []);
           onAlbum={(name) => void runBulk("album", name)}
           onRemoveTag={(tag) => void runRemove("tag", tag)}
           onRemoveAlbum={(name) => void runRemove("album", name)}
+          onDelete={() => setDeleteOpen(true)}
           onClear={() => setSelection([])}
+        />
+      )}
+
+      {deleteOpen && (
+        <DeleteDialog
+          count={selection.length}
+          busy={deleting}
+          onCancel={() => setDeleteOpen(false)}
+          onConfirm={() => void confirmDelete()}
         />
       )}
 

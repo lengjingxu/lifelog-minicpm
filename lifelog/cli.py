@@ -217,6 +217,17 @@ def cmd_album_remove(args) -> int:
     return 0
 
 
+
+def cmd_record_delete(args) -> int:
+    from . import aggregate, ops
+    result = ops.delete_records(_ids(args.ids))
+    # 记录被移除后，天与生活片段是物化数据，需要重算，避免留着旧数字。
+    result["days_rebuilt"] = aggregate.build_days()
+    result["events_rebuilt"] = aggregate.build_events()
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
 def cmd_album_list(args) -> int:
     from . import ops
     print(json.dumps(ops.list_albums(), ensure_ascii=False))
@@ -341,6 +352,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name")
     p.add_argument("--ids", required=True)
     p.set_defaults(func=cmd_album_remove)
+
+    p = sub.add_parser("record-delete", help="从库中移除记录（不动磁盘文件）")
+    p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
+    p.set_defaults(func=cmd_record_delete)
 
     p = sub.add_parser("album-list", help="列出相册")
     p.set_defaults(func=cmd_album_list)

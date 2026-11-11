@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FolderMinus, FolderPlus, Tag, X } from "lucide-react";
+import { FolderMinus, FolderPlus, Tag, Trash2, X } from "lucide-react";
 
 type Props = {
   count: number;
@@ -11,6 +11,7 @@ type Props = {
   onRemoveTag: (tag: string) => void;
   onRemoveAlbum: (name: string) => void;
   onClear: () => void;
+  onDelete: () => void;
 };
 
 export function SelectionBar({
@@ -23,6 +24,7 @@ export function SelectionBar({
   onRemoveTag,
   onRemoveAlbum,
   onClear,
+  onDelete,
 }: Props) {
   const [value, setValue] = useState("");
   const trimmed = value.trim();
@@ -74,6 +76,9 @@ export function SelectionBar({
       </button>
       <button type="button" onClick={() => run(onAlbum)} disabled={!trimmed || busy}>
         <FolderPlus size={13} /> 加入相册
+      </button>
+      <button type="button" className="selection-delete" onClick={onDelete} disabled={busy}>
+        <Trash2 size={13} /> 删除记录
       </button>
       <button type="button" className="selection-close" onClick={onClear} aria-label="取消选择">
         <X size={14} />

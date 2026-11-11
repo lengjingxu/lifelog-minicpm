@@ -148,3 +148,29 @@ def list_albums() -> dict:
     ).fetchall()
     conn.close()
     return {"ok": True, "albums": [{"id": r[0], "name": r[1], "count": r[2]} for r in rows]}
+
+
+def delete_records(ids: list[str]) -> dict:
+    """从库里移除记录：只删数据库行，不动磁盘文件。"""
+    ids = [i for i in ids if i]
+    if not ids:
+        raise SystemExit("没有要删除的记录")
+    conn = connect()
+    removed = {"captions": 0, "asset_tags": 0, "album_assets": 0, "assets": 0}
+    try:
+        conn.execute("BEGIN")
+        for table in ("captions", "asset_tags", "album_assets", "assets"):
+            marks = ",".join("?" for _ in ids)
+            cur = conn.execute(
+                f"DELETE FROM {table} WHERE "
+                + ("asset_id IN (" + marks + ")" if table != "assets" else "id IN (" + marks + ")"),
+                ids,
+            )
+            removed[table] = cur.rowcount
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return {"ok": True, "requested": len(ids), "removed": removed}
