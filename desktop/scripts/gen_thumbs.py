@@ -13,6 +13,9 @@ import argparse
 import os
 import sqlite3
 import subprocess
+import time
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -70,7 +73,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--home", type=Path, help="LIFELOG_HOME，默认取环境变量或 sample-data")
     parser.add_argument("--limit", type=int, default=0, help="只处理前 N 条，0 表示全部")
     parser.add_argument("--force", action="store_true", help="覆盖已存在的缩略图")
+    parser.add_argument("--jobs", type=int, default=6, help="并行度，默认 6（sips 是独立进程）")
+    parser.add_argument("--json", action="store_true", help="按行输出 JSON 进度，便于 UI/脚本消费")
     return parser.parse_args()
+
+
+def process(row, home: Path, thumbs_dir: Path, full_dir: Path, force: bool) -> tuple[str, str]:
+    asset_id = row["id"]
+    source = Path(row["path"])
+    if not source.is_absolute():
+        source = home / source
+    if not source.exists():
+        # 库挪过位置时，绝对路径会指向旧目录：按 photos/ 之后的部分重新拼一次。
+        marker = "/photos/"
+        raw = str(source)
+        if marker in raw:
+            source = home / "photos" / raw.split(marker, 1)[1]
+    thumb = thumbs_dir / f"{asset_id}.jpg"
+    full = full_dir / f"{asset_id}.jpg"
+    if not source.exists():
+        return "failed", f"{asset_id}: 原图不存在 {source}"
+    if force:
+        thumb.unlink(missing_ok=True)
+        full.unlink(missing_ok=True)
+    if thumb.exists() and full.exists():
+        return "skipped", asset_id
+    ok_thumb = thumb.exists() or generate_with_retry(source, thumb, 360, 78)
+    ok_full = full.exists() or generate_with_retry(source, full, 1600, 86)
+    if ok_thumb and ok_full:
+        return "ok", asset_id
+    return "failed", f"{asset_id}: 缩略图={ok_thumb} 大图={ok_full}"
 
 
 def main() -> int:
@@ -101,51 +133,54 @@ def main() -> int:
     ).fetchall()
     conn.close()
 
-    started = datetime.now().isoformat(timespec="seconds")
+    total = len(rows)
+    started_at = time.time()
     counts = {"ok": 0, "skipped": 0, "failed": 0}
     failures: list[str] = []
-    with log_path.open("a", encoding="utf-8") as log_file:
-        def record(line: str) -> None:
-            log(line)
-            log_file.write(line + "\n")
+    jobs = max(1, min(args.jobs, 16))
 
-        record(f"[{started}] 开始处理 {len(rows)} 张 · home={home}")
-        for index, row in enumerate(rows, 1):
-            asset_id = row["id"]
-            source = Path(row["path"])
-            if not source.is_absolute():
-                source = home / source
-            thumb = thumbs_dir / f"{asset_id}.jpg"
-            full = full_dir / f"{asset_id}.jpg"
-            if not source.exists():
-                counts["failed"] += 1
-                failures.append(f"{asset_id}: 原图不存在 {source}")
-                record(f"  [{index}/{len(rows)}] 跳过 {asset_id}: 原图不存在")
-                continue
-            if args.force:
-                thumb.unlink(missing_ok=True)
-                full.unlink(missing_ok=True)
-            if thumb.exists() and full.exists():
-                counts["skipped"] += 1
-                continue
-            ok_thumb = thumb.exists() or generate_with_retry(source, thumb, 360, 78)
-            ok_full = full.exists() or generate_with_retry(source, full, 1600, 86)
-            if ok_thumb and ok_full:
-                counts["ok"] += 1
-                record(f"  [{index}/{len(rows)}] ok {asset_id}")
+    def emit(done: int) -> None:
+        elapsed = time.time() - started_at
+        rate = done / elapsed if elapsed > 0 else 0
+        eta = int((total - done) / rate) if rate > 0 else None
+        if args.json:
+            log(json.dumps({
+                "total": total, "done": done,
+                "ok": counts["ok"], "skipped": counts["skipped"], "failed": counts["failed"],
+                "elapsed_s": round(elapsed, 1), "rate_per_s": round(rate, 1), "eta_s": eta,
+            }, ensure_ascii=False))
+        elif done % 25 == 0 or done == total:
+            log(f"  [{done}/{total}] ok={counts['ok']} skip={counts['skipped']} fail={counts['failed']} · {rate:.1f} 张/秒 · 剩余 {eta or 0}s")
+
+    with log_path.open("a", encoding="utf-8") as log_file, ThreadPoolExecutor(max_workers=jobs) as pool:
+        def record(line: str) -> None:
+            log_file.write(line + chr(10))
+
+        record(f"[{datetime.now().isoformat(timespec='seconds')}] 开始 {total} 张 · jobs={jobs} · home={home}")
+        futures = [pool.submit(process, row, home, thumbs_dir, full_dir, args.force) for row in rows]
+        for done, future in enumerate(as_completed(futures), 1):
+            status, detail = future.result()
+            counts[status] += 1
+            if status == "failed":
+                failures.append(detail)
+                record(f"  failed {detail}")
+            if args.json:
+                if done % 25 == 0 or done == total:
+                    emit(done)
             else:
-                counts["failed"] += 1
-                failures.append(f"{asset_id}: 缩略图={ok_thumb} 大图={ok_full}")
-                record(f"  [{index}/{len(rows)}] 失败 {asset_id}")
-        summary = (
-            f"[{datetime.now().isoformat(timespec='seconds')}] 完成 "
-            f"ok={counts['ok']} skipped={counts['skipped']} failed={counts['failed']}"
-        )
-        record(summary)
-        for failure in failures:
-            record(f"  FAIL {failure}")
-        record(f"日志: {log_path}")
-    return 0 if counts["failed"] == 0 else 2
+                emit(done)
+        record(f"[{datetime.now().isoformat(timespec='seconds')}] 完成 ok={counts['ok']} skip={counts['skipped']} fail={counts['failed']}")
+
+    summary = {
+        "total": total, **counts, "jobs": jobs,
+        "elapsed_s": round(time.time() - started_at, 1),
+        "failures": failures[:50],
+    }
+    if args.json:
+        log(json.dumps(summary, ensure_ascii=False))
+    else:
+        log(f"完成：ok={counts['ok']} skipped={counts['skipped']} failed={counts['failed']} · {summary['elapsed_s']}s")
+    return 0
 
 
 if __name__ == "__main__":
