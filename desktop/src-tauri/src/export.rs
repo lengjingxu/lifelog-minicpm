@@ -89,6 +89,60 @@ pub struct ExportSummary {
     pub target: String,
 }
 
+
+pub enum Dest {
+    Copy(PathBuf),
+    Skip(PathBuf),
+}
+
+/// 决定目标路径：原名 → 冲突名 → -2/-3…；超过上限返回错误，绝不覆盖已有文件。
+pub fn resolve_dest(target: &Path, src: &Path, row: &Row, limit: usize) -> Result<Dest, String> {
+    let original_name = src.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let first = target.join(sanitize_name(original_name));
+    if !first.exists() {
+        return Ok(Dest::Copy(first));
+    }
+    if same_file(src, &first) {
+        return Ok(Dest::Skip(first));
+    }
+
+    let base = conflict_name(original_name, row.day.as_deref(), &row.id);
+    let candidate = target.join(&base);
+    if !candidate.exists() {
+        return Ok(Dest::Copy(candidate));
+    }
+
+    for n in 2..=limit {
+        let path = target.join(with_suffix(&base, n));
+        if !path.exists() {
+            return Ok(Dest::Copy(path));
+        }
+    }
+    Err(format!("同名冲突超过上限（{limit}），未覆盖任何文件"))
+}
+
+pub fn write_sidecar(dest: &Path, row: &Row) {
+    let sidecar = PathBuf::from(format!("{}.json", dest.to_string_lossy()));
+    if sidecar.exists() {
+        return;
+    }
+    let payload = json!({
+        "id": row.id,
+        "source": row.path,
+        "day": row.day,
+        "taken_at": row.taken_at,
+        "caption": row.caption,
+        "scene": row.scene,
+        "people": row.people,
+        "place": row.place,
+        "activity": row.activity,
+        "mood": row.mood,
+        "tags": row.tags,
+        "ocr_text": row.ocr_text,
+    });
+    let _ = fs::write(sidecar, serde_json::to_vec_pretty(&payload).unwrap_or_default());
+}
+
 pub struct Row {
     pub id: String,
     pub path: String,
@@ -117,7 +171,10 @@ pub fn export_rows(rows: &[Row], home: &Path, target: &Path) -> Result<ExportSum
         }
     }
     let free = free_bytes(target);
-    if free > 0 && needed > free {
+    if free == 0 {
+        return Err("无法读取目标盘可用空间，已拒绝导出".to_string());
+    }
+    if needed > free {
         return Err(format!(
             "空间不足：需要 {:.1} GB，可用 {:.1} GB",
             needed as f64 / 1e9,
@@ -133,54 +190,38 @@ pub fn export_rows(rows: &[Row], home: &Path, target: &Path) -> Result<ExportSum
     for row in rows {
         let src = if Path::new(&row.path).is_absolute() { PathBuf::from(&row.path) } else { home.join(&row.path) };
         let original_name = src.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-        let mut name = sanitize_name(original_name);
-        let mut dest = target.join(&name);
-
-        if dest.exists() {
-            if same_file(&src, &dest) {
+        let dest = match resolve_dest(target, &src, row, 200) {
+            Ok(Dest::Skip(existing)) => {
                 skipped += 1;
+                // 原图已一致，但 sidecar 可能被用户删过：补写一份，不复制原图。
+                write_sidecar(&existing, row);
                 items.push(ExportItem {
                     id: row.id.clone(),
                     source: src.to_string_lossy().to_string(),
-                    target: dest.to_string_lossy().to_string(),
+                    target: existing.to_string_lossy().to_string(),
                     status: "skipped-identical".into(),
                     error: None,
                 });
                 continue;
             }
-            name = conflict_name(original_name, row.day.as_deref(), &row.id);
-            dest = target.join(&name);
-            let mut n = 2;
-            while dest.exists() {
-                name = with_suffix(&conflict_name(original_name, row.day.as_deref(), &row.id), n);
-                dest = target.join(&name);
-                n += 1;
-                if n > 200 { break; }
+            Ok(Dest::Copy(path)) => path,
+            Err(reason) => {
+                failed += 1;
+                items.push(ExportItem {
+                    id: row.id.clone(),
+                    source: src.to_string_lossy().to_string(),
+                    target: String::new(),
+                    status: "failed".into(),
+                    error: Some(reason),
+                });
+                continue;
             }
-        }
+        };
 
         match fs::copy(&src, &dest) {
             Ok(_) => {
                 copied += 1;
-                let sidecar = dest.with_extension(format!(
-                    "{}.json",
-                    dest.extension().and_then(|e| e.to_str()).unwrap_or("" )
-                ));
-                let payload = json!({
-                    "id": row.id,
-                    "source": src.to_string_lossy(),
-                    "day": row.day,
-                    "taken_at": row.taken_at,
-                    "caption": row.caption,
-                    "scene": row.scene,
-                    "people": row.people,
-                    "place": row.place,
-                    "activity": row.activity,
-                    "mood": row.mood,
-                    "tags": row.tags,
-                    "ocr_text": row.ocr_text,
-                });
-                let _ = fs::write(&sidecar, serde_json::to_vec_pretty(&payload).unwrap_or_default());
+                write_sidecar(&dest, row);
                 items.push(ExportItem {
                     id: row.id.clone(),
                     source: src.to_string_lossy().to_string(),
@@ -345,5 +386,44 @@ mod tests {
         assert!(renamed.exists(), "冲突时应退化为 日期_id_原名");
         assert!(fs::read_to_string(&renamed).unwrap().starts_with("content-"));
         assert_eq!(fs::read_to_string(target.join("IMG_0.jpg")).unwrap(), "different-content-that-is-longer");
+    }
+
+    #[test]
+    fn conflict_exhaustion_fails_instead_of_overwriting() {
+        let home = tmpdir("src3");
+        let target = tmpdir("dst3");
+        let rows = seed_rows(&home, 1);
+        fs::write(target.join("IMG_0.jpg"), "someone-elses-file").unwrap();
+        let base = "2024-02-09_id0000_IMG_0.jpg";
+        fs::write(target.join(&base), "x").unwrap();
+        fs::write(target.join("2024-02-09_id0000_IMG_0-2.jpg"), "x").unwrap();
+
+        // limit=2 表示只允许 -2，故意让它用尽
+        let outcome = resolve_dest(&target, Path::new(&rows[0].path), &rows[0], 2);
+        assert!(matches!(outcome, Err(ref e) if e.contains("同名冲突超过上限")));
+        assert_eq!(fs::read_to_string(target.join("IMG_0.jpg")).unwrap(), "someone-elses-file");
+    }
+
+    #[test]
+    fn unreadable_target_space_is_fail_closed() {
+        let home = tmpdir("src4");
+        let rows = seed_rows(&home, 1);
+        let missing = home.join("no-such-target");
+        let err = export_rows(&rows, &home, &missing).unwrap_err();
+        assert!(err.contains("无法读取目标盘可用空间"), "实际：{err}");
+    }
+
+    #[test]
+    fn skipped_identical_writes_missing_sidecar() {
+        let home = tmpdir("src5");
+        let target = tmpdir("dst5");
+        let rows = seed_rows(&home, 1);
+        let _ = export_rows(&rows, &home, &target).unwrap();
+        let sidecar = target.join("IMG_0.jpg.json");
+        assert!(sidecar.exists());
+        fs::remove_file(&sidecar).unwrap();
+        let second = export_rows(&rows, &home, &target).unwrap();
+        assert_eq!(second.skipped, 1);
+        assert!(sidecar.exists(), "skipped-identical 时应补写 sidecar");
     }
 }

@@ -312,6 +312,11 @@ const route = useMemo(readRoute, []);
   const [exporting, setExporting] = useState(false);
   const handleExport = useCallback(async () => {
     if (exporting) return;
+    // 全库一键导出必须是明确行为：没有选中、也没有任何筛选时拒绝，避免误触。
+    if (!selection.length && !active) {
+      showToast("先选中照片或套用筛选条件，再导出");
+      return;
+    }
     const remembered = window.localStorage.getItem("sg-export-dir") ?? undefined;
     const target = await pickFolder({ title: "选择导出目录", defaultPath: remembered });
     if (!target) return;
@@ -349,7 +354,7 @@ const route = useMemo(readRoute, []);
     } finally {
       setExporting(false);
     }
-  }, [exporting, selection, query, tagKey, tags, album, scene, person, place, showToast]);
+  }, [exporting, selection, active, query, tagKey, tags, album, scene, person, place, showToast]);
 
   const handleEmptyChoice = async (label: string) => {
     if (!label.includes("扫描")) {
@@ -1060,7 +1065,7 @@ const route = useMemo(readRoute, []);
         <Topbar
           title={title}
           subtitle={subtitle}
-          onExport={() => void handleExport()}
+          onExport={selection.length > 0 || active ? () => void handleExport() : undefined}
           searchValue={queryInput}
           onSearchChange={handleSearchChange}
           onSearchClear={clearSearch}
