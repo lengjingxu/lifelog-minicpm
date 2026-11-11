@@ -3,7 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{Manager, State};
+
+mod live;
+
+use live::LiveSidecar;
 
 struct Db {
     path: PathBuf,
@@ -19,6 +23,41 @@ fn resolve_data_dir() -> PathBuf {
         .unwrap_or_default()
         .join("Desktop/codepro/minicpm/lifelog-minicpm/data");
     fallback
+}
+
+fn project_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+}
+
+fn directory_usage(path: &Path, extensions: Option<&[&str]>) -> (u64, u64) {
+    let mut bytes = 0u64;
+    let mut files = 0u64;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Ok(meta) = entry.metadata() {
+                let matches = extensions.is_none_or(|wanted| {
+                    path.extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| wanted.iter().any(|item| item.eq_ignore_ascii_case(ext)))
+                });
+                if matches {
+                    bytes += meta.len();
+                    files += 1;
+                }
+            }
+        }
+    }
+    (bytes, files)
 }
 
 impl Db {
@@ -272,6 +311,91 @@ fn health(db: State<'_, Db>) -> Result<serde_json::Value, String> {
     }))
 }
 
+#[tauri::command]
+async fn app_settings(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let data_dir = db.data_dir.clone();
+    let db_path = db.path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let db_size = std::fs::metadata(&db_path).map(|meta| meta.len()).unwrap_or(0);
+        let (data_bytes, data_files) = directory_usage(&data_dir, None);
+        let (thumb_bytes, thumb_files) = directory_usage(&data_dir.join("thumbs"), Some(&["jpg", "jpeg"]));
+        let home = dirs::home_dir().unwrap_or_default();
+        let token_dir = home.join(".xiaomi-token");
+        let token_file = token_dir.join("token.mjs");
+        let model_key = std::env::var("LIFELOG_MODEL").unwrap_or_else(|_| "minicpm-v-4.7-1b".to_string());
+        let model_title = match model_key.as_str() {
+            "minicpm-v-4.5-8b" => "MiniCPM-V-4.5-8B",
+            "minicpm-ocr-1.0" => "MiniCPM-OCR-1.0",
+            "minicpm-ocr-jev" => "MiniCPM-OCR-Jev",
+            _ => "MiniCPM-V-4.7-1B",
+        };
+        let models_dir = PathBuf::from(
+            std::env::var("LIFELOG_MODELS_DIR").unwrap_or_else(|_| "/Volumes/Leng/Models".to_string()),
+        );
+        Ok(serde_json::json!({
+            "data_dir": data_dir.to_string_lossy(),
+            "db_path": db_path.to_string_lossy(),
+            "db_size": db_size,
+            "data_size": data_bytes,
+            "data_files": data_files,
+            "thumb_cache": {
+                "path": data_dir.join("thumbs").to_string_lossy(),
+                "size": thumb_bytes,
+                "count": thumb_files,
+            },
+            "model": {
+                "key": model_key,
+                "title": model_title,
+                "path": models_dir.join(model_key.clone()).to_string_lossy(),
+                "available": models_dir.join(model_key).exists(),
+                "role": "全库识别 · 端侧 MiniCPM",
+            },
+            "xiaomi": {
+                "logged_in": token_file.exists() || token_dir.exists(),
+                "token_dir": token_dir.to_string_lossy(),
+                "detail": if token_file.exists() { "检测到 ~/.xiaomi-token/token.mjs" } else { "未检测到登录态文件" },
+            },
+            "read_only": true,
+        }))
+    })
+    .await
+    .map_err(|err| format!("读取设置失败：{err}"))?
+}
+
+#[tauri::command]
+async fn rebuild_thumbs(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = project_root();
+        let script = root.join("scripts/gen_thumbs.py");
+        if !script.exists() {
+            return Err(format!("找不到缩略图脚本：{}", script.display()));
+        }
+        let output = std::process::Command::new("python3")
+            .arg(&script)
+            .arg("--force")
+            .current_dir(&root)
+            .env("LIFELOG_HOME", &home)
+            .output()
+            .map_err(|err| format!("启动缩略图重建失败：{err}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let tail = |text: &str| -> String {
+            let trimmed = text.trim();
+            let chars: Vec<char> = trimmed.chars().collect();
+            chars[chars.len().saturating_sub(1600)..].iter().collect()
+        };
+        Ok(serde_json::json!({
+            "ok": output.status.success(),
+            "code": output.status.code(),
+            "stdout": tail(&stdout),
+            "stderr": tail(&stderr),
+        }))
+    })
+    .await
+    .map_err(|err| format!("重建缩略图失败：{err}"))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let data_dir = resolve_data_dir();
@@ -279,19 +403,36 @@ pub fn run() {
         .map(PathBuf::from)
         .unwrap_or_else(|_| data_dir.join("lifelog.sqlite"));
 
-    tauri::Builder::default()
+    let sidecar = LiveSidecar::new(data_dir.clone(), project_root());
+
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(Db {
             path: db_path,
             data_dir,
             conn: Mutex::new(None),
         })
+        .manage(sidecar)
         .invoke_handler(tauri::generate_handler![
             library_stats,
             query_assets,
             facets,
-            health
+            health,
+            app_settings,
+            rebuild_thumbs,
+            live::live_health,
+            live::live_start,
+            live::live_state,
+            live::live_events,
+            live::live_stop,
+            live::live_photos
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            app_handle.state::<LiveSidecar>().shutdown();
+        }
+    });
 }
