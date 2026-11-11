@@ -11,6 +11,21 @@
 [快速开始](#快速开始) · [三种叙事](#三种叙事视角) · [自我画像](#自我画像与依据) · [报名材料](docs/报名材料.md)
 
 </div>
+## 跑测试
+
+Python 单测（仓库根目录执行）：
+
+```bash
+PYTHONPATH=. python3 -m unittest discover -s tests -p 'test_*.py'
+```
+
+桌面端（Rust）单测：
+
+```bash
+cd desktop && npm run build          # 前端类型检查 + 打包
+cd desktop/src-tauri && cargo test    # 只读查询、导出、过滤相关
+```
+
 ---
 ## 痛点
 

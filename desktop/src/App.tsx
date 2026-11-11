@@ -176,6 +176,8 @@ const route = useMemo(readRoute, []);
 
   const refreshData = useCallback(() => {
     getFacets().then(setFacets).catch(() => undefined);
+    // 统计也要刷：删掉记录后侧栏「全部照片」不能还显示旧数字。
+    libraryStats().then(setStats).catch(() => undefined);
     setDataVersion((version) => version + 1);
   }, []);
 

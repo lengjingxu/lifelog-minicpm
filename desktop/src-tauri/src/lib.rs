@@ -490,7 +490,13 @@ async fn delete_records(db: State<'_, Db>, ids: Vec<String>) -> Result<serde_jso
         if ids.is_empty() {
             return Err("没有选中要移除的记录".to_string());
         }
-        run_python_cli(&home, &["record-delete".to_string(), "--ids".to_string(), ids.join(",")])
+        let result = run_python_cli(&home, &["record-delete".to_string(), "--ids".to_string(), ids.join(",")])?;
+        // 记录没了，缩略图缓存就成了孤儿，顺手清掉（只动缓存，不动原图）。
+        let _ = run_python_cli(
+            &home,
+            &["thumbs-prune".to_string(), "--ids".to_string(), ids.join(",")],
+        );
+        Ok(result)
     })
     .await
     .map_err(|err| err.to_string())?

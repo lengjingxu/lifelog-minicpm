@@ -174,3 +174,40 @@ def delete_records(ids: list[str]) -> dict:
     finally:
         conn.close()
     return {"ok": True, "requested": len(ids), "removed": removed}
+
+
+def prune_orphan_thumbs(ids: list[str] | None = None, dry_run: bool = False) -> dict:
+    """清理孤儿缩略图。
+
+    ids 给了就只处理这些 id 的缩略图；不给就扫描 thumbs 目录，
+    删掉库里已经没有对应 asset 的文件。只动缩略图缓存，不动原图。
+    """
+    thumbs_dir = config.DATA_DIR / "thumbs"
+    full_dir = thumbs_dir / "full"
+    removed: list[str] = []
+    freed = 0
+
+    if ids:
+        for asset_id in ids:
+            for path in (thumbs_dir / f"{asset_id}.jpg", full_dir / f"{asset_id}.jpg"):
+                if path.exists():
+                    freed += path.stat().st_size
+                    if not dry_run:
+                        path.unlink(missing_ok=True)
+                    removed.append(path.name)
+        return {"ok": True, "removed": len(removed), "freed_bytes": freed, "dry_run": dry_run}
+
+    if not thumbs_dir.is_dir():
+        return {"ok": True, "removed": 0, "freed_bytes": 0, "dry_run": dry_run}
+
+    conn = connect()
+    known = {row[0] for row in conn.execute("SELECT id FROM assets")}
+    conn.close()
+    for path in list(thumbs_dir.glob("*.jpg")) + list(full_dir.glob("*.jpg")):
+        if path.stem in known:
+            continue
+        freed += path.stat().st_size
+        removed.append(path.name)
+        if not dry_run:
+            path.unlink(missing_ok=True)
+    return {"ok": True, "removed": len(removed), "freed_bytes": freed, "dry_run": dry_run}
