@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { Clock, Command, LayoutGrid, Search, X } from "lucide-react";
+import { Clock, Command, LayoutGrid, Moon, Search, Sun, X } from "lucide-react";
 import clsx from "clsx";
 import type { View } from "../utils";
 
@@ -17,6 +17,8 @@ type Props = {
   view: View;
   onView: (view: View) => void;
   minimal?: boolean;
+  theme?: "dark" | "light";
+  onTheme?: (theme: "dark" | "light") => void;
 };
 
 export function Topbar({
@@ -31,6 +33,8 @@ export function Topbar({
   view,
   onView,
   minimal = false,
+  theme = "dark",
+  onTheme,
 }: Props) {
   return (
     <header className="toolbar">
@@ -64,6 +68,17 @@ export function Topbar({
         )}
       </div>
 
+      {onTheme && (
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={() => onTheme(theme === "dark" ? "light" : "dark")}
+          aria-label={theme === "dark" ? "切换到亮色" : "切换到暗色"}
+          title={theme === "dark" ? "切换到亮色" : "切换到暗色"}
+        >
+          {theme === "dark" ? <Sun size={15} strokeWidth={1.8} /> : <Moon size={15} strokeWidth={1.8} />}
+        </button>
+      )}
       <div className="toolbar-divider" />
 
       <div className="view-switch" aria-label="视图切换">

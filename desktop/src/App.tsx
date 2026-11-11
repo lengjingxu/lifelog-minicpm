@@ -101,6 +101,20 @@ export default function App() {
   const [anchorId, setAnchorId] = useState<string | null>(route.assetId);
   const [detailId, setDetailId] = useState<string | null>(route.assetId);
   const [toast, setToast] = useState<string | null>(null);
+  const [dialogOrigin, setDialogOrigin] = useState<string>("50% 100%");
+  const [detailClosing, setDetailClosing] = useState(false);
+  const [dialogClosing, setDialogClosing] = useState(false);
+  const [detailOrigin, setDetailOrigin] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    const saved = localStorage.getItem("sg-theme");
+    if (saved === "light" || saved === "dark") return saved;
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("sg-theme", theme);
+  }, [theme]);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [recognitionOpen, setRecognitionOpen] = useState(route.modal === "recognize");
   const live = useLiveController();
@@ -271,7 +285,33 @@ export default function App() {
     () => (allAssets ? buildCategories(allAssets, "places").length : 0),
     [allAssets],
   );
-  const openDetail = useCallback((asset: Asset) => {
+  const closeDetail = useCallback(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setDetailId(null);
+      return;
+    }
+    setDetailClosing(true);
+    window.setTimeout(() => {
+      setDetailClosing(false);
+      setDetailId(null);
+    }, 200);
+  }, []);
+
+  const closeRecognition = useCallback(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setRecognitionOpen(false);
+      return;
+    }
+    setDialogClosing(true);
+    window.setTimeout(() => {
+      setDialogClosing(false);
+      setRecognitionOpen(false);
+    }, 180);
+  }, []);
+
+  const openDetail = useCallback((asset: Asset, rect?: DOMRect) => {
+    if (rect) setDetailOrigin({ x: rect.left, y: rect.top, w: rect.width, h: rect.height });
+    else setDetailOrigin(null);
     setDetailId(asset.id);
     setSelection([asset.id]);
     setAnchorId(asset.id);
@@ -736,7 +776,14 @@ export default function App() {
           rate: live.view.rate,
           paused: live.view.paused,
         }}
-        onRecognition={() => setRecognitionOpen(true)}
+        onRecognition={(rect?: DOMRect) => {
+          if (rect) {
+            const x = rect.left + rect.width / 2;
+            const y = rect.top + rect.height / 2;
+            setDialogOrigin(`${x}px ${y}px`);
+          }
+          setRecognitionOpen(true);
+        }}
         onSettings={() => navigate("settings")}
       />
 
@@ -753,6 +800,8 @@ export default function App() {
           view={view}
           onView={navigate}
           minimal={view === "organize" || view === "settings"}
+          theme={theme}
+          onTheme={setTheme}
         />
 
         {conditions.length > 0 && view !== "organize" && view !== "settings" && (
@@ -778,7 +827,9 @@ export default function App() {
           </div>
         )}
 
-        <section className={clsx("content", view === "timeline" && "timeline-content")}>{content}</section>
+        <section className={clsx("content", view === "timeline" && "timeline-content")}>
+          <div className="view-shell" key={view}>{content}</div>
+        </section>
       </main>
 
       {detailAsset && (
@@ -786,7 +837,9 @@ export default function App() {
           asset={detailAsset}
           index={Math.max(0, detailIndex)}
           total={view === "library" ? Math.max(detailTotal, stats?.assets ?? 0) : detailTotal}
-          onClose={() => setDetailId(null)}
+          origin={detailOrigin}
+          onClose={closeDetail}
+          closing={detailClosing}
           onPrev={() => navigateDetail(-1)}
           onNext={() => navigateDetail(1)}
           onTag={applyTag}
@@ -797,12 +850,14 @@ export default function App() {
       <RecognitionDialog
         open={recognitionOpen}
         live={live}
+        origin={dialogOrigin}
         assets={new Map((allAssets ?? assets).map((asset) => [asset.id, asset]))}
-        onClose={() => setRecognitionOpen(false)}
+        onClose={closeRecognition}
+        closing={dialogClosing}
       />
 
       {toast && (
-        <div className="toast" role="status">
+        <div className="toast glass-surface" role="status">
           {toast}
         </div>
       )}

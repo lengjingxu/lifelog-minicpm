@@ -514,7 +514,8 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
               <button
                 type="button"
                 key={group.name}
-                className={clsx("group-card", selectedGroup === group.name && "selected", group.name === "未归类" && "failed")}
+                className={clsx("group-card", "group-panel", "glass-surface", selectedGroup === group.name && "selected", group.name === "未归类" && "failed")}
+                style={{ animationDelay: `${Math.min(groups.indexOf(group) * 35, 210)}ms` }}
                 onClick={() => setSelectedGroup(group.name)}
               >
                 <div className="group-card-title">

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import type { Facets, Health, LiveStatus, Stats } from "../api";
+import { useLayoutEffect, useRef } from "react";
 import { formatBytes, type View } from "../utils";
 
 type Props = {
@@ -28,7 +29,7 @@ type Props = {
   onPlace: (place: string) => void;
   onSearch: () => void;
   liveStatus: { status: LiveStatus; done: number; total: number; rate: number | null; paused: boolean } | null;
-  onRecognition: () => void;
+  onRecognition: (rect?: DOMRect) => void;
   onSettings: () => void;
 };
 
@@ -59,6 +60,28 @@ export function Sidebar({
   onRecognition,
   onSettings,
 }: Props) {
+  const navRef = useRef<HTMLDivElement | null>(null);
+  const indicatorRef = useRef<HTMLSpanElement | null>(null);
+  const firstRun = useRef(true);
+
+  useLayoutEffect(() => {
+    const list = navRef.current;
+    const indicator = indicatorRef.current;
+    if (!list || !indicator) return;
+    const active = list.querySelector<HTMLElement>(".nav-item.active");
+    if (!active) {
+      indicator.style.opacity = "0";
+      return;
+    }
+    indicator.style.transition = firstRun.current
+      ? "opacity 160ms linear"
+      : "transform 240ms cubic-bezier(.32,.72,0,1), height 240ms cubic-bezier(.32,.72,0,1), opacity 160ms linear";
+    firstRun.current = false;
+    indicator.style.opacity = "1";
+    indicator.style.height = `${active.offsetHeight}px`;
+    indicator.style.transform = `translateY(${active.offsetTop}px)`;
+  }, [view]);
+
   const tags = facets?.tags ?? [];
   const people = (facets?.people ?? []).filter(([name]) => name !== "无" && name !== "未知").slice(0, 3);
 
@@ -81,6 +104,8 @@ export function Sidebar({
 
       <div className="sidebar-scroll">
         <div className="nav-group-label">资料库</div>
+        <div className="nav-list" ref={navRef}>
+          <span className="nav-indicator" ref={indicatorRef} aria-hidden="true" />
         {NAV.map((item) => {
           const Icon = item.icon;
           const count =
@@ -108,6 +133,7 @@ export function Sidebar({
             </button>
           );
         })}
+        </div>
 
         <div className="nav-group-label">标签</div>
         {tags.length === 0 ? (
@@ -158,7 +184,7 @@ export function Sidebar({
 
       <div className="sidebar-foot">
         {liveStatus && liveStatus.status !== "idle" && (
-          <button type="button" className="sidebar-live" onClick={onRecognition}>
+          <button type="button" className="sidebar-live" onClick={(event) => onRecognition(event.currentTarget.getBoundingClientRect())}>
             <span className={clsx("live-dot", liveStatus.paused && "paused")} />
             <span className="sidebar-live-copy">
               <strong>{liveStatus.paused ? "识别已暂停" : liveStatus.status === "running" ? "识别中 · 后台运行" : "识别已完成"}</strong>
@@ -169,7 +195,7 @@ export function Sidebar({
             </span>
           </button>
         )}
-        <button type="button" className="sidebar-action" onClick={onRecognition}>
+        <button type="button" className="sidebar-action" onClick={(event) => onRecognition(event.currentTarget.getBoundingClientRect())}>
           <Sparkles size={13} strokeWidth={1.7} />
           <span>{liveStatus?.status === "running" ? "打开识别进度" : "识别进度"}</span>
         </button>

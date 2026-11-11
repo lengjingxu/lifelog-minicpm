@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Asset } from "../api";
 import { GAP } from "../utils";
+import { DURATION, EASE, reducedMotion } from "../motion";
 import { Thumb } from "./Thumb";
 
 type Props = {
@@ -10,7 +11,7 @@ type Props = {
   selection: Set<string>;
   multi: boolean;
   onSelect: (asset: Asset, event: MouseEvent) => void;
-  onOpen: (asset: Asset) => void;
+  onOpen: (asset: Asset, rect?: DOMRect) => void;
   onLoadMore?: () => void;
   hasMore?: boolean;
   loadingMore?: boolean;
@@ -30,6 +31,7 @@ export function VirtualGrid({
   const scrollRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
+  const prevRects = useRef<Map<string, DOMRect>>(new Map());
 
   useEffect(() => {
     const element = innerRef.current;
@@ -61,6 +63,32 @@ export function VirtualGrid({
       onLoadMore();
     }
   };
+
+  // 筛掉/重排时：同一张照片从旧位置滑到新位置，而不是瞬间重排。
+  useLayoutEffect(() => {
+    const container = innerRef.current;
+    if (!container) return;
+    const reduced = reducedMotion();
+    const next = new Map<string, DOMRect>();
+    container.querySelectorAll<HTMLElement>("[data-asset-id]").forEach((el) => {
+      next.set(el.dataset.assetId ?? "", el.getBoundingClientRect());
+    });
+    if (!reduced && prevRects.current.size) {
+      next.forEach((rect, id) => {
+        const prev = prevRects.current.get(id);
+        if (!prev) return;
+        const dx = prev.left - rect.left;
+        const dy = prev.top - rect.top;
+        if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return;
+        const el = container.querySelector<HTMLElement>(`[data-asset-id="${id}"]`);
+        el?.animate(
+          [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0, 0)" }],
+          { duration: DURATION.md, easing: EASE.inOut },
+        );
+      });
+    }
+    prevRects.current = next;
+  }, [assets, columns]);
 
   const virtualRows = virtualizer.getVirtualItems();
 
