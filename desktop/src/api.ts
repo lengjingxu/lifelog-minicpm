@@ -503,13 +503,33 @@ export async function rebuildThumbs(): Promise<RebuildResult> {
 
 export type ThumbStatus = { assets: number; thumbs: number; full: number; missing: number };
 
+export type ExportSummary = {
+  ok: boolean;
+  total: number;
+  copied: number;
+  skipped: number;
+  failed: number;
+  manifest: string;
+  target: string;
+};
+
+export const exportAssets = (payload: { ids?: string[]; filter?: Filter; target: string }) =>
+  invoke<ExportSummary>("export_assets", { args: payload });
+
+export const revealInFinder = (path: string) => invoke<void>("reveal_in_finder", { path });
+
 export const thumbStatus = () => invoke<ThumbStatus>("thumb_status");
 export const generateThumbs = (force = false) => invoke<{ ok: boolean }>("generate_thumbs", { force });
 
 import { open } from "@tauri-apps/plugin-dialog";
 
-export const pickFolder = async (): Promise<string | null> => {
-  const picked = await open({ directory: true, multiple: false, title: "选择要导入的文件夹" });
+export const pickFolder = async (options?: { title?: string; defaultPath?: string }): Promise<string | null> => {
+  const picked = await open({
+    directory: true,
+    multiple: false,
+    title: options?.title ?? "选择要导入的文件夹",
+    defaultPath: options?.defaultPath,
+  });
   return typeof picked === "string" ? picked : null;
 };
 

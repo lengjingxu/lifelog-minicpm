@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { Clock, Command, LayoutGrid, Moon, Search, Sun, X } from "lucide-react";
+import { Clock, Command, Download, LayoutGrid, Moon, Search, Sun, X } from "lucide-react";
 import clsx from "clsx";
 import type { View } from "../utils";
 
@@ -19,6 +19,7 @@ type Props = {
   minimal?: boolean;
   theme?: "dark" | "light";
   onTheme?: (theme: "dark" | "light") => void;
+  onExport?: () => void;
 };
 
 export function Topbar({
@@ -35,6 +36,7 @@ export function Topbar({
   minimal = false,
   theme = "dark",
   onTheme,
+  onExport,
 }: Props) {
   return (
     <header className="toolbar">
@@ -100,6 +102,11 @@ export function Topbar({
         </button>
       </div>
 
+      {onExport && (
+        <button type="button" className="tool-btn" onClick={onExport} title="导出当前范围（选中优先）">
+          <Download size={15} strokeWidth={1.8} />
+        </button>
+      )}
       <div className="density-switch" aria-label="网格密度">
         <button
           type="button"
