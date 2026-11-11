@@ -829,7 +829,7 @@ export default function App() {
       />
 
       {toast && (
-        <div className="toast" role="status">
+        <div className="toast glass-surface" role="status">
           {toast}
         </div>
       )}

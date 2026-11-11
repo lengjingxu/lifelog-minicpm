@@ -114,7 +114,7 @@ export function RecognitionDialog({
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="recognition-dialog dialog"
+        className="recognition-dialog dialog glass-surface"
         style={{ ["--dialog-origin" as string]: origin }}
         role="dialog"
         aria-modal="true"

@@ -115,7 +115,7 @@ export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, on
         </div>
       </div>
 
-      <aside className="inspector">
+      <aside className="inspector glass-surface">
         <button type="button" className="close-btn" onClick={onClose} aria-label="关闭详情">
           <X size={15} strokeWidth={1.9} />
         </button>

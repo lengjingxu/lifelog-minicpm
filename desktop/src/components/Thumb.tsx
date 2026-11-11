@@ -63,7 +63,7 @@ export function Thumb({ asset, selected, multi, onSelect, onOpen }: Props) {
           />
         )}
       </span>
-      <span className="badge">{kindLabel(asset)}</span>
+      <span className="badge glass-surface">{kindLabel(asset)}</span>
       <span className="overlay">
         <span>{asset.caption || "尚未识别"}</span>
       </span>

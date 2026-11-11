@@ -973,33 +973,50 @@ button:focus-visible, input:focus-visible {
 
 /* ================= 液态玻璃 + 动效 ================= */
 
-/* 玻璃只用在浮动面：顶栏、侧栏、检查器、条件栏 */
-.toolbar {
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border-bottom-color: var(--glass-border);
-  box-shadow: inset 0 1px 0 var(--glass-highlight);
+/* 顶栏/侧栏/条件栏底下是纯色渐变——按 Glasswork 的规则不加玻璃，只做半透明实心 */
+.toolbar { background: color-mix(in srgb, var(--bg) 78%, transparent); }
+.sidebar { background: color-mix(in srgb, var(--bg) 82%, transparent); }
+.condition-bar { background: color-mix(in srgb, var(--bg) 76%, transparent); }
+
+/* 液态玻璃：只给压在图片/复杂背景上的面（识别弹窗、toast、检查器、整理分组卡、缩略图徽标） */
+.glass-surface {
+  --g-tint: 255, 255, 255;
+  --g-density: 0.10;
+  --g-blur: 26px;
+  --g-sat: 1.8;
+  --g-bri: 1.06;
+  background: linear-gradient(
+    180deg,
+    rgba(var(--g-tint), calc(var(--g-density) + 0.05)),
+    rgba(var(--g-tint), var(--g-density))
+  );
+  -webkit-backdrop-filter: blur(var(--g-blur)) saturate(var(--g-sat)) brightness(var(--g-bri));
+  backdrop-filter: blur(var(--g-blur)) saturate(var(--g-sat)) brightness(var(--g-bri));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 24px 70px rgba(0, 0, 0, 0.55),
+    0 2px 10px rgba(0, 0, 0, 0.35);
+  corner-shape: round;
 }
-.sidebar {
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border-right-color: var(--glass-border);
-  box-shadow: inset -1px 0 0 rgba(255,255,255,0.04);
+
+[data-theme="light"] .glass-surface {
+  --g-density: 0.30;
+  --g-sat: 1.6;
+  --g-bri: 1.02;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.72),
+    0 20px 50px rgba(30, 30, 40, 0.18),
+    0 2px 8px rgba(30, 30, 40, 0.08);
 }
-.inspector {
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border-left-color: var(--glass-border);
-  box-shadow: inset 1px 0 0 var(--glass-highlight), var(--glass-shadow);
-}
-.condition-bar {
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border-bottom: 1px solid var(--glass-border);
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass-surface {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+  }
 }
 
 [data-theme="light"] .overlay-root { background: rgba(238,238,242,0.82); }
