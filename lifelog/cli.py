@@ -420,7 +420,23 @@ def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     db.init_db()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        # 顶层兜底：不打印 traceback（异常里可能带含 token 的 URL），只给一行脱敏信息。
+        message = sync_xiaomi._sanitize(str(exc)) if _safe_sync() else str(exc)[:200]
+        print(json.dumps({"stage": "failed", "message": message}, ensure_ascii=False))
+        return 4
+
+
+def _safe_sync() -> bool:
+    try:
+        from . import sync_xiaomi
+        return True
+    except Exception:
+        return False
 
 
 if __name__ == "__main__":
