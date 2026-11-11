@@ -1,3 +1,4 @@
+import clsx from "clsx";
 import { useMemo, useState } from "react";
 import {
   AlertCircle,
@@ -19,6 +20,7 @@ type Props = {
   assets: Map<string, Asset>;
   onClose: () => void;
   origin?: string;
+  closing?: boolean;
 
 };
 
@@ -37,6 +39,7 @@ export function RecognitionDialog({
   assets,
   onClose,
   origin = "50% 100%",
+  closing = false,
 }: Props) {
   const [count, setCount] = useState(18);
   const [concurrency, setConcurrency] = useState(4);
@@ -114,7 +117,7 @@ export function RecognitionDialog({
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="recognition-dialog dialog glass-surface"
+        className={clsx("recognition-dialog dialog glass-surface", closing && "closing")}
         style={{ ["--dialog-origin" as string]: origin }}
         role="dialog"
         aria-modal="true"

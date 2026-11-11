@@ -23,6 +23,7 @@ type Props = {
   onTag: (tag: string) => void;
   onAction: (label: string) => void;
   origin?: { x: number; y: number; w: number; h: number } | null;
+  closing?: boolean;
 };
 
 function MetaRow({ label, value }: { label: string; value: string | null | undefined }) {
@@ -34,7 +35,7 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
   );
 }
 
-export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, onAction, origin }: Props) {
+export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, onAction, origin, closing = false }: Props) {
   const [fullLoaded, setFullLoaded] = useState(false);
   const [fullFailed, setFullFailed] = useState(false);
 
@@ -74,7 +75,7 @@ export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, on
   const place = splitList(asset.place).join("、");
 
   return (
-    <div className="overlay-root" role="dialog" aria-modal="true" aria-label="照片详情">
+    <div className={clsx("overlay-root", closing && "closing")} role="dialog" aria-modal="true" aria-label="照片详情">
       <div className="stage" onClick={(event) => event.target === event.currentTarget && onClose()}>
         <div ref={stageRef} className={clsx("stage-image", fullLoaded && "full-ready")}>
           <img className="stage-thumb" src={thumb} alt="" aria-hidden="true" />

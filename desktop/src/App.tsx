@@ -102,6 +102,8 @@ export default function App() {
   const [detailId, setDetailId] = useState<string | null>(route.assetId);
   const [toast, setToast] = useState<string | null>(null);
   const [dialogOrigin, setDialogOrigin] = useState<string>("50% 100%");
+  const [detailClosing, setDetailClosing] = useState(false);
+  const [dialogClosing, setDialogClosing] = useState(false);
   const [detailOrigin, setDetailOrigin] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     const saved = localStorage.getItem("sg-theme");
@@ -283,6 +285,30 @@ export default function App() {
     () => (allAssets ? buildCategories(allAssets, "places").length : 0),
     [allAssets],
   );
+  const closeDetail = useCallback(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setDetailId(null);
+      return;
+    }
+    setDetailClosing(true);
+    window.setTimeout(() => {
+      setDetailClosing(false);
+      setDetailId(null);
+    }, 200);
+  }, []);
+
+  const closeRecognition = useCallback(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setRecognitionOpen(false);
+      return;
+    }
+    setDialogClosing(true);
+    window.setTimeout(() => {
+      setDialogClosing(false);
+      setRecognitionOpen(false);
+    }, 180);
+  }, []);
+
   const openDetail = useCallback((asset: Asset, rect?: DOMRect) => {
     if (rect) setDetailOrigin({ x: rect.left, y: rect.top, w: rect.width, h: rect.height });
     else setDetailOrigin(null);
@@ -812,7 +838,8 @@ export default function App() {
           index={Math.max(0, detailIndex)}
           total={view === "library" ? Math.max(detailTotal, stats?.assets ?? 0) : detailTotal}
           origin={detailOrigin}
-          onClose={() => setDetailId(null)}
+          onClose={closeDetail}
+          closing={detailClosing}
           onPrev={() => navigateDetail(-1)}
           onNext={() => navigateDetail(1)}
           onTag={applyTag}
@@ -825,7 +852,8 @@ export default function App() {
         live={live}
         origin={dialogOrigin}
         assets={new Map((allAssets ?? assets).map((asset) => [asset.id, asset]))}
-        onClose={() => setRecognitionOpen(false)}
+        onClose={closeRecognition}
+        closing={dialogClosing}
       />
 
       {toast && (
