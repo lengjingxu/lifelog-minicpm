@@ -7,6 +7,7 @@ import {
   isFixture,
   libraryStats,
   queryAssets,
+  countAssets,
   type Asset,
   type Facets,
   type Health,
@@ -97,6 +98,7 @@ const route = useMemo(readRoute, []);
   const [allLoading, setAllLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [queryInput, setQueryInput] = useState(route.query);
   const [query, setQuery] = useState(route.query);
@@ -152,7 +154,7 @@ const route = useMemo(readRoute, []);
   const firstGridMarked = useRef(false);
 
   const tagKey = tags.join("\u0001");
-  const active = Boolean(query || tags.length || scene || person || place);
+  const active = Boolean(query || tags.length || scene || person || place || album);
   const columns = gridColumnCount(viewportWidth, density);
 
   useEffect(() => {
@@ -352,20 +354,30 @@ const route = useMemo(readRoute, []);
   useEffect(() => {
     if (view !== "library") return;
     let cancelled = false;
-    const filterActive = Boolean(query || tags.length || scene || person || place || album);
     setLoading(true);
     setError(null);
     setSelection([]);
     setAnchorId(null);
     const scope = tags.length === 1 ? `tag:${tags[0]}` : album ? `album:${album}` : null;
-    queryAssets({
+    const filter = {
       query: query || undefined,
       tag: isFixture && fixtureUserTags[tags[0]] ? undefined : tags[0],
       album: album ?? undefined,
       scene: scene || undefined,
-      limit: filterActive ? 1000 : PAGE_SIZE,
+      person: person || undefined,
+      place: place || undefined,
+      limit: PAGE_SIZE,
       offset: 0,
-    })
+    };
+    // 计数与分页都交给服务端，前端不再在「最多 N 条」里二次过滤。
+    countAssets(filter)
+      .then((total) => {
+        if (!cancelled) setTotalCount(total);
+      })
+      .catch(() => {
+        if (!cancelled) setTotalCount(null);
+      });
+    queryAssets(filter)
       .then((list) => {
         if (cancelled) return;
         const hidden = scope && isFixture ? new Set(localRemoved[scope] ?? []) : null;
@@ -379,7 +391,7 @@ const route = useMemo(readRoute, []);
           visible = visible.filter((item) => members.has(item.id));
         }
         setAssets(visible);
-        setHasMore(!filterActive && visible.length === PAGE_SIZE);
+        setHasMore(visible.length === PAGE_SIZE);
       })
       .catch((reason: unknown) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
@@ -439,15 +451,13 @@ const route = useMemo(readRoute, []);
     };
   }, [needsAll, allAssets]);
 
-  const filteredAssets = useMemo(
-    () =>
-      assets.filter(
-        // 标签已在 queryAssets 层过滤（AI 标签查 captions.tags，用户标签查 asset_tags），这里不再二次过滤，
-        // 否则用户标签的成员会被 asset.tags（只含 AI 标签）筛掉。
-        (asset) => matchesFilters(asset, { tags: [], scene, person, place }) && matchesSearch(asset, query),
-      ),
-    [assets, tags, scene, person, place, query],
-  );
+  const filteredAssets = useMemo(() => {
+    // 服务端已经按 query/tag/scene/person/place 过滤；前端只在浏览器 fixture 里补这一层。
+    if (!isFixture) return assets;
+    return assets.filter(
+      (asset) => matchesFilters(asset, { tags: [], scene, person, place }) && matchesSearch(asset, query),
+    );
+  }, [assets, tags, scene, person, place, query]);
 
   const categoryAssets = useMemo(() => {
     if (!drilldown || !allAssets) return [];
@@ -613,16 +623,25 @@ const route = useMemo(readRoute, []);
   );
 
   const loadMore = useCallback(() => {
-    if (loadingMore || !hasMore || view !== "library" || active) return;
+    if (loadingMore || !hasMore || view !== "library") return;
     setLoadingMore(true);
-    queryAssets({ limit: PAGE_SIZE, offset: assets.length })
+    queryAssets({
+      query: query || undefined,
+      tag: isFixture && fixtureUserTags[tags[0]] ? undefined : tags[0],
+      album: album ?? undefined,
+      scene: scene || undefined,
+      person: person || undefined,
+      place: place || undefined,
+      limit: PAGE_SIZE,
+      offset: assets.length,
+    })
       .then((list) => {
         setAssets((previous) => [...previous, ...list]);
         setHasMore(list.length === PAGE_SIZE);
       })
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)))
       .finally(() => setLoadingMore(false));
-  }, [loadingMore, hasMore, view, active, assets.length]);
+  }, [loadingMore, hasMore, view, query, tagKey, tags, album, scene, person, place, assets.length, fixtureUserTags]);
 
   useEffect(() => {
     if (view !== "library" || loading || firstGridMarked.current) return;
@@ -808,7 +827,7 @@ const route = useMemo(readRoute, []);
     return "全部照片";
   })();
 
-  const count = view === "library" ? (active ? filteredAssets.length : (stats?.assets ?? assets.length)) : categoryCount;
+  const count = view === "library" ? (active ? (totalCount ?? filteredAssets.length) : (stats?.assets ?? assets.length)) : categoryCount;
   const subtitle = [
     view === "organize"
       ? "AI 归位过程 · 只在内存预演"

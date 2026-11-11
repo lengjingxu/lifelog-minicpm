@@ -48,6 +48,8 @@ export type Filter = {
   query?: string;
   tag?: string;
   scene?: string;
+  person?: string;
+  place?: string;
   kind?: string;
   day_from?: string;
   day_to?: string;
@@ -203,6 +205,8 @@ async function fixtureQuery(filter: Filter): Promise<Asset[]> {
     if (query && !matchesQuery(asset, query)) return false;
     if (tag && !asset.tags.includes(tag)) return false;
     if (scene && asset.scene !== scene) return false;
+    if (filter.person && !(asset.people ?? "").includes(filter.person)) return false;
+    if (filter.place && !(asset.place ?? "").includes(filter.place)) return false;
     if (kind && asset.kind !== kind) return false;
     if (filter.day_from && (!asset.day || asset.day < filter.day_from)) return false;
     if (filter.day_to && (!asset.day || asset.day > filter.day_to)) return false;
@@ -211,6 +215,14 @@ async function fixtureQuery(filter: Filter): Promise<Asset[]> {
   const offset = Math.max(0, filter.offset ?? 0);
   const limit = Math.max(0, filter.limit ?? 500);
   return filtered.slice(offset, offset + limit);
+}
+
+export async function countAssets(filter: Filter): Promise<number> {
+  if (!isTauri) {
+    const rows = await fixtureQuery({ ...filter, limit: 100000, offset: 0 });
+    return rows.length;
+  }
+  return invoke<number>("count_assets", { filter });
 }
 
 export async function queryAssets(filter: Filter): Promise<Asset[]> {
