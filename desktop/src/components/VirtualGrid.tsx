@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "r
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Asset } from "../api";
 import { GAP } from "../utils";
+import { DURATION, EASE, reducedMotion } from "../motion";
 import { Thumb } from "./Thumb";
 
 type Props = {
@@ -67,7 +68,7 @@ export function VirtualGrid({
   useLayoutEffect(() => {
     const container = innerRef.current;
     if (!container) return;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduced = reducedMotion();
     const next = new Map<string, DOMRect>();
     container.querySelectorAll<HTMLElement>("[data-asset-id]").forEach((el) => {
       next.set(el.dataset.assetId ?? "", el.getBoundingClientRect());
@@ -82,7 +83,7 @@ export function VirtualGrid({
         const el = container.querySelector<HTMLElement>(`[data-asset-id="${id}"]`);
         el?.animate(
           [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0, 0)" }],
-          { duration: 260, easing: "cubic-bezier(.32,.72,0,1)" },
+          { duration: DURATION.md, easing: EASE.inOut },
         );
       });
     }

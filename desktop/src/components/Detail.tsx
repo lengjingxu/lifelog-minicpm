@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { assetSrc, type Asset } from "../api";
+import { DURATION, EASE, reducedMotion } from "../motion";
 import { kindLabel, peopleList, splitList, timeLabel } from "../utils";
 
 type Props = {
@@ -48,7 +49,7 @@ export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, on
   useEffect(() => {
     const el = stageRef.current;
     if (!el || !origin) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (reducedMotion()) return;
     const target = el.getBoundingClientRect();
     if (!target.width || !target.height) return;
     const scaleX = origin.w / target.width;
@@ -60,7 +61,7 @@ export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, on
         { transform: `translate(${dx}px, ${dy}px) scale(${scaleX}, ${scaleY})`, opacity: 0.55 },
         { transform: "none", opacity: 1 },
       ],
-      { duration: 380, easing: "cubic-bezier(.32,.72,0,1)" },
+      { duration: DURATION.lg, easing: EASE.out },
     );
     // 只在打开时跑一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
