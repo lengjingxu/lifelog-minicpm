@@ -518,6 +518,16 @@ export const exportAssets = (payload: { ids?: string[]; filter?: Filter; target:
 
 export const revealInFinder = (path: string) => invoke<void>("reveal_in_finder", { path });
 
+export type DeleteResult = {
+  ok: boolean;
+  requested: number;
+  removed: { captions: number; asset_tags: number; album_assets: number; assets: number };
+  days_rebuilt?: number;
+  events_rebuilt?: number;
+};
+
+export const deleteRecords = (ids: string[]) => invoke<DeleteResult>("delete_records", { ids });
+
 export const thumbStatus = () => invoke<ThumbStatus>("thumb_status");
 export const generateThumbs = (force = false) => invoke<{ ok: boolean }>("generate_thumbs", { force });
 

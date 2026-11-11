@@ -154,5 +154,54 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
 
 
+
+
+class DeleteRecordsTests(unittest.TestCase):
+    """移除记录：只删库里的行，不动磁盘文件。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.db_path = self.root / "lifelog.sqlite"
+        self._restore = (config.DATA_DIR, config.DB_PATH)
+        config.DATA_DIR = self.root
+        config.DB_PATH = self.db_path
+        db.init_db()
+
+    def tearDown(self):
+        config.DATA_DIR, config.DB_PATH = self._restore
+        self.tmp.cleanup()
+
+    def test_deletes_rows_but_keeps_files(self):
+        from lifelog import ops
+
+        photo = self.root / "photos"
+        photo.mkdir(parents=True, exist_ok=True)
+        for i in range(3):
+            (photo / f"{i}.jpg").write_bytes(b"data")
+        with db.session() as con:
+            con.execute(
+                "INSERT INTO assets (id, path, day, taken_at, kind) VALUES (?,?,?,?,?)",
+                ("a1", str(photo / "0.jpg"), "2024-01-01", "2024-01-01T10:00:00", "image"),
+            )
+            con.execute(
+                "INSERT INTO captions (asset_id, model, model_version, prompt_version, caption, tags, status, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                ("a1", "test", "v1", "p1", "描述", "[]", "ok", "2024-01-01"),
+            )
+        with ops.connect(self.db_path) as conn:
+            conn.execute("INSERT INTO asset_tags VALUES ('a1','夏日','2024-01-01')")
+            conn.commit()
+
+        result = ops.delete_records(["a1"])
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["removed"]["assets"], 1)
+        self.assertEqual(result["removed"]["captions"], 1)
+        self.assertEqual(result["removed"]["asset_tags"], 1)
+        with db.session() as con:
+            left = con.execute("SELECT count(*) FROM assets WHERE id='a1'").fetchone()[0]
+        self.assertEqual(left, 0, "assets 行应被删除")
+        self.assertTrue((photo / "0.jpg").exists(), "磁盘文件不能被删")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

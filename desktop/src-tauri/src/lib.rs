@@ -483,6 +483,20 @@ fn reveal_in_finder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn delete_records(db: State<'_, Db>, ids: Vec<String>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let ids: Vec<String> = ids.into_iter().filter(|id| !id.trim().is_empty()).collect();
+        if ids.is_empty() {
+            return Err("没有选中要移除的记录".to_string());
+        }
+        run_python_cli(&home, &["record-delete".to_string(), "--ids".to_string(), ids.join(",")])
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
 fn health(db: State<'_, Db>) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "data_dir": db.data_dir.to_string_lossy(),
@@ -811,6 +825,7 @@ pub fn run() {
             query_assets,
             count_assets,
             export_assets,
+            delete_records,
             reveal_in_finder,
             facets,
             health,
