@@ -785,7 +785,7 @@ export default function App() {
         <Detail
           asset={detailAsset}
           index={Math.max(0, detailIndex)}
-          total={detailTotal}
+          total={view === "library" ? Math.max(detailTotal, stats?.assets ?? 0) : detailTotal}
           onClose={() => setDetailId(null)}
           onPrev={() => navigateDetail(-1)}
           onNext={() => navigateDetail(1)}
