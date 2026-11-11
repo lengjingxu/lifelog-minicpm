@@ -80,6 +80,7 @@ const CATEGORY_LABEL: Record<CategoryKind, string> = {
   tags: "标签",
   people: "人物",
   places: "地点",
+  scenes: "场景",
 };
 
 export default function App() {
@@ -464,6 +465,7 @@ const route = useMemo(readRoute, []);
     return allAssets.filter((asset) => {
       if (drilldown.kind === "tags") return asset.tags.includes(drilldown.name);
       if (drilldown.kind === "people") return peopleList(asset.people).includes(drilldown.name);
+      if (drilldown.kind === "scenes") return asset.scene === drilldown.name;
       return splitList(asset.place).includes(drilldown.name);
     });
   }, [allAssets, drilldown]);
@@ -900,7 +902,7 @@ const route = useMemo(readRoute, []);
             kind={view}
             assets={allAssets ?? []}
             loading={allLoading || allAssets === null}
-            onPick={(name) => setDrilldown({ kind: view, name })}
+            onPick={(kind, name) => setDrilldown({ kind, name })}
           />
         );
       }

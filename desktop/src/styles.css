@@ -1147,3 +1147,9 @@ button:focus-visible, input:focus-visible {
   font-size: 11.5px; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis;
 }
 .selection-bar .selection-remove:hover { color: var(--text); box-shadow: 0 0 0 1px var(--accent-line) inset; }
+
+.category-tabs { display: inline-flex; gap: 4px; margin: 14px 0 4px; padding: 3px;
+  border-radius: 999px; background: var(--bg-elevated); box-shadow: 0 0 0 1px var(--line) inset; }
+.category-tab { height: 26px; padding: 0 14px; border-radius: 999px; font-size: 11.5px; color: var(--text-dim); }
+.category-tab:hover { color: var(--text); }
+.category-tab.active { color: var(--text); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent-line) inset; }

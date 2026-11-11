@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Hash, MapPin, Tags, Users } from "lucide-react";
+import clsx from "clsx";
+import { Hash, Layers, MapPin, Tags, Users } from "lucide-react";
 import { assetSrc, type Asset } from "../api";
 import { buildCategories, type CategoryKind } from "../utils";
 
@@ -7,13 +8,14 @@ type Props = {
   kind: CategoryKind;
   assets: Asset[];
   loading: boolean;
-  onPick: (name: string) => void;
+  onPick: (kind: CategoryKind, name: string) => void;
 };
 
 const COPY: Record<CategoryKind, { title: string; note: string; icon: typeof Tags }> = {
   tags: { title: "AI 标签", note: "按模型给出的内容标签浏览，代表图取该标签下最新一张。", icon: Tags },
   people: { title: "人物", note: "相册里被识别到的人物与人数线索。", icon: Users },
   places: { title: "地点", note: "按 AI 识别的地点线索回看照片。", icon: MapPin },
+  scenes: { title: "场景", note: "按模型识别的场景浏览，代表图取该场景下最新一张。", icon: Layers },
 };
 
 function Cover({ asset }: { asset: Asset }) {
@@ -32,9 +34,18 @@ function Cover({ asset }: { asset: Asset }) {
   );
 }
 
+const TABS: { kind: CategoryKind; label: string }[] = [
+  { kind: "tags", label: "标签" },
+  { kind: "people", label: "人物" },
+  { kind: "places", label: "地点" },
+  { kind: "scenes", label: "场景" },
+];
+
 export function Categories({ kind, assets, loading, onPick }: Props) {
-  const groups = useMemo(() => buildCategories(assets, kind), [assets, kind]);
-  const copy = COPY[kind];
+  const [activeKind, setActiveKind] = useState<CategoryKind>(kind);
+  useEffect(() => setActiveKind(kind), [kind]);
+  const groups = useMemo(() => buildCategories(assets, activeKind), [assets, activeKind]);
+  const copy = COPY[activeKind];
   const Icon = copy.icon;
 
   return (
@@ -54,6 +65,21 @@ export function Categories({ kind, assets, loading, onPick }: Props) {
         </div>
       </div>
 
+      <div className="category-tabs" role="tablist">
+        {TABS.map((tab) => (
+          <button
+            key={tab.kind}
+            type="button"
+            role="tab"
+            aria-selected={activeKind === tab.kind}
+            className={clsx("category-tab", activeKind === tab.kind && "active")}
+            onClick={() => setActiveKind(tab.kind)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <div className="category-loading">正在整理分类…</div>
       ) : groups.length === 0 ? (
@@ -65,7 +91,7 @@ export function Categories({ kind, assets, loading, onPick }: Props) {
               type="button"
               className="category-card"
               key={group.name}
-              onClick={() => onPick(group.name)}
+              onClick={() => onPick(activeKind, group.name)}
               style={{ animationDelay: `${Math.min(index, 10) * 24}ms` }}
             >
               <span className="category-cover">

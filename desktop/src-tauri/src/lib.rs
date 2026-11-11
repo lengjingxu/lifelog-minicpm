@@ -192,7 +192,16 @@ fn library_stats(db: State<'_, Db>) -> Result<Stats, String> {
     })
 }
 
-fn filter_where(filter: &Filter) -> (String, Vec<rusqlite::types::Value>) {
+fn has_table(conn: &rusqlite::Connection, name: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1",
+        [name],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+fn filter_where(filter: &Filter, has_asset_tags: bool) -> (String, Vec<rusqlite::types::Value>) {
     let mut sql = String::from(" WHERE 1=1");
     let mut args: Vec<rusqlite::types::Value> = Vec::new();
 
@@ -213,9 +222,18 @@ fn filter_where(filter: &Filter) -> (String, Vec<rusqlite::types::Value>) {
     if let Some(tag) = filter.tag.as_deref().filter(|value| !value.is_empty()) {
         args.push(rusqlite::types::Value::Text(tag.to_string()));
         let index = args.len();
-        sql.push_str(&format!(
-            " AND ((c.tags LIKE '%' || ?{index} || '%') OR EXISTS (SELECT 1 FROM asset_tags ut WHERE ut.asset_id = a.id AND ut.tag = ?{index}))"
-        ));
+        // 精确匹配：json_each 逐项比较，避免「户外」命中「运动户外」；json_valid 守住脏数据。
+        // asset_tags 可能尚未创建（全新库），此时只走 AI 标签分支。
+        let mut clause = format!(
+            " AND ((json_valid(c.tags) AND EXISTS (SELECT 1 FROM json_each(c.tags) WHERE json_each.value = ?{index}))"
+        );
+        if has_asset_tags {
+            clause.push_str(&format!(
+                " OR EXISTS (SELECT 1 FROM asset_tags ut WHERE ut.asset_id = a.id AND ut.tag = ?{index})"
+            ));
+        }
+        clause.push_str(")");
+        sql.push_str(&clause);
     }
 
     push(filter.album.as_deref(), " AND EXISTS (SELECT 1 FROM album_assets aa JOIN albums al ON al.id = aa.album_id WHERE aa.asset_id = a.id AND al.name = ?{n})", &mut args, &mut sql);
@@ -233,7 +251,7 @@ fn filter_where(filter: &Filter) -> (String, Vec<rusqlite::types::Value>) {
 fn count_assets(db: State<'_, Db>, filter: Filter) -> Result<i64, String> {
     let guard = db.open()?;
     let conn = guard.as_ref().unwrap();
-    let (where_sql, args) = filter_where(&filter);
+    let (where_sql, args) = filter_where(&filter, has_table(conn, "asset_tags"));
     let sql = format!(
         "SELECT count(*) FROM assets a \
          LEFT JOIN captions c ON c.rowid = ( \
@@ -252,7 +270,7 @@ fn count_assets(db: State<'_, Db>, filter: Filter) -> Result<i64, String> {
 fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, String> {
     let guard = db.open()?;
     let conn = guard.as_ref().unwrap();
-    let (where_sql, mut args) = filter_where(&filter);
+    let (where_sql, mut args) = filter_where(&filter, has_table(conn, "asset_tags"));
     let mut sql = format!(
         "SELECT a.id, a.path, a.day, a.taken_at, a.kind, \
                 c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text \
@@ -310,8 +328,14 @@ fn facets(db: State<'_, Db>) -> Result<Facets, String> {
     let conn = guard.as_ref().unwrap();
     let mut facets = Facets::default();
 
+    // 按「每个 asset 的最新一条 caption」统计，与 query_assets / count_assets 同源，
+    // 否则分类卡片的数字（按 caption 行计）会和网格总数（按 asset 计）对不上。
     let mut stmt = conn
-        .prepare("SELECT tags, scene, people FROM captions")
+        .prepare(
+            "SELECT c.tags, c.scene, c.people FROM assets a \
+             LEFT JOIN captions c ON c.rowid = ( \
+                 SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)",
+        )
         .map_err(|e| e.to_string())?;
     let mut tags: HashMap<String, i64> = HashMap::new();
     let mut scenes: HashMap<String, i64> = HashMap::new();
@@ -754,7 +778,7 @@ mod filter_tests {
     }
 
     fn count(conn: &rusqlite::Connection, filter: &Filter) -> i64 {
-        let (where_sql, args) = filter_where(filter);
+        let (where_sql, args) = filter_where(filter, true);
         let sql = format!(
             "SELECT count(*) FROM assets a \
              LEFT JOIN captions c ON c.rowid = ( \
@@ -766,7 +790,7 @@ mod filter_tests {
     }
 
     fn list(conn: &rusqlite::Connection, filter: &Filter) -> usize {
-        let (where_sql, mut args) = filter_where(filter);
+        let (where_sql, mut args) = filter_where(filter, true);
         let mut sql = format!(
             "SELECT a.id FROM assets a \
              LEFT JOIN captions c ON c.rowid = ( \
@@ -826,5 +850,54 @@ mod filter_tests {
         f.limit = Some(1);
         f.offset = Some(1);
         assert_eq!(list(&conn, &f), 1);
+    }
+
+    #[test]
+    fn tag_filter_is_exact_not_substring() {
+        let conn = seed();
+        conn.execute(r#"UPDATE captions SET tags = '["运动户外"]' WHERE rowid = 2"#, []).unwrap();
+        let mut f = filter();
+        f.tag = Some("户外".into());
+        assert_eq!(count(&conn, &f), 0, "「户外」不应命中「运动户外」");
+        f.tag = Some("运动户外".into());
+        assert_eq!(count(&conn, &f), 1);
+    }
+
+    #[test]
+    fn facets_counts_match_count_assets() {
+        let conn = seed();
+        let base = "FROM assets a LEFT JOIN captions c ON c.rowid = (             SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)";
+
+        let mut f = filter();
+        f.scene = Some("户外".into());
+        let facet_scene: i64 = conn
+            .query_row(&format!("SELECT count(*) {base} WHERE c.scene = '户外'"), [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(facet_scene, count(&conn, &f), "scene 维度 facets 与 count_assets 不一致");
+
+        let mut f = filter();
+        f.person = Some("一人".into());
+        let facet_person: i64 = conn
+            .query_row(&format!("SELECT count(*) {base} WHERE c.people LIKE '%一人%'"), [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(facet_person, count(&conn, &f), "person 维度不一致");
+
+        let mut f = filter();
+        f.place = Some("海边".into());
+        let facet_place: i64 = conn
+            .query_row(&format!("SELECT count(*) {base} WHERE c.place LIKE '%海边%'"), [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(facet_place, count(&conn, &f), "place 维度不一致");
+
+        let mut f = filter();
+        f.tag = Some("风景".into());
+        let facet_tag: i64 = conn
+            .query_row(
+                &format!("SELECT count(*) {base} WHERE json_valid(c.tags) AND EXISTS (SELECT 1 FROM json_each(c.tags) WHERE json_each.value = '风景')"),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(facet_tag, count(&conn, &f), "tag 维度不一致");
     }
 }
