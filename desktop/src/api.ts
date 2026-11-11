@@ -485,3 +485,8 @@ export async function rebuildThumbs(): Promise<RebuildResult> {
   }
   return invoke<RebuildResult>("rebuild_thumbs");
 }
+
+export type ThumbStatus = { assets: number; thumbs: number; full: number; missing: number };
+
+export const thumbStatus = () => invoke<ThumbStatus>("thumb_status");
+export const generateThumbs = (force = false) => invoke<{ ok: boolean }>("generate_thumbs", { force });

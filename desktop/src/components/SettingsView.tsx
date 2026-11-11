@@ -10,7 +10,8 @@ import {
   RefreshCw,
   UserRound,
 } from "lucide-react";
-import { appSettings, rebuildThumbs, type AppSettings } from "../api";
+import { listen } from "@tauri-apps/api/event";
+import { appSettings, generateThumbs, rebuildThumbs, thumbStatus, type AppSettings, type ThumbStatus } from "../api";
 import { formatBytes } from "../utils";
 
 const SHORTCUTS: [string, string][] = [
@@ -30,6 +31,9 @@ export function SettingsView({ onToast }: { onToast: (message: string) => void }
   const [loading, setLoading] = useState(true);
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildOutput, setRebuildOutput] = useState<string | null>(null);
+  const [gap, setGap] = useState<ThumbStatus | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number; rate: number; eta: number | null } | null>(null);
+  const [generating, setGenerating] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -41,6 +45,45 @@ export function SettingsView({ onToast }: { onToast: (message: string) => void }
   };
 
   useEffect(load, []);
+
+  useEffect(() => {
+    void thumbStatus().then(setGap).catch(() => setGap(null));
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<{ done: number; total: number; rate_per_s?: number; eta_s?: number | null }>(
+      "thumbs-progress",
+      (event) => {
+        const payload = event.payload;
+        setProgress({
+          done: payload.done ?? 0,
+          total: payload.total ?? 0,
+          rate: payload.rate_per_s ?? 0,
+          eta: payload.eta_s ?? null,
+        });
+      },
+    ).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
+
+  const runGenerate = async () => {
+    setGenerating(true);
+    setProgress({ done: 0, total: gap?.missing ?? 0, rate: 0, eta: null });
+    try {
+      await generateThumbs(false);
+      const next = await thumbStatus();
+      setGap(next);
+      onToast(next.missing === 0 ? "缩略图已补齐" : `仍缺 ${next.missing} 张，失败项已记入 broken.json`);
+    } catch (err) {
+      onToast(`生成失败：${String(err)}`);
+    } finally {
+      setGenerating(false);
+      setProgress(null);
+    }
+  };
 
   const rebuild = async () => {
     setRebuilding(true);
@@ -139,11 +182,30 @@ export function SettingsView({ onToast }: { onToast: (message: string) => void }
             <h3>缩略图缓存</h3>
           </div>
           <div className="cache-number">{formatBytes(settings.thumb_cache.size)}</div>
-          <div className="model-key">{settings.thumb_cache.count} 张缩略图</div>
+          <div className="model-key">
+            {settings.thumb_cache.count} 张缩略图
+            {gap ? ` · 库内 ${gap.assets} 张${gap.missing > 0 ? `，缺 ${gap.missing} 张` : "，已齐全"}` : ""}
+          </div>
+          {progress && (
+            <div className="model-key">
+              已处理 {progress.done} / {progress.total}
+              {progress.rate > 0 ? ` · ${progress.rate.toFixed(1)} 张/秒` : ""}
+              {progress.eta !== null ? ` · 剩余 ${progress.eta}s` : ""}
+            </div>
+          )}
           <div className="path-note" title={settings.thumb_cache.path}>{settings.thumb_cache.path}</div>
           <button type="button" className="ghost-button full" onClick={() => void rebuild()} disabled={rebuilding}>
             {rebuilding ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}
             {rebuilding ? "正在重建…" : "重建缩略图缓存"}
+          </button>
+          <button
+            type="button"
+            className="ghost-button full"
+            onClick={() => void runGenerate()}
+            disabled={generating || rebuilding}
+          >
+            {generating ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}
+            {generating ? "正在补齐…" : "补齐缺失缩略图"}
           </button>
           {rebuildOutput && <pre className="rebuild-output">{rebuildOutput}</pre>}
         </section>

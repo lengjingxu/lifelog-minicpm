@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use std::io::{BufRead, BufReader};
+use std::process::Stdio;
+use tauri::{Emitter, Manager, State};
 
 mod live;
 
@@ -369,6 +371,77 @@ async fn app_settings(db: State<'_, Db>) -> Result<serde_json::Value, String> {
     .map_err(|err| format!("读取设置失败：{err}"))?
 }
 
+fn count_jpgs(dir: &Path) -> i64 {
+    std::fs::read_dir(dir)
+        .map(|items| {
+            items
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.path().extension().map(|ext| ext == "jpg").unwrap_or(false))
+                .count() as i64
+        })
+        .unwrap_or(0)
+}
+
+#[tauri::command]
+fn thumb_status(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let thumbs = count_jpgs(&db.data_dir.join("thumbs"));
+    let full = count_jpgs(&db.data_dir.join("thumbs").join("full"));
+    let guard = db.open()?;
+    let conn = guard.as_ref().unwrap();
+    let assets: i64 = conn
+        .query_row("SELECT count(*) FROM assets", [], |row| row.get(0))
+        .unwrap_or(0);
+    Ok(serde_json::json!({
+        "assets": assets,
+        "thumbs": thumbs,
+        "full": full,
+        "missing": (assets - thumbs).max(0),
+    }))
+}
+
+#[tauri::command]
+async fn generate_thumbs(
+    app: tauri::AppHandle,
+    db: State<'_, Db>,
+    force: bool,
+) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = desktop_root();
+        let script = root.join("scripts/gen_thumbs.py");
+        if !script.exists() {
+            return Err(format!("找不到缩略图脚本：{}", script.display()));
+        }
+        let mut command = std::process::Command::new("python3");
+        command
+            .arg(&script)
+            .arg("--json")
+            .arg("--jobs")
+            .arg("6")
+            .current_dir(&root)
+            .env("LIFELOG_HOME", &home)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        if force {
+            command.arg("--force");
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|err| format!("启动缩略图生成失败：{err}"))?;
+        if let Some(stdout) = child.stdout.take() {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+                    let _ = app.emit("thumbs-progress", value);
+                }
+            }
+        }
+        let status = child.wait().map_err(|err| err.to_string())?;
+        Ok(serde_json::json!({"ok": status.success()}))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
 #[tauri::command]
 async fn rebuild_thumbs(db: State<'_, Db>) -> Result<serde_json::Value, String> {
     let home = db.data_dir.clone();
@@ -427,6 +500,8 @@ pub fn run() {
             health,
             app_settings,
             rebuild_thumbs,
+            thumb_status,
+            generate_thumbs,
             live::live_health,
             live::live_start,
             live::live_state,
