@@ -15,6 +15,8 @@ import {
   pickFolder,
   importFolder,
   bulkTag,
+  exportAssets,
+  revealInFinder,
   albumAdd,
 } from "./api";
 import { Sidebar } from "./components/Sidebar";
@@ -306,6 +308,53 @@ const route = useMemo(readRoute, []);
       setBulkBusy(false);
     }
   };
+
+  const [exporting, setExporting] = useState(false);
+  const handleExport = useCallback(async () => {
+    if (exporting) return;
+    // 全库一键导出必须是明确行为：没有选中、也没有任何筛选时拒绝，避免误触。
+    if (!selection.length && !active) {
+      showToast("先选中照片或套用筛选条件，再导出");
+      return;
+    }
+    const remembered = window.localStorage.getItem("sg-export-dir") ?? undefined;
+    const target = await pickFolder({ title: "选择导出目录", defaultPath: remembered });
+    if (!target) return;
+    window.localStorage.setItem("sg-export-dir", target);
+    setExporting(true);
+    try {
+      const result = await exportAssets({
+        ids: selection.length ? selection : undefined,
+        filter: {
+          query: query || undefined,
+          tag: tags[0],
+          album: album ?? undefined,
+          scene: scene || undefined,
+          person: person || undefined,
+          place: place || undefined,
+          limit: 100000,
+          offset: 0,
+        },
+        target,
+      });
+      const text = `导出完成：成功 ${result.copied} / 跳过 ${result.skipped} / 失败 ${result.failed}`;
+      if (result.copied === 0 && result.skipped > 0) {
+        showToast(`${text}（全部为已存在且一致的文件）`, {
+          label: "在 Finder 中显示",
+          run: () => void revealInFinder(result.manifest),
+        });
+      } else {
+        showToast(text, {
+          label: "在 Finder 中显示",
+          run: () => void revealInFinder(result.manifest),
+        });
+      }
+    } catch (err) {
+      showToast(`导出失败：${String(err)}`);
+    } finally {
+      setExporting(false);
+    }
+  }, [exporting, selection, active, query, tagKey, tags, album, scene, person, place, showToast]);
 
   const handleEmptyChoice = async (label: string) => {
     if (!label.includes("扫描")) {
@@ -1016,6 +1065,7 @@ const route = useMemo(readRoute, []);
         <Topbar
           title={title}
           subtitle={subtitle}
+          onExport={selection.length > 0 || active ? () => void handleExport() : undefined}
           searchValue={queryInput}
           onSearchChange={handleSearchChange}
           onSearchClear={clearSearch}

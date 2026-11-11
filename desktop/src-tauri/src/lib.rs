@@ -7,6 +7,8 @@ use std::io::{BufRead, BufReader};
 use std::process::Stdio;
 use tauri::{Emitter, Manager, State};
 
+mod export;
+
 mod live;
 
 use live::LiveSidecar;
@@ -396,6 +398,90 @@ fn facets(db: State<'_, Db>) -> Result<Facets, String> {
     Ok(facets)
 }
 
+
+#[derive(Deserialize)]
+struct ExportArgs {
+    ids: Option<Vec<String>>,
+    filter: Option<Filter>,
+    target: String,
+}
+
+fn load_export_rows(conn: &Connection, args: &ExportArgs) -> Result<Vec<export::Row>, String> {
+    let (where_sql, mut params) = match (&args.ids, &args.filter) {
+        (Some(ids), _) if !ids.is_empty() => {
+            let placeholders = vec!["?"; ids.len()].join(",");
+            let mut values: Vec<rusqlite::types::Value> = ids
+                .iter()
+                .map(|id| rusqlite::types::Value::Text(id.clone()))
+                .collect();
+            (format!(" WHERE a.id IN ({placeholders})"), values)
+        }
+        (_, Some(filter)) => filter_where(filter, has_table(conn, "asset_tags")),
+        _ => (String::from(" WHERE 1=1"), Vec::new()),
+    };
+    let sql = format!(
+        "SELECT a.id, a.path, a.day, a.taken_at, c.caption, c.scene, c.people, c.place,                 c.activity, c.mood, c.tags, c.ocr_text          FROM assets a          LEFT JOIN captions c ON c.rowid = (              SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)          {}",
+        where_sql
+    );
+    let _ = &mut params;
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params_from_iter(params.iter()), |row| {
+            Ok(export::Row {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                day: row.get(2)?,
+                taken_at: row.get(3)?,
+                caption: row.get(4)?,
+                scene: row.get(5)?,
+                people: row.get(6)?,
+                place: row.get(7)?,
+                activity: row.get(8)?,
+                mood: row.get(9)?,
+                tags: parse_tags(row.get(10)?),
+                ocr_text: row.get(11)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+async fn export_assets(db: State<'_, Db>, args: ExportArgs) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    let db_path = db.path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = Connection::open_with_flags(
+            &db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| e.to_string())?;
+        let rows = load_export_rows(&conn, &args)?;
+        let target = PathBuf::from(&args.target);
+        if !target.is_dir() {
+            return Err(format!("目标目录不存在：{}", target.display()));
+        }
+        let summary = export::export_rows(&rows, &home, &target)?;
+        serde_json::to_value(summary).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn reveal_in_finder(path: String) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg("-R")
+        .arg(path)
+        .status()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn health(db: State<'_, Db>) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
@@ -724,6 +810,8 @@ pub fn run() {
             library_stats,
             query_assets,
             count_assets,
+            export_assets,
+            reveal_in_finder,
             facets,
             health,
             app_settings,
