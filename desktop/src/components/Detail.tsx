@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -21,6 +21,7 @@ type Props = {
   onNext: () => void;
   onTag: (tag: string) => void;
   onAction: (label: string) => void;
+  origin?: { x: number; y: number; w: number; h: number } | null;
 };
 
 function MetaRow({ label, value }: { label: string; value: string | null | undefined }) {
@@ -32,7 +33,7 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
   );
 }
 
-export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, onAction }: Props) {
+export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, onAction, origin }: Props) {
   const [fullLoaded, setFullLoaded] = useState(false);
   const [fullFailed, setFullFailed] = useState(false);
 
@@ -40,6 +41,30 @@ export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, on
     setFullLoaded(false);
     setFullFailed(false);
   }, [asset.id]);
+
+  const stageRef = useRef<HTMLDivElement | null>(null);
+
+  // 从被点开的卡片长成详情大图（关闭时由外部直接移除）。
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el || !origin) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const target = el.getBoundingClientRect();
+    if (!target.width || !target.height) return;
+    const scaleX = origin.w / target.width;
+    const scaleY = origin.h / target.height;
+    const dx = origin.x + origin.w / 2 - (target.left + target.width / 2);
+    const dy = origin.y + origin.h / 2 - (target.top + target.height / 2);
+    el.animate(
+      [
+        { transform: `translate(${dx}px, ${dy}px) scale(${scaleX}, ${scaleY})`, opacity: 0.55 },
+        { transform: "none", opacity: 1 },
+      ],
+      { duration: 380, easing: "cubic-bezier(.32,.72,0,1)" },
+    );
+    // 只在打开时跑一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const thumb = assetSrc(asset.thumb);
   const original = assetSrc(asset.original);
@@ -50,7 +75,7 @@ export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, on
   return (
     <div className="overlay-root" role="dialog" aria-modal="true" aria-label="照片详情">
       <div className="stage" onClick={(event) => event.target === event.currentTarget && onClose()}>
-        <div className={clsx("stage-image", fullLoaded && "full-ready")}>
+        <div ref={stageRef} className={clsx("stage-image", fullLoaded && "full-ready")}>
           <img className="stage-thumb" src={thumb} alt="" aria-hidden="true" />
           {!fullFailed && (
             <img

@@ -9,7 +9,7 @@ type Props = {
   selected?: boolean;
   multi?: boolean;
   onSelect: (asset: Asset, event: MouseEvent) => void;
-  onOpen: (asset: Asset) => void;
+  onOpen: (asset: Asset, rect?: DOMRect) => void;
 };
 
 export function Thumb({ asset, selected, multi, onSelect, onOpen }: Props) {
@@ -41,7 +41,7 @@ export function Thumb({ asset, selected, multi, onSelect, onOpen }: Props) {
       aria-label={`${kindLabel(asset)} · ${asset.caption || asset.path}`}
       aria-pressed={selected}
       onClick={(event) => onSelect(asset, event)}
-      onDoubleClick={() => onOpen(asset)}
+      onDoubleClick={(event) => onOpen(asset, event.currentTarget.getBoundingClientRect())}
     >
       <span className="thumb-frame">
         {!loaded && !failed && <span className="skeleton" aria-hidden="true" />}

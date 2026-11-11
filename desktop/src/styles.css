@@ -1,4 +1,5 @@
-:root {
+/* ---------- tokens ---------- */
+:root, [data-theme="dark"] {
   --bg: #08080A;
   --bg-elevated: rgba(255,255,255,0.045);
   --bg-hover: rgba(255,255,255,0.075);
@@ -10,6 +11,27 @@
   --accent: #FF4A4A;
   --accent-soft: rgba(255,74,74,0.14);
   --accent-line: rgba(255,74,74,0.30);
+  --glow-a: rgba(255,74,74,0.085);
+  --glow-b: rgba(90,105,160,0.045);
+  --outline: rgba(255,255,255,0.45);
+  --scroll-thumb: rgba(255,255,255,0.08);
+  --scroll-thumb-hover: rgba(255,255,255,0.14);
+
+  /* 液态玻璃 */
+  --glass-bg: linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.035));
+  --glass-blur: saturate(180%) blur(28px);
+  --glass-border: rgba(255,255,255,0.16);
+  --glass-highlight: rgba(255,255,255,0.42);
+  --glass-shadow: 0 24px 70px rgba(0,0,0,0.55), 0 2px 10px rgba(0,0,0,0.35);
+
+  /* 动效 */
+  --dur-fast: 160ms;
+  --dur-base: 240ms;
+  --dur-slow: 320ms;
+  --dur-page: 420ms;
+  --ease-out: cubic-bezier(.32,.72,0,1);
+  --ease-soft: cubic-bezier(.2,.8,.3,1);
+
   --radius: 14px;
   color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
@@ -18,13 +40,40 @@
   -webkit-font-smoothing: antialiased;
 }
 
+[data-theme="light"] {
+  --bg: #F2F1EE;
+  --bg-elevated: rgba(255,255,255,0.72);
+  --bg-hover: rgba(255,255,255,0.92);
+  --line: rgba(22,22,26,0.10);
+  --line-strong: rgba(22,22,26,0.20);
+  --text: #17171A;
+  --text-dim: rgba(23,23,26,0.66);
+  --text-faint: rgba(23,23,26,0.42);
+  --accent: #D9382F;
+  --accent-soft: rgba(217,56,47,0.10);
+  --accent-line: rgba(217,56,47,0.24);
+  --glow-a: rgba(217,56,47,0.06);
+  --glow-b: rgba(90,105,160,0.05);
+  --outline: rgba(23,23,26,0.45);
+  --scroll-thumb: rgba(23,23,26,0.14);
+  --scroll-thumb-hover: rgba(23,23,26,0.24);
+
+  --glass-bg: linear-gradient(180deg, rgba(255,255,255,0.86), rgba(255,255,255,0.66));
+  --glass-blur: saturate(180%) blur(28px);
+  --glass-border: rgba(255,255,255,0.85);
+  --glass-highlight: rgba(255,255,255,0.95);
+  --glass-shadow: 0 24px 60px rgba(30,30,40,0.16), 0 2px 8px rgba(30,30,40,0.08);
+
+  color-scheme: light;
+}
+
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 
 body {
   background:
-    radial-gradient(1100px 680px at 10% -12%, rgba(255,74,74,0.085), transparent 62%),
-    radial-gradient(900px 560px at 100% 0%, rgba(90,105,160,0.045), transparent 58%),
+    radial-gradient(1100px 680px at 10% -12%, var(--glow-a), transparent 62%),
+    radial-gradient(900px 560px at 100% 0%, var(--glow-b), transparent 58%),
     var(--bg);
   color: var(--text);
   overflow: hidden;
@@ -35,19 +84,19 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 button:disabled { cursor: default; }
 input { font: inherit; color: inherit; }
 button:focus-visible, input:focus-visible {
-  outline: 1px solid rgba(255,255,255,0.45);
+  outline: 1px solid var(--outline);
   outline-offset: 2px;
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.08);
+  background: var(--scroll-thumb);
   border-radius: 10px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.14); background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
 
 .app { display: grid; grid-template-columns: 232px minmax(0, 1fr); height: 100%; }
 
@@ -907,3 +956,102 @@ button:focus-visible, input:focus-visible {
   .organize-stage { grid-template-columns: minmax(0,1fr) minmax(340px,0.9fr); }
   .group-panels { grid-template-columns: 1fr 1fr; }
 }
+
+/* ================= 液态玻璃 + 动效 ================= */
+
+/* 玻璃只用在浮动面：顶栏、侧栏、检查器、条件栏 */
+.toolbar {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-bottom-color: var(--glass-border);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+.sidebar {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-right-color: var(--glass-border);
+  box-shadow: inset -1px 0 0 rgba(255,255,255,0.04);
+}
+.inspector {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-left-color: var(--glass-border);
+  box-shadow: inset 1px 0 0 var(--glass-highlight), var(--glass-shadow);
+}
+.condition-bar {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+[data-theme="light"] .overlay-root { background: rgba(238,238,242,0.82); }
+[data-theme="light"] .stage img { box-shadow: 0 24px 60px rgba(30,30,40,0.18); }
+[data-theme="light"] .cell { box-shadow: inset 0 0 0 1px rgba(22,22,26,0.07); }
+[data-theme="light"] .cell:hover { box-shadow: inset 0 0 0 1px rgba(22,22,26,0.16), 0 12px 26px rgba(30,30,40,0.14); }
+[data-theme="light"] .sidebar,
+[data-theme="light"] .toolbar,
+[data-theme="light"] .inspector { box-shadow: inset 0 1px 0 rgba(255,255,255,0.9); }
+[data-theme="light"] .skeleton { background: linear-gradient(100deg, rgba(22,22,26,0.05) 30%, rgba(22,22,26,0.10) 50%, rgba(22,22,26,0.05) 70%); background-size: 200% 100%; }
+
+/* 视图切换：内容从下方 6px 淡入 */
+@keyframes view-in {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to { opacity: 1; transform: none; }
+}
+.view-shell { height: 100%; min-height: 0; animation: view-in var(--dur-slow) var(--ease-out) both; }
+
+/* 详情：图片交叉淡入 */
+@keyframes image-in {
+  from { opacity: 0; transform: scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+.stage-full { animation: image-in var(--dur-base) var(--ease-out) both; }
+
+/* toast 从底部生长 */
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, 8px) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+.toast { animation: toast-in var(--dur-base) var(--ease-out) both; transform-origin: 50% 100%; }
+
+/* 弹窗从触发处生长 */
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: none; }
+}
+.dialog { animation: dialog-in var(--dur-base) var(--ease-out) both; transform-origin: var(--dialog-origin, 50% 100%); }
+
+/* 侧栏指示条：一个块在选中项之间滑动 */
+.nav-list { position: relative; }
+.nav-indicator {
+  position: absolute; left: 2px; right: 2px; border-radius: 9px;
+  background: var(--bg-elevated); box-shadow: inset 0 0 0 1px var(--line);
+  transition: transform var(--dur-base) var(--ease-out), height var(--dur-base) var(--ease-out), opacity var(--dur-fast) linear;
+  pointer-events: none;
+}
+
+/* 整理视图分组入场 */
+@keyframes group-in {
+  from { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.group-panel { animation: group-in var(--dur-slow) var(--ease-out) both; }
+
+/* 减少动态 */
+@media (prefers-reduced-motion: reduce) {
+  .view-shell, .stage-full, .toast, .dialog, .group-panel { animation-duration: 1ms !important; }
+  .nav-indicator { transition-duration: 1ms !important; }
+  .cell, .category-card, .nav-item, .tag-pill { transition-duration: 1ms !important; }
+  html.flip-animating * { animation: none !important; }
+}
+
+.view-shell { display: flex; flex-direction: column; min-height: 0; }
+.theme-toggle {
+  width: 28px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+  color: var(--text-dim); transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.theme-toggle:hover { background: var(--bg-hover); color: var(--text); }

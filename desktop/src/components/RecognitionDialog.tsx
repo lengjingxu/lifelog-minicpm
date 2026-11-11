@@ -18,6 +18,8 @@ type Props = {
   live: LiveController;
   assets: Map<string, Asset>;
   onClose: () => void;
+  origin?: string;
+
 };
 
 function formatRemaining(total: number, done: number, rate: number | null): string {
@@ -29,7 +31,13 @@ function formatRemaining(total: number, done: number, rate: number | null): stri
   return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
 }
 
-export function RecognitionDialog({ open, live, assets, onClose }: Props) {
+export function RecognitionDialog({
+  open,
+  live,
+  assets,
+  onClose,
+  origin = "50% 100%",
+}: Props) {
   const [count, setCount] = useState(18);
   const [concurrency, setConcurrency] = useState(4);
   const [speed, setSpeed] = useState(2);
@@ -106,7 +114,8 @@ export function RecognitionDialog({ open, live, assets, onClose }: Props) {
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="recognition-dialog"
+        className="recognition-dialog dialog"
+        style={{ ["--dialog-origin" as string]: origin }}
         role="dialog"
         aria-modal="true"
         aria-label="识别进度"
