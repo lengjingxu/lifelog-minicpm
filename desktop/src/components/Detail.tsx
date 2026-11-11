@@ -38,11 +38,38 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
 export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, onAction, origin, closing = false }: Props) {
   const [fullLoaded, setFullLoaded] = useState(false);
   const [fullFailed, setFullFailed] = useState(false);
+  const fullRef = useRef<HTMLImageElement | null>(null);
 
+  // 原图直接挂在可见的 img 上，但先不淡入：等 decode() 完成再显示。
+  // 这样只有一次解码，且解码走异步路径，不会把 30-50ms 的活儿算进某一帧。
   useEffect(() => {
     setFullLoaded(false);
     setFullFailed(false);
-  }, [asset.id]);
+
+    const el = fullRef.current;
+    if (!el) return;
+    let cancelled = false;
+
+    const done = () => {
+      if (!cancelled) setFullLoaded(true);
+    };
+    const fail = () => {
+      if (!cancelled) setFullFailed(true);
+    };
+
+    if (typeof el.decode === 'function') {
+      el.decode().then(done, fail);
+    } else if (el.complete && el.naturalWidth > 0) {
+      done();
+    } else {
+      el.addEventListener('load', done, { once: true });
+      el.addEventListener('error', fail, { once: true });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.id, asset.original]);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
 
@@ -83,6 +110,7 @@ export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, on
             <img
               key={asset.id}
               className={clsx("stage-full", fullLoaded && "loaded")}
+              ref={fullRef}
               src={original}
               alt={asset.caption || asset.path}
               draggable={false}
