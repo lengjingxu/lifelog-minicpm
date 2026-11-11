@@ -105,7 +105,15 @@ export default function App() {
   const [detailClosing, setDetailClosing] = useState(false);
   const [dialogClosing, setDialogClosing] = useState(false);
   const [detailOrigin, setDetailOrigin] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  // ?theme=dark|light 只影响本次会话（测量/截图用），不覆盖用户偏好。
+  const forcedTheme = useRef<"dark" | "light" | null>(
+    (() => {
+      const value = new URLSearchParams(window.location.search).get("theme");
+      return value === "dark" || value === "light" ? value : null;
+    })(),
+  ).current;
   const [theme, setTheme] = useState<"dark" | "light">(() => {
+    if (forcedTheme) return forcedTheme;
     const saved = localStorage.getItem("sg-theme");
     if (saved === "light" || saved === "dark") return saved;
     return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
@@ -113,8 +121,8 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem("sg-theme", theme);
-  }, [theme]);
+    if (!forcedTheme) localStorage.setItem("sg-theme", theme);
+  }, [theme, forcedTheme]);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [recognitionOpen, setRecognitionOpen] = useState(route.modal === "recognize");
   const live = useLiveController();

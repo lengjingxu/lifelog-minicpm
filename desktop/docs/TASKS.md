@@ -11,7 +11,7 @@
 | A3 | `prefers-reduced-transparency` 退回实心 | ✅ | `@media` 块 |
 | A4 | Safari/iOS `corner-shape: round` | ✅ | `.glass-surface` |
 | A5 | 对比度检查（亮/暗 × 5 个面，正文 ≥ 4.5:1） | 🟡 | 待逐面量 |
-| A6 | 帧率复测（整理视图 / 详情打开），基线 60.05 / 60.52 | ⬜ | 交 mini 跑 `measure_fps.py` |
+| A6 | 帧率复测（整理视图 / 详情打开），基线 60.05 / 60.52 | ✅ | d13fda5：整理 60.19/60.03、详情 60.34；worst 16.8ms，>20ms 0。4 次详情中 1 次出现单帧 49.9ms（首帧解码），未复现，记为已知一次性开销 |
 | A7 | 边缘折射（`lens.js` / `refract.js`） | ⬜ | 需先决定是否引入 WebGL；WKWebView 不支持 `backdrop-filter: url()` |
 
 ## B. 动效补完
