@@ -150,6 +150,7 @@ struct Stats {
 #[derive(Serialize, Default)]
 struct Facets {
     tags: Vec<(String, i64)>,
+    user_tags: Vec<(String, i64)>,
     albums: Vec<(String, i64)>,
     scenes: Vec<(String, i64)>,
     people: Vec<(String, i64)>,
@@ -306,6 +307,13 @@ fn facets(db: State<'_, Db>) -> Result<Facets, String> {
         v
     };
     facets.tags = sorted(tags);
+    facets.user_tags = conn
+        .prepare("SELECT tag, count(*) FROM asset_tags GROUP BY tag ORDER BY count(*) DESC")
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+                .map(|rows| rows.flatten().collect())
+        })
+        .unwrap_or_default();
     facets.scenes = sorted(scenes);
     facets.people = sorted(people);
 

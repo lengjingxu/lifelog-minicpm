@@ -88,6 +88,7 @@ export function Sidebar({
 
   const tags = facets?.tags ?? [];
   const albums = facets?.albums ?? [];
+  const userTags = facets?.user_tags ?? [];
   const people = (facets?.people ?? []).filter(([name]) => name !== "无" && name !== "未知").slice(0, 3);
 
   return (
@@ -156,6 +157,24 @@ export function Sidebar({
               <span className="count">{count}</span>
             </button>
           ))
+        )}
+
+        {userTags.length > 0 && (
+          <>
+            <div className="nav-group-label">我的标签</div>
+            {userTags.map(([name, count]) => (
+              <button
+                key={`user-${name}`}
+                type="button"
+                className={clsx("tag-pill", activeTags.includes(name) && "active")}
+                onClick={() => onTag(name)}
+              >
+                <span className="tag-dot" />
+                <span className="tag-name">{name}</span>
+                <span className="count">{count}</span>
+              </button>
+            ))}
+          </>
         )}
 
         <div className="nav-group-label">标签</div>

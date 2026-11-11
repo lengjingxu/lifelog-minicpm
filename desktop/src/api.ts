@@ -31,6 +31,7 @@ export type Stats = {
 
 export type Facets = {
   tags: [string, number][];
+  user_tags?: [string, number][];
   albums: [string, number][];
   scenes: [string, number][];
   people: [string, number][];

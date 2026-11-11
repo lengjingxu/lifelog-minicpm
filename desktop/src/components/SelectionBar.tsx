@@ -1,15 +1,29 @@
 import { useState } from "react";
-import { FolderPlus, Tag, X } from "lucide-react";
+import { FolderMinus, FolderPlus, Tag, X } from "lucide-react";
 
 type Props = {
   count: number;
   busy: boolean;
+  tagContext?: string | null;
+  albumContext?: string | null;
   onTag: (tag: string) => void;
   onAlbum: (name: string) => void;
+  onRemoveTag: (tag: string) => void;
+  onRemoveAlbum: (name: string) => void;
   onClear: () => void;
 };
 
-export function SelectionBar({ count, busy, onTag, onAlbum, onClear }: Props) {
+export function SelectionBar({
+  count,
+  busy,
+  tagContext = null,
+  albumContext = null,
+  onTag,
+  onAlbum,
+  onRemoveTag,
+  onRemoveAlbum,
+  onClear,
+}: Props) {
   const [value, setValue] = useState("");
   const trimmed = value.trim();
 
@@ -22,6 +36,28 @@ export function SelectionBar({ count, busy, onTag, onAlbum, onClear }: Props) {
   return (
     <div className="selection-bar glass-surface" role="toolbar" aria-label="批量操作">
       <span className="selection-count">已选 {count} 张</span>
+      {tagContext && (
+        <button
+          type="button"
+          className="selection-remove"
+          onClick={() => onRemoveTag(tagContext)}
+          disabled={busy}
+          title={`把选中的 ${count} 张从标签「${tagContext}」移除`}
+        >
+          <Tag size={13} /> 移除此标签：{tagContext}
+        </button>
+      )}
+      {albumContext && (
+        <button
+          type="button"
+          className="selection-remove"
+          onClick={() => onRemoveAlbum(albumContext)}
+          disabled={busy}
+          title={`把选中的 ${count} 张从相册「${albumContext}」移出（不删文件）`}
+        >
+          <FolderMinus size={13} /> 移出此相册：{albumContext}
+        </button>
+      )}
       <input
         className="selection-input"
         value={value}

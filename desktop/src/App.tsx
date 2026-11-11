@@ -82,7 +82,10 @@ const CATEGORY_LABEL: Record<CategoryKind, string> = {
 };
 
 export default function App() {
-  const route = useMemo(readRoute, []);
+  type ToastAction = { label: string; run: () => void };
+type ToastState = { text: string; action?: ToastAction };
+
+const route = useMemo(readRoute, []);
   const [view, setView] = useState<View>(route.query ? "library" : route.view);
   const [drilldown, setDrilldown] = useState<Drilldown>(null);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -105,7 +108,7 @@ export default function App() {
   const [selection, setSelection] = useState<string[]>(route.assetId ? [route.assetId] : []);
   const [anchorId, setAnchorId] = useState<string | null>(route.assetId);
   const [detailId, setDetailId] = useState<string | null>(route.assetId);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
   const [dialogOrigin, setDialogOrigin] = useState<string>("50% 100%");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [album, setAlbum] = useState<string | null>(null);
@@ -138,6 +141,13 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const searchTimer = useRef<number | null>(null);
   const toastTimer = useRef<number | null>(null);
+  const [dataVersion, setDataVersion] = useState(0);
+  // 浏览器 fixture 模式下没有后端，用本地覆盖层模拟「已移除」，撤销时回滚。
+  const [localRemoved, setLocalRemoved] = useState<Record<string, string[]>>({});
+  const pendingUndo = useRef<{ revert: () => Promise<void> } | null>(null);
+  // fixture 模式下没有后端相册，用本地成员表撑起相册视图与「移出」。
+  const [fixtureAlbums, setFixtureAlbums] = useState<Record<string, string[]>>({});
+  const [fixtureUserTags, setFixtureUserTags] = useState<Record<string, string[]>>({});
   const pendingSearch = useRef<{ start: number; value: string } | null>(null);
   const firstGridMarked = useRef(false);
 
@@ -151,25 +161,142 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const showToast = useCallback((message: string) => {
-    setToast(message);
+  const showToast = useCallback((message: string, action?: ToastAction) => {
+    setToast({ text: message, action });
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 2400);
+    toastTimer.current = window.setTimeout(() => setToast(null), action ? 5000 : 2400);
   }, []);
+
+  const refreshData = useCallback(() => {
+    getFacets().then(setFacets).catch(() => undefined);
+    setDataVersion((version) => version + 1);
+  }, []);
+
+  const setLocalRemoval = useCallback((scope: string, ids: string[], removed: boolean) => {
+    setLocalRemoved((previous) => {
+      const next = new Set(previous[scope] ?? []);
+      ids.forEach((id) => (removed ? next.add(id) : next.delete(id)));
+      return { ...previous, [scope]: Array.from(next) };
+    });
+  }, []);
+
+  const userTagNames = useMemo(() => {
+    const names = new Set((facets?.user_tags ?? []).map(([name]) => name));
+    Object.keys(fixtureUserTags).forEach((name) => names.add(name));
+    return names;
+  }, [facets, fixtureUserTags]);
+
+  const displayFacets = useMemo(() => {
+    if (!facets || !isFixture) return facets;
+    const subtract = (list: [string, number][] | undefined, prefix: string): [string, number][] =>
+      (list ?? []).map(([name, count]) => [
+        name,
+        Math.max(0, count - (localRemoved[`${prefix}:${name}`]?.length ?? 0)),
+      ]);
+    const baseAlbums = subtract(facets.albums, "album");
+    const localAlbums: [string, number][] = Object.entries(fixtureAlbums).map(([name, ids]) => [
+      name,
+      ids.filter((id) => !(localRemoved[`album:${name}`] ?? []).includes(id)).length,
+    ]);
+    const merged = new Map<string, number>(baseAlbums);
+    localAlbums.forEach(([name, count]) => merged.set(name, count));
+    const baseUserTags = subtract(facets.user_tags, "tag");
+    const localUserTags: [string, number][] = Object.entries(fixtureUserTags).map(([name, ids]) => [
+      name,
+      ids.filter((id) => !(localRemoved[`tag:${name}`] ?? []).includes(id)).length,
+    ]);
+    const userMerged = new Map<string, number>(baseUserTags);
+    localUserTags.forEach(([name, count]) => userMerged.set(name, count));
+    return {
+      ...facets,
+      tags: subtract(facets.tags, "tag"),
+      user_tags: Array.from(userMerged.entries()),
+      albums: Array.from(merged.entries()),
+    };
+  }, [facets, localRemoved, fixtureAlbums, fixtureUserTags]);
+
+  const runRemove = useCallback(
+    async (kind: "tag" | "album", value: string) => {
+      if (!selection.length || bulkBusy) return;
+      const ids = [...selection];
+      const scope = `${kind}:${value}`;
+      setBulkBusy(true);
+      try {
+        if (isFixture) {
+          setLocalRemoval(scope, ids, true);
+        } else if (kind === "tag") {
+          await bulkTag(ids, value, true);
+        } else {
+          await albumAdd(value, ids, true);
+        }
+
+        // 上一次未撤销的那批直接提交（丢弃 undo 句柄），符合「后一次覆盖前一次」。
+        pendingUndo.current = {
+          revert: async () => {
+            if (isFixture) {
+              setLocalRemoval(scope, ids, false);
+            } else if (kind === "tag") {
+              await bulkTag(ids, value, false);
+            } else {
+              await albumAdd(value, ids, false);
+            }
+            refreshData();
+          },
+        };
+
+        refreshData();
+        setSelection([]);
+        const message =
+          kind === "tag"
+            ? `已从 ${ids.length} 张移除标签「${value}」`
+            : `已从相册「${value}」移出 ${ids.length} 张`;
+        showToast(message, {
+          label: "撤销",
+          run: () => {
+            const undo = pendingUndo.current;
+            pendingUndo.current = null;
+            if (!undo) return;
+            void undo.revert().then(
+              () => showToast("已撤销"),
+              (err: unknown) => showToast(`撤销失败：${String(err)}`),
+            );
+          },
+        });
+      } catch (err) {
+        showToast(`移除失败：${String(err)}`);
+      } finally {
+        setBulkBusy(false);
+      }
+    },
+    [selection, bulkBusy, refreshData, setLocalRemoval, showToast],
+  );
 
   const runBulk = async (kind: "tag" | "album", value: string) => {
     if (!selection.length || bulkBusy) return;
     setBulkBusy(true);
     try {
       if (kind === "tag") {
-        await bulkTag(selection, value);
+        if (isFixture) {
+          setFixtureUserTags((previous) => ({
+            ...previous,
+            [value]: Array.from(new Set([...(previous[value] ?? []), ...selection])),
+          }));
+        } else {
+          await bulkTag(selection, value);
+        }
         showToast(`已给 ${selection.length} 张加标签「${value}」`);
+      } else if (isFixture) {
+        setFixtureAlbums((previous) => ({
+          ...previous,
+          [value]: Array.from(new Set([...(previous[value] ?? []), ...selection])),
+        }));
+        showToast(`已把 ${selection.length} 张加入相册「${value}」`);
       } else {
         await albumAdd(value, selection);
         showToast(`已把 ${selection.length} 张加入相册「${value}」`);
       }
       setSelection([]);
-      window.setTimeout(() => window.location.reload(), 500);
+      refreshData();
     } catch (err) {
       showToast(`批量操作失败：${String(err)}`);
     } finally {
@@ -230,9 +357,10 @@ export default function App() {
     setError(null);
     setSelection([]);
     setAnchorId(null);
+    const scope = tags.length === 1 ? `tag:${tags[0]}` : album ? `album:${album}` : null;
     queryAssets({
       query: query || undefined,
-      tag: tags[0],
+      tag: isFixture && fixtureUserTags[tags[0]] ? undefined : tags[0],
       album: album ?? undefined,
       scene: scene || undefined,
       limit: filterActive ? 1000 : PAGE_SIZE,
@@ -240,8 +368,18 @@ export default function App() {
     })
       .then((list) => {
         if (cancelled) return;
-        setAssets(list);
-        setHasMore(!filterActive && list.length === PAGE_SIZE);
+        const hidden = scope && isFixture ? new Set(localRemoved[scope] ?? []) : null;
+        let visible = hidden ? list.filter((item) => !hidden.has(item.id)) : list;
+        if (isFixture && tags.length === 1 && fixtureUserTags[tags[0]]) {
+          const members = new Set(fixtureUserTags[tags[0]]);
+          visible = visible.filter((item) => members.has(item.id));
+        }
+        if (isFixture && album) {
+          const members = new Set(fixtureAlbums[album] ?? []);
+          visible = visible.filter((item) => members.has(item.id));
+        }
+        setAssets(visible);
+        setHasMore(!filterActive && visible.length === PAGE_SIZE);
       })
       .catch((reason: unknown) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
@@ -252,7 +390,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [view, query, tagKey, tags.length, scene, person, place, album]);
+  }, [view, query, tagKey, tags.length, scene, person, place, album, dataVersion, localRemoved, fixtureAlbums, fixtureUserTags]);
 
   const needsAll =
     view === "timeline" || view === "tags" || view === "people" || view === "places" || view === "organize";
@@ -304,7 +442,9 @@ export default function App() {
   const filteredAssets = useMemo(
     () =>
       assets.filter(
-        (asset) => matchesFilters(asset, { tags, scene, person, place }) && matchesSearch(asset, query),
+        // 标签已在 queryAssets 层过滤（AI 标签查 captions.tags，用户标签查 asset_tags），这里不再二次过滤，
+        // 否则用户标签的成员会被 asset.tags（只含 AI 标签）筛掉。
+        (asset) => matchesFilters(asset, { tags: [], scene, person, place }) && matchesSearch(asset, query),
       ),
     [assets, tags, scene, person, place, query],
   );
@@ -805,7 +945,7 @@ export default function App() {
     <div className="app">
       <Sidebar
         stats={stats}
-        facets={facets}
+        facets={displayFacets}
         healthInfo={healthInfo}
         view={view}
         activeTags={tags}
@@ -924,15 +1064,32 @@ export default function App() {
         <SelectionBar
           count={selection.length}
           busy={bulkBusy}
+          tagContext={tags.length === 1 && userTagNames.has(tags[0]) ? tags[0] : null}
+          albumContext={album}
           onTag={(tag) => void runBulk("tag", tag)}
           onAlbum={(name) => void runBulk("album", name)}
+          onRemoveTag={(tag) => void runRemove("tag", tag)}
+          onRemoveAlbum={(name) => void runRemove("album", name)}
           onClear={() => setSelection([])}
         />
       )}
 
       {toast && (
         <div className="toast glass-surface" role="status">
-          {toast}
+          <span>{toast.text}</span>
+          {toast.action && (
+            <button
+              type="button"
+              className="toast-action"
+              onClick={() => {
+                const action = toast.action;
+                setToast(null);
+                action?.run();
+              }}
+            >
+              {toast.action.label}
+            </button>
+          )}
         </div>
       )}
     </div>
