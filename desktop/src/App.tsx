@@ -147,6 +147,7 @@ const route = useMemo(readRoute, []);
   const pendingUndo = useRef<{ revert: () => Promise<void> } | null>(null);
   // fixture 模式下没有后端相册，用本地成员表撑起相册视图与「移出」。
   const [fixtureAlbums, setFixtureAlbums] = useState<Record<string, string[]>>({});
+  const [fixtureUserTags, setFixtureUserTags] = useState<Record<string, string[]>>({});
   const pendingSearch = useRef<{ start: number; value: string } | null>(null);
   const firstGridMarked = useRef(false);
 
@@ -179,6 +180,12 @@ const route = useMemo(readRoute, []);
     });
   }, []);
 
+  const userTagNames = useMemo(() => {
+    const names = new Set((facets?.user_tags ?? []).map(([name]) => name));
+    Object.keys(fixtureUserTags).forEach((name) => names.add(name));
+    return names;
+  }, [facets, fixtureUserTags]);
+
   const displayFacets = useMemo(() => {
     if (!facets || !isFixture) return facets;
     const subtract = (list: [string, number][] | undefined, prefix: string): [string, number][] =>
@@ -193,8 +200,20 @@ const route = useMemo(readRoute, []);
     ]);
     const merged = new Map<string, number>(baseAlbums);
     localAlbums.forEach(([name, count]) => merged.set(name, count));
-    return { ...facets, tags: subtract(facets.tags, "tag"), albums: Array.from(merged.entries()) };
-  }, [facets, localRemoved, fixtureAlbums]);
+    const baseUserTags = subtract(facets.user_tags, "tag");
+    const localUserTags: [string, number][] = Object.entries(fixtureUserTags).map(([name, ids]) => [
+      name,
+      ids.filter((id) => !(localRemoved[`tag:${name}`] ?? []).includes(id)).length,
+    ]);
+    const userMerged = new Map<string, number>(baseUserTags);
+    localUserTags.forEach(([name, count]) => userMerged.set(name, count));
+    return {
+      ...facets,
+      tags: subtract(facets.tags, "tag"),
+      user_tags: Array.from(userMerged.entries()),
+      albums: Array.from(merged.entries()),
+    };
+  }, [facets, localRemoved, fixtureAlbums, fixtureUserTags]);
 
   const runRemove = useCallback(
     async (kind: "tag" | "album", value: string) => {
@@ -257,7 +276,14 @@ const route = useMemo(readRoute, []);
     setBulkBusy(true);
     try {
       if (kind === "tag") {
-        if (!isFixture) await bulkTag(selection, value);
+        if (isFixture) {
+          setFixtureUserTags((previous) => ({
+            ...previous,
+            [value]: Array.from(new Set([...(previous[value] ?? []), ...selection])),
+          }));
+        } else {
+          await bulkTag(selection, value);
+        }
         showToast(`已给 ${selection.length} 张加标签「${value}」`);
       } else if (isFixture) {
         setFixtureAlbums((previous) => ({
@@ -334,7 +360,7 @@ const route = useMemo(readRoute, []);
     const scope = tags.length === 1 ? `tag:${tags[0]}` : album ? `album:${album}` : null;
     queryAssets({
       query: query || undefined,
-      tag: tags[0],
+      tag: isFixture && fixtureUserTags[tags[0]] ? undefined : tags[0],
       album: album ?? undefined,
       scene: scene || undefined,
       limit: filterActive ? 1000 : PAGE_SIZE,
@@ -344,6 +370,10 @@ const route = useMemo(readRoute, []);
         if (cancelled) return;
         const hidden = scope && isFixture ? new Set(localRemoved[scope] ?? []) : null;
         let visible = hidden ? list.filter((item) => !hidden.has(item.id)) : list;
+        if (isFixture && tags.length === 1 && fixtureUserTags[tags[0]]) {
+          const members = new Set(fixtureUserTags[tags[0]]);
+          visible = visible.filter((item) => members.has(item.id));
+        }
         if (isFixture && album) {
           const members = new Set(fixtureAlbums[album] ?? []);
           visible = visible.filter((item) => members.has(item.id));
@@ -360,7 +390,7 @@ const route = useMemo(readRoute, []);
     return () => {
       cancelled = true;
     };
-  }, [view, query, tagKey, tags.length, scene, person, place, album, dataVersion, localRemoved, fixtureAlbums]);
+  }, [view, query, tagKey, tags.length, scene, person, place, album, dataVersion, localRemoved, fixtureAlbums, fixtureUserTags]);
 
   const needsAll =
     view === "timeline" || view === "tags" || view === "people" || view === "places" || view === "organize";
@@ -412,7 +442,9 @@ const route = useMemo(readRoute, []);
   const filteredAssets = useMemo(
     () =>
       assets.filter(
-        (asset) => matchesFilters(asset, { tags, scene, person, place }) && matchesSearch(asset, query),
+        // 标签已在 queryAssets 层过滤（AI 标签查 captions.tags，用户标签查 asset_tags），这里不再二次过滤，
+        // 否则用户标签的成员会被 asset.tags（只含 AI 标签）筛掉。
+        (asset) => matchesFilters(asset, { tags: [], scene, person, place }) && matchesSearch(asset, query),
       ),
     [assets, tags, scene, person, place, query],
   );
@@ -1032,7 +1064,7 @@ const route = useMemo(readRoute, []);
         <SelectionBar
           count={selection.length}
           busy={bulkBusy}
-          tagContext={tags.length === 1 ? tags[0] : null}
+          tagContext={tags.length === 1 && userTagNames.has(tags[0]) ? tags[0] : null}
           albumContext={album}
           onTag={(tag) => void runBulk("tag", tag)}
           onAlbum={(name) => void runBulk("album", name)}
