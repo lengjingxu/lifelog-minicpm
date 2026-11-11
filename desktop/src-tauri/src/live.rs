@@ -27,6 +27,7 @@ struct SidecarState {
     port: Option<u16>,
     failures: u32,
     next_retry: Option<Instant>,
+    started_at: Option<Instant>,
 }
 
 #[derive(Deserialize)]
@@ -138,8 +139,8 @@ impl LiveSidecar {
                     .map_err(|_| "识别服务状态锁失败".to_string())?;
                 state.child = Some(child);
                 state.port = Some(port);
-                state.failures = 0;
                 state.next_retry = None;
+                state.started_at = Some(Instant::now());
                 return Ok(port);
             }
 
@@ -168,8 +169,15 @@ impl LiveSidecar {
         match child.try_wait() {
             Ok(None) => Ok(state.port),
             Ok(Some(_)) => {
+                if state
+                    .started_at
+                    .is_some_and(|started| started.elapsed() > Duration::from_secs(30))
+                {
+                    state.failures = 0;
+                }
                 state.child = None;
                 state.port = None;
+                state.started_at = None;
                 state.failures = state.failures.saturating_add(1);
                 state.next_retry = Some(Instant::now() + backoff(state.failures));
                 Ok(None)
@@ -182,6 +190,7 @@ impl LiveSidecar {
         if let Ok(mut state) = self.inner.state.lock() {
             state.failures = state.failures.saturating_add(1);
             state.next_retry = Some(Instant::now() + backoff(state.failures));
+            state.started_at = None;
         }
     }
 
@@ -266,6 +275,7 @@ impl LiveSidecar {
                 let _ = child.wait();
             }
             state.port = None;
+            state.started_at = None;
         }
     }
 }
