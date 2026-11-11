@@ -101,7 +101,17 @@ def _album_id(conn: sqlite3.Connection, name: str) -> str:
 
 def add_to_album(name: str, ids: list[str]) -> dict:
     conn = connect()
-    album_id = _album_id(conn, name)
+    row = conn.execute("SELECT id FROM albums WHERE name = ?", (name,)).fetchone()
+    if not row:
+        # 输入新名字时直接建：界面上「加入相册」只有一个输入框
+        album_id = uuid.uuid4().hex[:12]
+        conn.execute(
+            "INSERT INTO albums (id, name, created_at) VALUES (?, ?, ?)",
+            (album_id, name, _now()),
+        )
+        conn.commit()
+        row = (album_id,)
+    album_id = row[0]
     now = _now()
     changed = 0
     for asset_id in ids:

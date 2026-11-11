@@ -108,6 +108,7 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [dialogOrigin, setDialogOrigin] = useState<string>("50% 100%");
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [album, setAlbum] = useState<string | null>(null);
   const [detailClosing, setDetailClosing] = useState(false);
   const [dialogClosing, setDialogClosing] = useState(false);
   const [detailOrigin, setDetailOrigin] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -224,7 +225,7 @@ export default function App() {
   useEffect(() => {
     if (view !== "library") return;
     let cancelled = false;
-    const filterActive = Boolean(query || tags.length || scene || person || place);
+    const filterActive = Boolean(query || tags.length || scene || person || place || album);
     setLoading(true);
     setError(null);
     setSelection([]);
@@ -232,6 +233,7 @@ export default function App() {
     queryAssets({
       query: query || undefined,
       tag: tags[0],
+      album: album ?? undefined,
       scene: scene || undefined,
       limit: filterActive ? 1000 : PAGE_SIZE,
       offset: 0,
@@ -250,7 +252,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [view, query, tagKey, tags.length, scene, person, place]);
+  }, [view, query, tagKey, tags.length, scene, person, place, album]);
 
   const needsAll =
     view === "timeline" || view === "tags" || view === "people" || view === "places" || view === "organize";
@@ -651,6 +653,7 @@ export default function App() {
   const title = (() => {
     if (view === "organize") return "整理视图";
     if (view === "settings") return "设置";
+    if (album) return `相册 · ${album}`;
     if (query) return `搜索 “${query}”`;
     if (drilldown) return `${CATEGORY_LABEL[drilldown.kind]} · ${drilldown.name}`;
     if (view === "timeline") return "时间线";
@@ -806,11 +809,17 @@ export default function App() {
         healthInfo={healthInfo}
         view={view}
         activeTags={tags}
+        activeAlbum={album}
         activePerson={person}
         activePlace={place}
         placeTotal={placeTotal}
         onNavigate={navigate}
         onTag={applyTag}
+        onAlbum={(name) => {
+          setView("library");
+          setDrilldown(null);
+          setAlbum((current) => (current === name ? null : name));
+        }}
         onPerson={(name) => {
           setView("library");
           setDrilldown(null);

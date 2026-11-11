@@ -20,6 +20,8 @@ type Props = {
   healthInfo: Health | null;
   view: View;
   activeTags: string[];
+  activeAlbum: string | null;
+  onAlbum: (name: string) => void;
   activePerson: string | null;
   activePlace: string | null;
   placeTotal: number;
@@ -48,6 +50,8 @@ export function Sidebar({
   healthInfo,
   view,
   activeTags,
+  activeAlbum,
+  onAlbum,
   activePerson,
   activePlace,
   placeTotal,
@@ -83,6 +87,7 @@ export function Sidebar({
   }, [view]);
 
   const tags = facets?.tags ?? [];
+  const albums = facets?.albums ?? [];
   const people = (facets?.people ?? []).filter(([name]) => name !== "无" && name !== "未知").slice(0, 3);
 
   return (
@@ -134,6 +139,24 @@ export function Sidebar({
           );
         })}
         </div>
+
+        <div className="nav-group-label">相册</div>
+        {albums.length === 0 ? (
+          <div className="sidebar-empty">选中照片后可以加入相册</div>
+        ) : (
+          albums.map(([name, count]) => (
+            <button
+              key={name}
+              type="button"
+              className={clsx("tag-pill", activeAlbum === name && "active")}
+              onClick={() => onAlbum(name)}
+            >
+              <span className="tag-dot place" />
+              <span className="tag-name">{name}</span>
+              <span className="count">{count}</span>
+            </button>
+          ))
+        )}
 
         <div className="nav-group-label">标签</div>
         {tags.length === 0 ? (
