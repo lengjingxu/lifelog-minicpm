@@ -218,6 +218,13 @@ def cmd_album_remove(args) -> int:
 
 
 
+def cmd_thumbs_prune(args) -> int:
+    from . import ops
+    ids = _ids(args.ids) if args.ids else None
+    print(json.dumps(ops.prune_orphan_thumbs(ids, dry_run=args.dry_run), ensure_ascii=False))
+    return 0
+
+
 def cmd_record_delete(args) -> int:
     from . import aggregate, ops
     result = ops.delete_records(_ids(args.ids))
@@ -352,6 +359,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name")
     p.add_argument("--ids", required=True)
     p.set_defaults(func=cmd_album_remove)
+
+    p = sub.add_parser("thumbs-prune", help="清理孤儿缩略图（库里已无对应 asset 的缓存文件）")
+    p.add_argument("--ids", help="逗号分隔的 asset id，只处理这些")
+    p.add_argument("--dry-run", action="store_true", help="只统计不删除")
+    p.set_defaults(func=cmd_thumbs_prune)
 
     p = sub.add_parser("record-delete", help="从库中移除记录（不动磁盘文件）")
     p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
