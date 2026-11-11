@@ -310,8 +310,14 @@ fn facets(db: State<'_, Db>) -> Result<Facets, String> {
     let conn = guard.as_ref().unwrap();
     let mut facets = Facets::default();
 
+    // 按「每个 asset 的最新一条 caption」统计，与 query_assets / count_assets 同源，
+    // 否则分类卡片的数字（按 caption 行计）会和网格总数（按 asset 计）对不上。
     let mut stmt = conn
-        .prepare("SELECT tags, scene, people FROM captions")
+        .prepare(
+            "SELECT c.tags, c.scene, c.people FROM assets a \
+             LEFT JOIN captions c ON c.rowid = ( \
+                 SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)",
+        )
         .map_err(|e| e.to_string())?;
     let mut tags: HashMap<String, i64> = HashMap::new();
     let mut scenes: HashMap<String, i64> = HashMap::new();
