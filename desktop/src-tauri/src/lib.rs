@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::io::{BufRead, BufReader};
-use std::process::Stdio;
-use tauri::{Emitter, Manager, State};
+use std::process::{Command, Stdio};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 mod export;
 
@@ -503,6 +503,55 @@ async fn delete_records(db: State<'_, Db>, ids: Vec<String>) -> Result<serde_jso
 }
 
 #[tauri::command]
+async fn import_xiaomi(app: AppHandle, db: State<'_, Db>, dry_run: bool) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    let repo = repo_root();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut args: Vec<String> = vec![
+            "-m".to_string(),
+            "lifelog.cli".to_string(),
+            "sync".to_string(),
+        ];
+        if dry_run {
+            args.push("--dry-run".to_string());
+        } else {
+            args.push("--json".to_string());
+        }
+        let output = Command::new("python3")
+            .current_dir(&repo)
+            .args(&args)
+            .env("LIFELOG_HOME", &home)
+            .output()
+            .map_err(|e| e.to_string())?;
+        // 只透出 JSON 里的进度事件，stderr 不回显，避免任何凭据外泄。
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let mut last = serde_json::Value::Null;
+        for line in stdout.lines() {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+                let _ = app.emit("import-progress", &value);
+                last = value;
+            }
+        }
+        if !output.status.success() {
+            let message = last
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("导入失败")
+                .to_string();
+            let code = last
+                .get("code")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            return Err(serde_json::json!({"message": message, "code": code}).to_string());
+        }
+        Ok(last)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 fn health(db: State<'_, Db>) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "data_dir": db.data_dir.to_string_lossy(),
@@ -831,6 +880,7 @@ pub fn run() {
             query_assets,
             count_assets,
             export_assets,
+            import_xiaomi,
             delete_records,
             reveal_in_finder,
             facets,

@@ -528,6 +528,16 @@ export type DeleteResult = {
 
 export const deleteRecords = (ids: string[]) => invoke<DeleteResult>("delete_records", { ids });
 
+export type ImportPlan = {
+  listed: number;
+  new: number;
+  existing: number;
+  bytes: number;
+  stage?: string;
+};
+
+export const importXiaomi = (dryRun: boolean) => invoke<ImportPlan>("import_xiaomi", { dryRun });
+
 export const thumbStatus = () => invoke<ThumbStatus>("thumb_status");
 export const generateThumbs = (force = false) => invoke<{ ok: boolean }>("generate_thumbs", { force });
 

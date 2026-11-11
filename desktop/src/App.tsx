@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
+import { listen } from "@tauri-apps/api/event";
 import { AlertCircle, LoaderCircle, Search, X } from "lucide-react";
 import {
   getFacets,
@@ -14,6 +15,9 @@ import {
   type Stats,
   pickFolder,
   importFolder,
+  isTauri,
+  importXiaomi,
+  generateThumbs,
   bulkTag,
   exportAssets,
   deleteRecords,
@@ -27,6 +31,7 @@ import { Timeline } from "./components/Timeline";
 import { Categories } from "./components/Categories";
 import { Detail } from "./components/Detail";
 import { SelectionBar } from "./components/SelectionBar";
+import { ImportDialog, type ImportPlan, type ImportProgress } from "./components/ImportDialog";
 import { DeleteDialog } from "./components/DeleteDialog";
 import { EmptyState } from "./components/EmptyState";
 import { OrganizeView } from "./components/OrganizeView";
@@ -86,6 +91,17 @@ const CATEGORY_LABEL: Record<CategoryKind, string> = {
   places: "地点",
   scenes: "场景",
 };
+
+function extractMessage(err: unknown): string {
+  const raw = String(err);
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.message === "string") return parsed.message;
+  } catch {
+    // 不是 JSON 就原样返回
+  }
+  return raw;
+}
 
 export default function App() {
   type ToastAction = { label: string; run: () => void };
@@ -380,7 +396,54 @@ const route = useMemo(readRoute, []);
     }
   }, [deleting, selection, refreshData, showToast]);
 
+  const [importPlan, setImportPlan] = useState<ImportPlan | null>(null);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importAuthError, setImportAuthError] = useState(false);
+
+  const runImportPlan = useCallback(async () => {
+    setImportBusy(true);
+    setImportProgress(null);
+    setImportAuthError(false);
+    try {
+      const plan = await importXiaomi(true);
+      setImportPlan(plan);
+    } catch (err) {
+      const message = extractMessage(err);
+      setImportAuthError(message.includes("登录态"));
+      setImportProgress({ message });
+      setImportPlan({ listed: 0, new: 0, existing: 0, bytes: 0 });
+    } finally {
+      setImportBusy(false);
+    }
+  }, []);
+
+  const runImportDownload = useCallback(async () => {
+    setImportBusy(true);
+    try {
+      await importXiaomi(false);
+      setImportProgress({ stage: "xiaomi-done", message: "下载完成，正在生成缩略图…" });
+      // 复用现成的缩略图链路，不让用户再手动跑一次。
+      await generateThumbs(false);
+      setImportPlan(null);
+      setImportProgress(null);
+      refreshData();
+      showToast("小米相册导入完成");
+    } catch (err) {
+      const message = extractMessage(err);
+      setImportAuthError(message.includes("登录态"));
+      setImportProgress({ message });
+    } finally {
+      setImportBusy(false);
+    }
+  }, [refreshData, showToast]);
+
   const handleEmptyChoice = async (label: string) => {
+    if (label.includes("小米")) {
+      setImportPlan({ listed: 0, new: 0, existing: 0, bytes: 0 });
+      void runImportPlan();
+      return;
+    }
     if (!label.includes("扫描")) {
       showToast(`${label}将在后续版本接入`);
       return;
@@ -400,6 +463,17 @@ const route = useMemo(readRoute, []);
       showToast(`导入失败：${String(err)}`);
     }
   };
+
+  useEffect(() => {
+    if (!isTauri) return;
+    let unlisten: (() => void) | undefined;
+    void listen<ImportProgress>("import-progress", (event) => {
+      setImportProgress(event.payload);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
 
   useEffect(() => () => {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
@@ -1176,6 +1250,22 @@ const route = useMemo(readRoute, []);
           busy={deleting}
           onCancel={() => setDeleteOpen(false)}
           onConfirm={() => void confirmDelete()}
+        />
+      )}
+
+      {importPlan && (
+        <ImportDialog
+          plan={importProgress ? null : importPlan}
+          progress={importProgress}
+          busy={importBusy}
+          authError={importAuthError}
+          onCancel={() => {
+            setImportPlan(null);
+            setImportProgress(null);
+            setImportAuthError(false);
+          }}
+          onConfirm={() => void runImportDownload()}
+          onRetryAuth={() => void runImportPlan()}
         />
       )}
 

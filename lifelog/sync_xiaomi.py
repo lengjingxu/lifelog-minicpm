@@ -30,6 +30,13 @@ class SyncError(RuntimeError):
     pass
 
 
+class AuthExpired(SyncError):
+    """登录态失效（401/403）：不重试，交给上层引导用户重新取 token。"""
+
+    def __init__(self, message="小米云登录态已失效，请打开小米云服务 App 重新登录后重试"):
+        super().__init__(message)
+
+
 def get_credentials(force: bool = False) -> dict:
     """调用本机 token.mjs 取 serviceToken / userId。"""
     if not TOKEN_HELPER.exists():
@@ -81,8 +88,9 @@ def http_json(path: str, query: dict, cred: dict, retries: int = 4, timeout: int
                 body = resp.read().decode()
             return json.loads(body)
         except urllib.error.HTTPError as exc:
-            if exc.code == 401:
-                raise SyncError("登录态失效（401），请在小米云服务 App 重新登录")
+            if exc.code in (401, 403):
+                # 登录态问题不重试：重试多少次都没用，直接引导重新取 token。
+                raise AuthExpired(f"登录态失效（{exc.code}），请打开小米云服务 App 重新登录后重试")
             last = exc
         except Exception as exc:
             last = exc
@@ -171,6 +179,8 @@ def download(cred: dict, item: dict, dest_dir: Path, date_hint: str | None = Non
     target = target_dir / name
     if target.exists() and target.stat().st_size == int(item.get("size") or -1):
         return target
+    # 先写 .part，完整后再原子改名：中断留下的半截文件不会被 ingest 当成品。
+    part = target.with_name(target.name + ".part")
 
     digest = hashlib.sha1()
     total = 0
@@ -196,14 +206,15 @@ def download(cred: dict, item: dict, dest_dir: Path, date_hint: str | None = Non
             raise SyncError(f"块校验失败：{name}")
         digest.update(data)
         total += len(data)
-        with target.open("ab") as handle:
+        with part.open("ab") as handle:
             handle.write(data)
     if item.get("size") and total != int(item["size"]):
-        target.unlink(missing_ok=True)
+        part.unlink(missing_ok=True)
         raise SyncError(f"大小不一致 {total}/{item['size']}：{name}")
     if item.get("sha1") and digest.hexdigest() != str(item["sha1"]).lower():
-        target.unlink(missing_ok=True)
+        part.unlink(missing_ok=True)
         raise SyncError(f"sha1 不一致：{name}")
+    part.replace(target)
     return target
 
 
@@ -277,4 +288,152 @@ def incremental(start: str | None = None, end: str | None = None,
     state["index"] = index
     state["last_end"] = finish
     save_state(state)
+    return stats
+
+# ---------------------------------------------------------------- 桌面端导入
+
+def _target_path(item: dict, dest_dir: Path) -> Path:
+    """条目的本地落盘路径（与 download 保持一致）。"""
+    name = item.get("fileName") or f"{item.get('id')}.bin"
+    stamp = item.get("date") or ""
+    if not stamp:
+        sort_time = int(item.get("sortTime") or 0)
+        if sort_time:
+            stamp = datetime.fromtimestamp(sort_time / 1000).strftime("%Y%m")
+    if not stamp:
+        digits = "".join(ch for ch in str(name) if ch.isdigit())
+        if len(digits) >= 8:
+            stamp = digits[:8]
+    month = (stamp or datetime.now().strftime("%Y%m"))[:6]
+    return dest_dir / month / name
+
+
+def plan(cred: dict, start_date: str, end_date: str, dest_dir: Path,
+         limit: int | None = None) -> dict:
+    """只读计划：拉列表 + 与本地比对。
+
+    严格只读：不建表、不写 state、不下载、不碰缩略图。
+    """
+    items = list_range(cred, start_date, end_date)
+    items.sort(key=lambda x: int(x.get("sortTime") or 0))
+    if limit:
+        items = items[-limit:]
+
+    new_items: list[dict] = []
+    existing = 0
+    total_bytes = 0
+    for item in items:
+        target = _target_path(item, dest_dir)
+        size = int(item.get("size") or 0)
+        if target.exists() and (not size or target.stat().st_size == size):
+            existing += 1
+            continue
+        new_items.append({"id": item.get("id"), "name": target.name, "size": size,
+                          "date": item.get("date")})
+        total_bytes += size
+    return {
+        "listed": len(items),
+        "new": len(new_items),
+        "existing": existing,
+        "bytes": total_bytes,
+        "items": new_items[:500],
+    }
+
+
+def free_bytes(path: Path) -> int:
+    """目标盘可用字节。读不到就返回 0（调用方按 fail-closed 处理）。"""
+    try:
+        out = subprocess.check_output(["df", "-Pk", str(path)], text=True)
+        cols = out.splitlines()[1].split()
+        return int(cols[3]) * 1024
+    except Exception:
+        return 0
+
+
+def sync_import(cred: dict, start_date: str, end_date: str, dest_dir: Path,
+                limit: int | None = None, jobs: int = 2,
+                progress=None, should_cancel=None) -> dict:
+    """下载并记账。可取消、可续传、并发不超过 2。
+
+    progress: 可调用对象，收到 {"stage":..., "done":..., "total":..., "message":...}
+    should_cancel: 返回 True 时停止（已下载的文件保留，重跑续传）。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    items = list_range(cred, start_date, end_date)
+    items.sort(key=lambda x: int(x.get("sortTime") or 0))
+    if limit:
+        items = items[-limit:]
+
+    todo = []
+    existing = 0
+    total_bytes = 0
+    for item in items:
+        target = _target_path(item, dest_dir)
+        size = int(item.get("size") or 0)
+        if target.exists() and (not size or target.stat().st_size == size):
+            existing += 1
+            continue
+        todo.append(item)
+        total_bytes += size
+
+    free = free_bytes(dest_dir)
+    if free == 0:
+        raise SyncError("无法读取目标盘可用空间，已拒绝下载")
+    if total_bytes > free:
+        raise SyncError(
+            f"空间不足：需要 {total_bytes / 1e9:.1f} GB，可用 {free / 1e9:.1f} GB")
+
+    state = load_state()
+    index = state.get("index", {})
+    # 已下载的按 sha1 记账，重跑直接跳过（续跑）。
+    todo = [i for i in todo
+            if not (str(i.get("sha1") or "") and str(i.get("sha1")) in index)]
+
+    stats = {"listed": len(items), "existing": existing, "ok": 0, "failed": 0,
+             "cancelled": False, "bytes": total_bytes}
+    done = 0
+    total = len(todo)
+    lock = __import__("threading").Lock()
+
+    def one(item: dict) -> tuple[bool, str]:
+        try:
+            download(cred, item, dest_dir, date_hint=item.get("date"))
+            return True, ""
+        except AuthExpired:
+            raise
+        except Exception as exc:
+            return False, str(exc)
+
+    with ThreadPoolExecutor(max_workers=max(1, min(jobs, 2))) as pool:
+        futures = {pool.submit(one, item): item for item in todo}
+        for future in futures:
+            pass
+        for future in list(futures):
+            item = futures[future]
+            if should_cancel and should_cancel():
+                stats["cancelled"] = True
+                for pending in futures:
+                    pending.cancel()
+                break
+            try:
+                ok, err = future.result()
+            except AuthExpired:
+                raise
+            except Exception as exc:
+                ok, err = False, str(exc)
+            with lock:
+                done += 1
+                if ok:
+                    stats["ok"] += 1
+                    sha1 = str(item.get("sha1") or "")
+                    if sha1:
+                        index[sha1] = str(_target_path(item, dest_dir))
+                    state["index"] = index
+                else:
+                    stats["failed"] += 1
+                save_state(state)
+                if progress:
+                    progress({"stage": "xiaomi-download", "done": done, "total": total,
+                              "message": f"已下载 {done}/{total}"})
     return stats
