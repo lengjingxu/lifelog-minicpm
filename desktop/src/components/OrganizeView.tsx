@@ -64,6 +64,11 @@ function hash(value: string): number {
     h ^= value.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
+  h ^= h >>> 16;
+  h = Math.imul(h, 2246822507);
+  h ^= h >>> 13;
+  h = Math.imul(h, 3266489909);
+  h ^= h >>> 16;
   return (h >>> 0) / 4294967295;
 }
 
@@ -171,6 +176,23 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
     if (!live.photos.length) return;
     applyPhotos(live.photos, false);
   }, [live.photos, applyPhotos]);
+
+  useEffect(() => {
+    if (live.view.active || !assets.length) return;
+    setCards((previous) =>
+      previous.length
+        ? previous
+        : assets.slice(0, 48).map((asset, index) => ({
+            id: asset.id,
+            asset,
+            status: "pile" as const,
+            group: null,
+            groupSeq: Number.MAX_SAFE_INTEGER,
+            failed: false,
+            position: makePosition(asset.id, index),
+          })),
+    );
+  }, [assets, live.view.active]);
 
   useEffect(() => {
     setCards((previous) =>
@@ -366,9 +388,13 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
   const rateLabel = rate === null ? "测速中" : rate <= 0 ? "计算中" : rate.toFixed(2);
   const currentTags = useMemo(() => {
     const starts = live.events.filter((event) => event.type === "start" && event.asset_id).slice(-3);
-    return starts
-      .map((event) => assetMap.get(event.asset_id!)?.tags?.[0])
-      .filter((tag): tag is string => Boolean(tag));
+    return [
+      ...new Set(
+        starts
+          .map((event) => assetMap.get(event.asset_id!)?.tags?.[0])
+          .filter((tag): tag is string => Boolean(tag)),
+      ),
+    ];
   }, [live.events, assetMap]);
 
   const start = async () => {
@@ -636,9 +662,11 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
         </div>
       )}
 
-      <button type="button" className="organize-recognition-link" onClick={onOpenRecognition}>
-        <Sparkles size={13} /> 识别进度
-      </button>
+      {phase !== "done" && (
+        <button type="button" className="organize-recognition-link" onClick={onOpenRecognition}>
+          <Sparkles size={13} /> 识别进度
+        </button>
+      )}
     </div>
   );
 }

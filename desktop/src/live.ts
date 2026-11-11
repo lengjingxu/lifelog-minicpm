@@ -111,9 +111,7 @@ export function useLiveController(): LiveController {
     try {
       const nextHealth = await liveHealth();
       setHealth(nextHealth);
-      if (nextHealth.state && nextHealth.state.status !== "idle") {
-        recordState(nextHealth.state);
-      }
+      if (nextHealth.state) recordState(nextHealth.state);
       if (nextHealth.state && nextHealth.state.status !== "idle") {
         const queue = await livePhotos();
         if (queue.length) {

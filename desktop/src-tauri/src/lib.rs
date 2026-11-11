@@ -25,11 +25,18 @@ fn resolve_data_dir() -> PathBuf {
     fallback
 }
 
-fn project_root() -> PathBuf {
+fn desktop_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+}
+
+fn repo_root() -> PathBuf {
+    desktop_root()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(desktop_root)
 }
 
 fn directory_usage(path: &Path, extensions: Option<&[&str]>) -> (u64, u64) {
@@ -366,7 +373,7 @@ async fn app_settings(db: State<'_, Db>) -> Result<serde_json::Value, String> {
 async fn rebuild_thumbs(db: State<'_, Db>) -> Result<serde_json::Value, String> {
     let home = db.data_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let root = project_root();
+        let root = desktop_root();
         let script = root.join("scripts/gen_thumbs.py");
         if !script.exists() {
             return Err(format!("找不到缩略图脚本：{}", script.display()));
@@ -403,7 +410,7 @@ pub fn run() {
         .map(PathBuf::from)
         .unwrap_or_else(|_| data_dir.join("lifelog.sqlite"));
 
-    let sidecar = LiveSidecar::new(data_dir.clone(), project_root());
+    let sidecar = LiveSidecar::new(data_dir.clone(), repo_root());
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

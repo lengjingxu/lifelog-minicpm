@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::Read;
 use std::net::TcpListener;
 use std::path::PathBuf;
@@ -185,7 +185,12 @@ impl LiveSidecar {
         }
     }
 
-    fn call(&self, method: reqwest::Method, path: &str, body: Option<Value>) -> Result<Value, String> {
+    fn call(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<Value, String> {
         let port = self.ensure_started()?;
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(3))
@@ -314,7 +319,9 @@ fn probe(url: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn live_health(sidecar: tauri::State<'_, LiveSidecar>) -> Result<Value, LiveCommandError> {
+pub async fn live_health(
+    sidecar: tauri::State<'_, LiveSidecar>,
+) -> Result<Value, LiveCommandError> {
     let sidecar = sidecar.inner.clone();
     tauri::async_runtime::spawn_blocking(move || LiveSidecar { inner: sidecar }.health())
         .await
@@ -365,7 +372,9 @@ pub async fn live_stop(sidecar: tauri::State<'_, LiveSidecar>) -> Result<Value, 
 }
 
 #[tauri::command]
-pub async fn live_photos(sidecar: tauri::State<'_, LiveSidecar>) -> Result<Value, LiveCommandError> {
+pub async fn live_photos(
+    sidecar: tauri::State<'_, LiveSidecar>,
+) -> Result<Value, LiveCommandError> {
     let sidecar = sidecar.inner.clone();
     tauri::async_runtime::spawn_blocking(move || LiveSidecar { inner: sidecar }.photos())
         .await

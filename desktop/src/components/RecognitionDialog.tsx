@@ -57,7 +57,10 @@ export function RecognitionDialog({ open, live, assets, onClose }: Props) {
         }
       }
     }
-    return [...latest.entries()].slice(0, 3).map(([slot, id]) => ({ slot, asset: assets.get(id) }));
+    return [...latest.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .slice(0, 3)
+      .map(([slot, id]) => ({ slot, asset: assets.get(id) }));
   }, [live.events, assets]);
 
   if (!open) return null;
@@ -147,6 +150,17 @@ export function RecognitionDialog({ open, live, assets, onClose }: Props) {
                 连接小米云
               </button>
             </div>
+            <div className="import-placeholder">
+              <div className="import-placeholder-head">
+                <span>导入进度</span>
+                <em>等待真实导入接入</em>
+              </div>
+              <div className="import-placeholder-track" />
+              <div className="import-placeholder-foot">
+                <span>云端相册</span>
+                <span>本地扫描</span>
+              </div>
+            </div>
           </section>
 
           <section className="recognition-block mark-block">
@@ -213,7 +227,7 @@ export function RecognitionDialog({ open, live, assets, onClose }: Props) {
 
             <div className="inflight-row">
               {[0, 1, 2].map((slot) => {
-                const item = inFlight.find((entry) => entry.slot === slot);
+                const item = inFlight[slot];
                 return (
                   <div className="inflight-card" key={slot}>
                     {item?.asset ? (
@@ -221,7 +235,7 @@ export function RecognitionDialog({ open, live, assets, onClose }: Props) {
                     ) : (
                       <div className="inflight-empty">空闲</div>
                     )}
-                    <span>槽位 {slot + 1}</span>
+                    <span>槽位 {(item?.slot ?? slot) + 1}</span>
                   </div>
                 );
               })}

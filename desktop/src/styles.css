@@ -720,7 +720,7 @@ button:focus-visible, input:focus-visible {
 .flight-trail {
   position: absolute; height: 2px; transform-origin: 0 50%; border-radius: 2px;
   background: linear-gradient(90deg, rgba(255,74,74,0.55), rgba(255,74,74,0));
-  animation: trail-fade 220ms ease-out both;
+  animation: trail-fade 120ms ease-out both;
 }
 @keyframes trail-fade { from { opacity: 0.9; } to { opacity: 0; } }
 
@@ -797,6 +797,12 @@ button:focus-visible, input:focus-visible {
 .import-row > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .import-row strong { font-size: 11px; color: var(--text-dim); font-weight: 550; }
 .import-row span { font-size: 9.5px; color: var(--text-faint); line-height: 1.45; }
+.import-placeholder { margin-top: 14px; padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.018); }
+.import-placeholder-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; font-size: 9.5px; color: var(--text-faint); }
+.import-placeholder-head em { font-style: normal; font-size: 9px; color: var(--text-faint); opacity: 0.72; }
+.import-placeholder-track { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.045); overflow: hidden; }
+.import-placeholder-track::after { content: ""; display: block; width: 18%; height: 100%; border-radius: inherit; background: rgba(255,255,255,0.12); }
+.import-placeholder-foot { display: flex; justify-content: space-between; margin-top: 8px; font-size: 8.5px; color: var(--text-faint); opacity: 0.72; }
 
 .mark-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 11px 0 12px; }
 .mark-controls label { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
