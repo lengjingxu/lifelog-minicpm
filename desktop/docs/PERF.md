@@ -67,3 +67,24 @@ python3 scripts/measure_fps.py --url http://localhost:5176 --scenario both --sec
 
 液体玻璃（`backdrop-filter`）是最容易掉帧的一项，建议单独开一次 diff：只在详情检查器上启用，再测 `detail` 场景。
 
+## 整理视图三态（d5b4acf 连续淡入之后）
+
+三态指 待整理（idle）→ 运行中（running）→ 完成（done）。这一版把三态的头部/HUD/完成面板从硬切改成 240ms ease-out 淡入 + 上移 6px，卡片级飞行动画未改。
+
+采样脚本：`scripts/measure_state_transitions.py`（连续记录 rAF，按「点击开始后 800ms」「飞行中」「完成前 800ms」三个窗口切分）
+
+```bash
+npm run dev -- --port 5176
+python3 scripts/measure_state_transitions.py --url http://localhost:5176
+```
+
+3 次结果（暗色，示例库）：
+
+| 窗口 | fps | 最长帧 | >20ms |
+| --- | ---: | ---: | ---: |
+| 进入 idle→running（0–800ms） | 60.00 / 60.01 / 60.00 | 16.8ms | 0 / 0 / 0 |
+| 飞行中 | 60.00 / 60.00 / 60.00 | 16.8ms | 0 / 0 / 0 |
+| 完成 running→done（末 1.4s） | 60.00 / 60.00 / 60.01 | 16.8ms | 0 / 0 / 0 |
+
+结论：三态切换没有引入掉帧，和网格基线（60.05fps / 16.8ms / 0）一致。
+
