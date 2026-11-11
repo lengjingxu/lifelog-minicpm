@@ -20,6 +20,14 @@ DEFAULT_HOME = Path(__file__).resolve().parent.parent / "sample-data"
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "public" / "sample-fixture.json"
 
 
+
+def _display_path(target: Path, home: Path) -> str:
+    try:
+        return target.resolve().relative_to(home.resolve()).as_posix()
+    except (ValueError, OSError):
+        return target.name
+
+
 def parse_tags(raw: str | None) -> list[str]:
     if not raw:
         return []
@@ -129,7 +137,8 @@ def main() -> None:
         "events": conn.execute("SELECT count(*) FROM events").fetchone()[0],
         "first_day": first_day,
         "last_day": last_day,
-        "db_path": str(db_path),
+        # 不写导出机器的绝对路径：优先相对 home，其次只留文件名。
+        "db_path": _display_path(db_path, home),
         "db_size": db_path.stat().st_size,
     }
     facets = {

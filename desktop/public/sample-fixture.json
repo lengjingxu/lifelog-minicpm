@@ -6,7 +6,7 @@
     "events": 0,
     "first_day": "2026-11-03",
     "last_day": "2026-11-06",
-    "db_path": "/Users/leng/dev/lifelog-minicpm/desktop/sample-data/lifelog.sqlite",
+    "db_path": "lifelog.sqlite",
     "db_size": 69632
   },
   "assets": [
