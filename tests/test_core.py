@@ -203,5 +203,92 @@ class DeleteRecordsTests(unittest.TestCase):
         self.assertTrue((photo / "0.jpg").exists(), "磁盘文件不能被删")
 
 
+class XiaomiImportTests(unittest.TestCase):
+    """小米云导入：只读计划与 token 不外泄。"""
+
+    TOKEN = "FAKE-SERVICE-TOKEN-9f8e7d"
+
+    def _cred(self):
+        return {"token": self.TOKEN, "userId": "999999"}
+
+    def _fake_items(self):
+        return [
+            {"id": "1", "fileName": "IMG_1.jpg", "size": 100, "sha1": "a" * 40,
+             "sortTime": 1700000000000, "mediaType": 0, "date": "20240101"},
+            {"id": "2", "fileName": "IMG_2.jpg", "size": 200, "sha1": "b" * 40,
+             "sortTime": 1700000001000, "mediaType": 0, "date": "20240102"},
+        ]
+
+    def test_plan_is_readonly_and_does_not_leak_token(self):
+        from lifelog import sync_xiaomi
+
+        tmp = tempfile.TemporaryDirectory()
+        root = Path(tmp.name)
+        dest = root / "photos"
+        dest.mkdir(parents=True, exist_ok=True)
+        state_path = root / "state.json"
+
+        original_list = sync_xiaomi.list_range
+        original_state = sync_xiaomi.STATE_FILE
+        sync_xiaomi.list_range = lambda cred, start, end: self._fake_items()
+        sync_xiaomi.STATE_FILE = state_path
+        try:
+            plan = sync_xiaomi.plan(self._cred(), "20240101", "20240131", dest)
+        finally:
+            sync_xiaomi.list_range = original_list
+            sync_xiaomi.STATE_FILE = original_state
+
+        self.assertEqual(plan["listed"], 2)
+        self.assertEqual(plan["new"], 2)
+        self.assertEqual(plan["existing"], 0)
+        self.assertEqual(plan["bytes"], 300)
+        # 严格只读：没有下载任何文件，没有写 state
+        self.assertEqual(list(dest.rglob("*")), [])
+        self.assertFalse(state_path.exists())
+        # token 不得出现在任何可见输出里
+        blob = json.dumps(plan, ensure_ascii=False)
+        self.assertNotIn(self.TOKEN, blob)
+
+    def test_auth_expired_message_carries_no_token(self):
+        from lifelog import sync_xiaomi
+
+        err = sync_xiaomi.AuthExpired()
+        self.assertNotIn(self.TOKEN, str(err))
+        self.assertIn("重新登录", str(err))
+
+    def test_sync_import_reports_without_leaking_token(self):
+        from lifelog import sync_xiaomi
+
+        tmp = tempfile.TemporaryDirectory()
+        root = Path(tmp.name)
+        dest = root / "photos"
+        dest.mkdir(parents=True, exist_ok=True)
+
+        original_list = sync_xiaomi.list_range
+        original_state = sync_xiaomi.STATE_FILE
+        original_download = sync_xiaomi.download
+        sync_xiaomi.list_range = lambda cred, start, end: self._fake_items()
+        sync_xiaomi.STATE_FILE = root / "state.json"
+
+        def boom(cred, item, dest_dir, date_hint=None):
+            raise RuntimeError("模拟失败 " + self.TOKEN)
+
+        sync_xiaomi.download = boom
+        seen = []
+        try:
+            stats = sync_xiaomi.sync_import(self._cred(), "20240101", "20240131", dest,
+                                           progress=lambda ev: seen.append(ev))
+        finally:
+            sync_xiaomi.list_range = original_list
+            sync_xiaomi.STATE_FILE = original_state
+            sync_xiaomi.download = original_download
+
+        self.assertEqual(stats["failed"], 2)
+        self.assertEqual(stats["ok"], 0)
+        for event in seen:
+            self.assertNotIn(self.TOKEN, json.dumps(event, ensure_ascii=False))
+        # 失败信息里不能带 token
+        self.assertNotIn(self.TOKEN, json.dumps(stats, ensure_ascii=False))
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

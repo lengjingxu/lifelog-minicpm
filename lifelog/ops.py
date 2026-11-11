@@ -195,6 +195,19 @@ def prune_orphan_thumbs(ids: list[str] | None = None, dry_run: bool = False) -> 
                     if not dry_run:
                         path.unlink(missing_ok=True)
                     removed.append(path.name)
+        # 记录已经删了，这些 id 不该继续留在坏件名单里。
+        broken_path = thumbs_dir / "broken.json"
+        if broken_path.exists():
+            try:
+                broken = json.loads(broken_path.read_text(encoding="utf-8"))
+            except Exception:
+                broken = {}
+            stale = [i for i in ids if i in broken]
+            if stale and not dry_run:
+                for asset_id in stale:
+                    broken.pop(asset_id, None)
+                broken_path.write_text(json.dumps(broken, ensure_ascii=False, indent=2), encoding="utf-8")
+            removed.extend(f"broken.json:{i}" for i in stale)
         return {"ok": True, "removed": len(removed), "freed_bytes": freed, "dry_run": dry_run}
 
     if not thumbs_dir.is_dir():
