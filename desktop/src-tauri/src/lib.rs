@@ -128,6 +128,8 @@ struct Filter {
     tag: Option<String>,
     album: Option<String>,
     scene: Option<String>,
+    person: Option<String>,
+    place: Option<String>,
     kind: Option<String>,
     day_from: Option<String>,
     day_to: Option<String>,
@@ -190,18 +192,8 @@ fn library_stats(db: State<'_, Db>) -> Result<Stats, String> {
     })
 }
 
-#[tauri::command]
-fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, String> {
-    let guard = db.open()?;
-    let conn = guard.as_ref().unwrap();
-    let mut sql = String::from(
-        "SELECT a.id, a.path, a.day, a.taken_at, a.kind,
-                c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text
-         FROM assets a
-         LEFT JOIN captions c ON c.rowid = (
-             SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)
-         WHERE 1=1",
-    );
+fn filter_where(filter: &Filter) -> (String, Vec<rusqlite::types::Value>) {
+    let mut sql = String::from(" WHERE 1=1");
     let mut args: Vec<rusqlite::types::Value> = Vec::new();
 
     if let Some(q) = filter.query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
@@ -210,12 +202,14 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
         );
         args.push(rusqlite::types::Value::Text(format!("%{q}%")));
     }
-    let next_index = |sql: &mut String, args: &mut Vec<rusqlite::types::Value>, value: Option<&str>, clause: &str| {
+
+    let push = |value: Option<&str>, clause: &str, args: &mut Vec<rusqlite::types::Value>, sql: &mut String| {
         if let Some(v) = value.filter(|v| !v.is_empty()) {
             args.push(rusqlite::types::Value::Text(v.to_string()));
             sql.push_str(&clause.replace("{n}", &args.len().to_string()));
         }
     };
+
     if let Some(tag) = filter.tag.as_deref().filter(|value| !value.is_empty()) {
         args.push(rusqlite::types::Value::Text(tag.to_string()));
         let index = args.len();
@@ -223,11 +217,52 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
             " AND ((c.tags LIKE '%' || ?{index} || '%') OR EXISTS (SELECT 1 FROM asset_tags ut WHERE ut.asset_id = a.id AND ut.tag = ?{index}))"
         ));
     }
-    next_index(&mut sql, &mut args, filter.album.as_deref(), " AND EXISTS (SELECT 1 FROM album_assets aa JOIN albums al ON al.id = aa.album_id WHERE aa.asset_id = a.id AND al.name = ?{n})");
-    next_index(&mut sql, &mut args, filter.scene.as_deref(), " AND c.scene = ?{n}");
-    next_index(&mut sql, &mut args, filter.kind.as_deref(), " AND a.kind = ?{n}");
-    next_index(&mut sql, &mut args, filter.day_from.as_deref(), " AND a.day >= ?{n}");
-    next_index(&mut sql, &mut args, filter.day_to.as_deref(), " AND a.day <= ?{n}");
+
+    push(filter.album.as_deref(), " AND EXISTS (SELECT 1 FROM album_assets aa JOIN albums al ON al.id = aa.album_id WHERE aa.asset_id = a.id AND al.name = ?{n})", &mut args, &mut sql);
+    push(filter.scene.as_deref(), " AND c.scene = ?{n}", &mut args, &mut sql);
+    push(filter.person.as_deref(), " AND c.people LIKE '%' || ?{n} || '%'", &mut args, &mut sql);
+    push(filter.place.as_deref(), " AND c.place LIKE '%' || ?{n} || '%'", &mut args, &mut sql);
+    push(filter.kind.as_deref(), " AND a.kind = ?{n}", &mut args, &mut sql);
+    push(filter.day_from.as_deref(), " AND a.day >= ?{n}", &mut args, &mut sql);
+    push(filter.day_to.as_deref(), " AND a.day <= ?{n}", &mut args, &mut sql);
+
+    (sql, args)
+}
+
+#[tauri::command]
+fn count_assets(db: State<'_, Db>, filter: Filter) -> Result<i64, String> {
+    let guard = db.open()?;
+    let conn = guard.as_ref().unwrap();
+    let (where_sql, args) = filter_where(&filter);
+    let sql = format!(
+        "SELECT count(*) FROM assets a \
+         LEFT JOIN captions c ON c.rowid = ( \
+             SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1) \
+         {}",
+        where_sql
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let total: i64 = stmt
+        .query_row(params_from_iter(args.iter()), |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    Ok(total)
+}
+
+#[tauri::command]
+fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, String> {
+    let guard = db.open()?;
+    let conn = guard.as_ref().unwrap();
+    let (where_sql, mut args) = filter_where(&filter);
+    let mut sql = format!(
+        "SELECT a.id, a.path, a.day, a.taken_at, a.kind, \
+                c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text \
+         FROM assets a \
+         LEFT JOIN captions c ON c.rowid = ( \
+             SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1) \
+         {}",
+        where_sql
+    );
+
 
     sql.push_str(" ORDER BY a.taken_at DESC, a.day DESC LIMIT ?");
     args.push(rusqlite::types::Value::Integer(filter.limit.unwrap_or(500)));
@@ -664,6 +699,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             library_stats,
             query_assets,
+            count_assets,
             facets,
             health,
             app_settings,
@@ -690,4 +726,105 @@ pub fn run() {
             app_handle.state::<LiveSidecar>().shutdown();
         }
     });
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use super::*;
+
+    fn seed() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE assets (id TEXT PRIMARY KEY, path TEXT, day TEXT, taken_at TEXT, kind TEXT);
+             CREATE TABLE captions (rowid INTEGER PRIMARY KEY, asset_id TEXT, caption TEXT, scene TEXT,
+                                    people TEXT, place TEXT, activity TEXT, mood TEXT, tags TEXT,
+                                    ocr_text TEXT, created_at TEXT);
+             CREATE TABLE asset_tags (asset_id TEXT, tag TEXT, created_at TEXT);
+             CREATE TABLE albums (id TEXT PRIMARY KEY, name TEXT, created_at TEXT);
+             CREATE TABLE album_assets (album_id TEXT, asset_id TEXT, added_at TEXT);
+             INSERT INTO assets VALUES ('a1','/p/1.jpg','2024-01-01','2024-01-01T10:00:00','image');
+             INSERT INTO assets VALUES ('a2','/p/2.jpg','2024-01-02','2024-01-02T10:00:00','image');
+             INSERT INTO assets VALUES ('a3','/p/3.jpg','2024-01-03','2024-01-03T10:00:00','image');
+             INSERT INTO captions VALUES (1,'a1','海边日落','户外','一人','海边','休息','平静','[\"风景\"]',NULL,'2024-01-01');
+             INSERT INTO captions VALUES (2,'a2','山间徒步','户外','一人','山里','行走','平静','[\"风景\"]',NULL,'2024-01-02');
+             INSERT INTO captions VALUES (3,'a3','室内看书','室内居家','多人','家','阅读','安静','[\"人物\"]',NULL,'2024-01-03');",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn count(conn: &rusqlite::Connection, filter: &Filter) -> i64 {
+        let (where_sql, args) = filter_where(filter);
+        let sql = format!(
+            "SELECT count(*) FROM assets a \
+             LEFT JOIN captions c ON c.rowid = ( \
+                 SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1) \
+             {}",
+            where_sql
+        );
+        conn.query_row(&sql, params_from_iter(args.iter()), |row| row.get(0)).unwrap()
+    }
+
+    fn list(conn: &rusqlite::Connection, filter: &Filter) -> usize {
+        let (where_sql, mut args) = filter_where(filter);
+        let mut sql = format!(
+            "SELECT a.id FROM assets a \
+             LEFT JOIN captions c ON c.rowid = ( \
+                 SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1) \
+             {}",
+            where_sql
+        );
+        sql.push_str(" ORDER BY a.taken_at DESC, a.day DESC LIMIT ?");
+        args.push(rusqlite::types::Value::Integer(filter.limit.unwrap_or(500)));
+        sql.push_str(" OFFSET ?");
+        args.push(rusqlite::types::Value::Integer(filter.offset.unwrap_or(0)));
+        let mut stmt = conn.prepare(&sql).unwrap();
+        stmt.query_map(params_from_iter(args.iter()), |_| Ok(())).unwrap().count()
+    }
+
+    fn filter() -> Filter {
+        Filter {
+            query: None,
+            tag: None,
+            album: None,
+            scene: None,
+            person: None,
+            place: None,
+            kind: None,
+            day_from: None,
+            day_to: None,
+            limit: None,
+            offset: None,
+        }
+    }
+
+    #[test]
+    fn scene_filter_counts_and_lists_same_rows() {
+        let conn = seed();
+        let mut f = filter();
+        f.scene = Some("户外".into());
+        assert_eq!(count(&conn, &f), 2);
+        assert_eq!(list(&conn, &f), 2);
+    }
+
+    #[test]
+    fn person_and_place_filter_apply_on_server() {
+        let conn = seed();
+        let mut f = filter();
+        f.person = Some("一人".into());
+        assert_eq!(count(&conn, &f), 2);
+        f.place = Some("海边".into());
+        assert_eq!(count(&conn, &f), 1);
+        assert_eq!(list(&conn, &f), 1);
+    }
+
+    #[test]
+    fn limit_and_offset_do_not_break_placeholders() {
+        let conn = seed();
+        let mut f = filter();
+        f.scene = Some("户外".into());
+        f.limit = Some(1);
+        f.offset = Some(1);
+        assert_eq!(list(&conn, &f), 1);
+    }
 }
