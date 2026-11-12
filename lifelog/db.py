@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE INDEX IF NOT EXISTS idx_assets_day ON assets(day);
 -- 列表按 (taken_at, day, id) 倒序翻页：没有这条索引，10 万级首屏要扫全表（实测 74.8ms -> 0.7ms）。
-CREATE INDEX IF NOT EXISTS idx_assets_taken ON assets(taken_at DESC, id DESC);
+DROP INDEX IF EXISTS idx_assets_taken;
 CREATE INDEX IF NOT EXISTS idx_captions_asset ON captions(asset_id);
 """
 
@@ -121,9 +121,29 @@ def connect() -> sqlite3.Connection:
     return con
 
 
+def _ensure_cursor_index(con: sqlite3.Connection) -> None:
+    """列表按 (taken_at, id) 倒序 keyset 翻页。
+
+    taken_at 允许为 NULL，而行值比较遇到 NULL 会整体变 NULL —— 那些行会被静默跳过。
+    这里加一个 VIRTUAL 生成列做 COALESCE，再在它上面建索引，既保证 NULL 行可翻到，
+    又让 ORDER BY 能吃到索引（表达式索引在带 JOIN 的查询里会退化成全排序）。
+    """
+    # 注意：PRAGMA table_info 不返回 VIRTUAL 生成列，必须用 table_xinfo
+    columns = {row[1] for row in con.execute("PRAGMA table_xinfo(assets)")}
+    if "taken_sort" not in columns:
+        con.execute(
+            "ALTER TABLE assets ADD COLUMN taken_sort TEXT "
+            "GENERATED ALWAYS AS (COALESCE(taken_at, '')) VIRTUAL"
+        )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_assets_cursor ON assets(taken_sort DESC, id DESC)"
+    )
+
+
 def init_db() -> None:
     with connect() as con:
         con.executescript(SCHEMA)
+        _ensure_cursor_index(con)
         try:
             con.executescript(FTS_SCHEMA)
         except sqlite3.OperationalError:

@@ -23,9 +23,12 @@ SELECT = (
 )
 
 
-def timed(conn, sql, params=(), repeats=3):
+def timed(conn, sql, params=(), repeats=3, warmup=True):
     times = []
     rows = 0
+    if warmup:
+        # 先跑一次把页缓存预热，否则第一条查询会把冷读算进来，数字不可比
+        conn.execute(sql, params).fetchall()
     for _ in range(repeats):
         t0 = time.perf_counter()
         cur = conn.execute(sql, params)
@@ -41,27 +44,31 @@ def main():
     args = ap.parse_args()
 
     conn = sqlite3.connect("file:%s?mode=ro" % os.path.expanduser(args.db), uri=True)
+    # 需要先跑过 lifelog init（生成列 + 索引）；这里直接检查，缺了就提醒
+    cols = {r[1] for r in conn.execute("pragma table_xinfo(assets)")}
+    if "taken_sort" not in cols:
+        raise SystemExit("基准库缺少 taken_sort，请先对该库跑一次 lifelog init")
     conn.execute("pragma cache_size=-64000")
     out = {}
 
     n = conn.execute("select count(*) from assets").fetchone()[0]
     out["assets"] = n
 
-    out["first_page_500"] = timed(conn, SELECT + " ORDER BY a.taken_at DESC, a.day DESC LIMIT ? OFFSET ?", (500, 0))
-    out["deep_offset_50k"] = timed(conn, SELECT + " ORDER BY a.taken_at DESC, a.day DESC LIMIT ? OFFSET ?", (500, 50000), repeats=1)
-    out["deep_offset_95k"] = timed(conn, SELECT + " ORDER BY a.taken_at DESC, a.day DESC LIMIT ? OFFSET ?", (500, 95000), repeats=1)
+    out["first_page_500"] = timed(conn, SELECT + " ORDER BY a.taken_sort DESC, a.id DESC LIMIT ? OFFSET ?", (500, 0))
+    out["deep_offset_50k"] = timed(conn, SELECT + " ORDER BY a.taken_sort DESC, a.id DESC LIMIT ? OFFSET ?", (500, 50000), repeats=1)
+    out["deep_offset_95k"] = timed(conn, SELECT + " ORDER BY a.taken_sort DESC, a.id DESC LIMIT ? OFFSET ?", (500, 95000), repeats=1)
 
     # keyset 对照：与 query_assets 的 cursor 分支同一形状
-    order = " ORDER BY a.taken_at DESC, a.id DESC LIMIT 500"
+    order = " ORDER BY a.taken_sort DESC, a.id DESC LIMIT 500"
     for label, skip in (("keyset_50k", 50000), ("keyset_95k", 95000)):
         row = conn.execute(
-            "select taken_at, id from assets order by taken_at desc, id desc limit 1 offset ?",
+            "select taken_sort, id from assets order by taken_sort desc, id desc limit 1 offset ?",
             (skip,),
         ).fetchone()
         if row:
             out[label] = timed(
                 conn,
-                SELECT + " WHERE (a.taken_at, a.id) < (?, ?)" + order,
+                SELECT + " WHERE (a.taken_sort, a.id) < (?, ?)" + order,
                 row,
                 repeats=2,
             )
@@ -71,7 +78,7 @@ def main():
         conn,
         SELECT
         + " WHERE (c.caption LIKE ?1 OR c.tags LIKE ?1 OR c.scene LIKE ?1 OR c.ocr_text LIKE ?1 OR c.place LIKE ?1 OR a.path LIKE ?1)"
-        + " ORDER BY a.taken_at DESC, a.day DESC LIMIT 500 OFFSET 0",
+        + " ORDER BY a.taken_sort DESC, a.id DESC LIMIT 500 OFFSET 0",
         (q,),
     )
     out["count_search_like"] = timed(
@@ -84,17 +91,17 @@ def main():
     out["tag_exact"] = timed(
         conn,
         SELECT + " WHERE 1=1 AND ((json_valid(c.tags) AND EXISTS (SELECT 1 FROM json_each(c.tags) WHERE json_each.value = ?1)))"
-        + " ORDER BY a.taken_at DESC, a.day DESC LIMIT 500 OFFSET 0",
+        + " ORDER BY a.taken_sort DESC, a.id DESC LIMIT 500 OFFSET 0",
         ("旅行",),
     )
     out["person_like"] = timed(
         conn,
-        SELECT + " WHERE 1=1 AND c.people LIKE '%' || ?1 || '%' ORDER BY a.taken_at DESC, a.day DESC LIMIT 500 OFFSET 0",
+        SELECT + " WHERE 1=1 AND c.people LIKE '%' || ?1 || '%' ORDER BY a.taken_sort DESC, a.id DESC LIMIT 500 OFFSET 0",
         ("一人",),
     )
     out["scene_eq"] = timed(
         conn,
-        SELECT + " WHERE 1=1 AND c.scene = ?1 ORDER BY a.taken_at DESC, a.day DESC LIMIT 500 OFFSET 0",
+        SELECT + " WHERE 1=1 AND c.scene = ?1 ORDER BY a.taken_sort DESC, a.id DESC LIMIT 500 OFFSET 0",
         ("户外",),
     )
 
