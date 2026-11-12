@@ -11,7 +11,7 @@ export type AssetFilters = {
   place: string | null;
 };
 
-export const GAP = 10;
+export const GAP = 14;
 
 export function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0) return "—";
@@ -135,6 +135,7 @@ export function unique<T>(values: T[]): T[] {
 export function gridColumnCount(viewportWidth: number, density: "comfort" | "compact"): number {
   const requested = density === "compact" ? 8 : 6;
   const minCell = density === "compact" ? 132 : 160;
-  const available = viewportWidth - 232 - 40;
+  // 244 = 侧栏宽，48 = 网格左右 padding 之和（见 DENSITY-LOOSE.md）
+  const available = viewportWidth - 244 - 48;
   return Math.max(1, Math.min(requested, Math.floor((available + GAP) / (minCell + GAP))));
 }
