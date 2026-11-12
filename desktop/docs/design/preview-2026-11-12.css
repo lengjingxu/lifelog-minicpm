@@ -121,3 +121,39 @@
   backdrop-filter: none !important;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10) !important;
 }
+
+/* ===== 去分割线：靠留白和底色分层，不画线 ===== */
+.sidebar { border-right: 0; background: color-mix(in srgb, var(--bg) 55%, transparent); }
+.toolbar { border-bottom: 0; }
+.sidebar-foot { border-top: 0; padding-top: 16px; }
+.toolbar-divider { display: none; }
+.inspector { border-left: 0; }
+.inspector-actions { border-top: 0; padding-top: 20px; }
+.shortcut-row { border-top: 0; }
+.condition-bar { border: 0; }
+
+/* 控件不再描边，只靠底色 */
+.search, .sidebar-search, .view-switch, .density-switch, .icon-button,
+.close-btn, .ghost-button, .mark-controls input, .mark-controls select,
+.chip, .status-pill, .group-target, .tag-cloud button, .inspector-actions button {
+  box-shadow: none !important;
+}
+.view-switch, .density-switch { background: rgba(255,255,255,0.035); }
+[data-theme="light"] .view-switch, [data-theme="light"] .density-switch { background: rgba(23,23,26,0.04); }
+.view-switch button.active, .density-switch button.active { background: rgba(255,255,255,0.09); box-shadow: none; }
+[data-theme="light"] .view-switch button.active, [data-theme="light"] .density-switch button.active { background: rgba(255,255,255,0.95); }
+
+/* 面板只留上高光，不要整圈描边 */
+.settings-card, .stat-box, .import-row, .import-placeholder,
+.organize-complete, .login-line, .ocr, .empty-actions > * {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 24px rgba(0,0,0,0.16) !important;
+}
+[data-theme="light"] .settings-card, [data-theme="light"] .stat-box, [data-theme="light"] .import-row,
+[data-theme="light"] .import-placeholder, [data-theme="light"] .organize-complete,
+[data-theme="light"] .login-line, [data-theme="light"] .ocr, [data-theme="light"] .empty-actions > * {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.95), 0 8px 22px rgba(30,30,40,0.09) !important;
+}
+/* 玻璃面也去掉整圈描边，只留顶部高光 */
+.glass-surface { box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 18px 44px rgba(0,0,0,0.32) !important; }
+[data-theme="light"] .glass-surface { box-shadow: inset 0 1px 0 rgba(255,255,255,0.95), 0 18px 40px rgba(20,20,30,0.16) !important; }
+
