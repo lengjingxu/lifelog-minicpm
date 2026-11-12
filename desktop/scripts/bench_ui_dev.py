@@ -113,6 +113,8 @@ def main() -> None:
 
     env = dict(os.environ)
     env["LIFELOG_HOME"] = os.path.abspath(os.path.expanduser(args.home))
+    # 让应用启动即置前：后台 WKWebView 会节流 rAF，滚动数字会失真
+    env["LIFELOG_BENCH_FOCUS"] = "1"
     env["VITE_BENCH"] = "1"
     env["VITE_BENCH_ENDPOINT"] = "http://127.0.0.1:%d/bench" % port
 

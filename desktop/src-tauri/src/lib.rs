@@ -1047,6 +1047,17 @@ pub fn run() {
     let sidecar = LiveSidecar::new(data_dir.clone(), repo_root());
 
     let app = tauri::Builder::default()
+        // 仅压测用：设置 LIFELOG_BENCH_FOCUS=1 时启动即把窗口置前，
+        // 否则 WKWebView 在后台会节流 rAF，滚动帧率根本测不出来。
+        .setup(|app| {
+            if std::env::var("LIFELOG_BENCH_FOCUS").is_ok() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(Db {

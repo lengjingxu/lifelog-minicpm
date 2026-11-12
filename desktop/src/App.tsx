@@ -110,7 +110,8 @@ const route = useMemo(readRoute, []);
   // 只给整理视图用，上限 500，不再把整库读进内存
   const [allAssets, setAllAssets] = useState<Asset[] | null>(null);
   const [months, setMonths] = useState<MonthSummary[] | null>(null);
-  const [groups, setGroups] = useState<GroupSummary[] | null>(null);
+  // 按 kind 缓存，避免在标签/全部照片之间来回切时反复重算聚合（一次扫描 100k 约 370ms）
+  const [groupsByKind, setGroupsByKind] = useState<Record<string, GroupSummary[]>>({});
   const [catKind, setCatKind] = useState<CategoryKind>("tags");
   const [dayFrom, setDayFrom] = useState<string | null>(null);
   const [dayTo, setDayTo] = useState<string | null>(null);
@@ -616,13 +617,15 @@ const route = useMemo(readRoute, []);
 
   useEffect(() => {
     if (view !== "tags" && view !== "people" && view !== "places") return;
-    if (groups) return;
+    if (groupsByKind[catKind]) return;
     let cancelled = false;
     categoryGroups(catKind)
-      .then((list) => { if (!cancelled) setGroups(list); })
+      .then((list) => { if (!cancelled) setGroupsByKind((prev) => ({ ...prev, [catKind]: list })); })
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [view, catKind, groups]);
+  }, [view, catKind, groupsByKind]);
+
+  const groups = groupsByKind[catKind] ?? null;
 
   const currentList = useMemo(() => {
     if (view === "library") return filteredAssets;
@@ -796,7 +799,6 @@ const route = useMemo(readRoute, []);
   useEffect(() => {
     if (view === "tags" || view === "people" || view === "places") {
       setCatKind(view);
-      setGroups(null);
     }
   }, [view]);
 
@@ -1078,10 +1080,7 @@ const route = useMemo(readRoute, []);
           groups={groups ?? []}
           loading={groups === null}
           onPick={openCategory}
-          onKindChange={(next) => {
-            setCatKind(next);
-            setGroups(null);
-          }}
+          onKindChange={(next) => setCatKind(next)}
         />
       );
     }
