@@ -59,6 +59,7 @@ type Props = {
 };
 
 const MAX_FLIGHTS = 3;
+const MAX_SLOTS = 8;
 const FLIGHT_MS = 620;
 
 function hash(value: string): number {
@@ -678,6 +679,9 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
                       <span>{group.name}</span>
                       <strong>{group.count}</strong>
                     </header>
+                    {group.count > MAX_SLOTS && (
+                      <span className="group-cap">显示最近 {MAX_SLOTS} 张</span>
+                    )}
                     <div className="group-target-grid">
                       {group.cards.map((card, slot) => (
                         <div
