@@ -50,9 +50,15 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length).decode("utf-8", "replace")
         try:
-            STATE["report"] = json.loads(raw)
+            payload = json.loads(raw)
         except Exception:
-            STATE["report"] = {"error": "bad json", "raw": raw[:200]}
+            payload = {"error": "bad json", "raw": raw[:200]}
+        if isinstance(payload, dict) and "stage" in payload:
+            # 阶段性信标：只是进度，不是最终报告
+            print("[beacon] %s %s" % (payload.get("stage"), {k: v for k, v in payload.items() if k != "stage"}), flush=True)
+        else:
+            STATE["report"] = payload
+            print("[report] received %d bytes" % len(raw), flush=True)
         self._json({"ok": True})
 
 
@@ -67,15 +73,17 @@ def app_pid() -> int | None:
 
 
 def sample_rss(stop: threading.Event) -> None:
+    tick = 0
     while not stop.is_set():
         pid = app_pid()
-        if pid and STATE.get("activated") != pid:
-            STATE["activated"] = pid
+        # 每 2 秒重新置前一次：窗口被别的程序抢到后台，WKWebView 就会节流 rAF
+        if pid and tick % 10 == 0:
             subprocess.run(
                 ["osascript", "-e",
                  'tell application "System Events" to set frontmost of (first process whose unix id is %d) to true' % pid],
                 capture_output=True,
             )
+        tick += 1
         if pid:
             out = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
             if out.isdigit():
@@ -88,11 +96,16 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--home", required=True)
     ap.add_argument("--out", default="/tmp/bench-ui.json")
-    ap.add_argument("--port", type=int, default=8799)
+    ap.add_argument("--port", type=int, default=0, help="0 = 自动选空闲端口")
     ap.add_argument("--timeout", type=float, default=300)
+    ap.add_argument("--release", action="store_true", help="用 release 构建跑（bench 构建，不要发布）")
     args = ap.parse_args()
 
+    # 端口 0 让内核分配，避免上一次进程没退干净就 Address already in use
     server = HTTPServer(("127.0.0.1", args.port), Handler)
+    server.timeout = 0.5
+    port = server.server_address[1]
+    print("[bench] receiver on 127.0.0.1:%d" % port, flush=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
     stop = threading.Event()
@@ -101,11 +114,30 @@ def main() -> None:
     env = dict(os.environ)
     env["LIFELOG_HOME"] = os.path.abspath(os.path.expanduser(args.home))
     env["VITE_BENCH"] = "1"
-    env["VITE_BENCH_ENDPOINT"] = "http://127.0.0.1:%d/bench" % args.port
+    env["VITE_BENCH_ENDPOINT"] = "http://127.0.0.1:%d/bench" % port
 
     log = open("/tmp/bench-ui-dev.log", "w")
-    proc = subprocess.Popen(["npm", "run", "tauri", "dev"], env=env, stdout=log, stderr=subprocess.STDOUT)
-    print("[bench] tauri dev started pid=%d, waiting report (timeout %.0fs)" % (proc.pid, args.timeout), flush=True)
+
+    if args.release:
+        # 正式包不含 bench 代码；这里构建一个专用 bench 构建（VITE_BENCH_BUILD=1），
+        # 产物同样落在 bundle 目录里，注意不要拿它发布。
+        env["VITE_BENCH_BUILD"] = "1"
+        print("[bench] 构建 release bench 包（不要发布这个产物）...", flush=True)
+        build = subprocess.run(
+            ["npm", "run", "tauri", "build", "--", "--bundles", "app"],
+            env=env, capture_output=True, text=True,
+        )
+        if build.returncode != 0:
+            print(build.stdout[-3000:], flush=True)
+            print(build.stderr[-3000:], flush=True)
+            raise SystemExit("release build failed")
+        app_bin = "src-tauri/target/release/bundle/macos/拾光.app/Contents/MacOS/shiguang-mac"
+        print("[bench] launch release app: " + app_bin, flush=True)
+        proc = subprocess.Popen([app_bin], env=env, stdout=log, stderr=subprocess.STDOUT)
+        print("[bench] release app pid=%d, waiting report (timeout %.0fs)" % (proc.pid, args.timeout), flush=True)
+    else:
+        proc = subprocess.Popen(["npm", "run", "tauri", "dev"], env=env, stdout=log, stderr=subprocess.STDOUT)
+        print("[bench] tauri dev started pid=%d, waiting report (timeout %.0fs)" % (proc.pid, args.timeout), flush=True)
 
     deadline = time.time() + args.timeout
     while time.time() < deadline and STATE["report"] is None:
@@ -116,6 +148,7 @@ def main() -> None:
     report["rssPeakKb"] = STATE["peak_kb"] or None
     report["rssPeakMb"] = round(STATE["peak_kb"] / 1024, 1) if STATE["peak_kb"] else None
     report["home"] = env["LIFELOG_HOME"]
+    report["mode"] = "release" if args.release else "dev"
 
     proc.terminate()
     try:
@@ -123,7 +156,8 @@ def main() -> None:
     except subprocess.TimeoutExpired:
         proc.kill()
     subprocess.run(["pkill", "-f", "shiguang-mac"], capture_output=True)
-    subprocess.run(["pkill", "-f", "vite"], capture_output=True)
+    server.shutdown()
+    server.server_close()
 
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=1)

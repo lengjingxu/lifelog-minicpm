@@ -3,8 +3,8 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./styles.css";
 
-if (import.meta.env.DEV) {
-  // 仅开发期加载：生产构建里这段会被整体剔除（不会产出 bench chunk）
+if (import.meta.env.DEV || import.meta.env.VITE_BENCH_BUILD === "1") {
+  // 开发期或 bench 专用构建才加载；正式发布构建两者都是 false，整段被剔除
   void import("./bench").then((mod) => mod.startBenchIfEnabled());
 }
 
