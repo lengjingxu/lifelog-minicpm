@@ -50,9 +50,15 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length).decode("utf-8", "replace")
         try:
-            STATE["report"] = json.loads(raw)
+            payload = json.loads(raw)
         except Exception:
-            STATE["report"] = {"error": "bad json", "raw": raw[:200]}
+            payload = {"error": "bad json", "raw": raw[:200]}
+        if isinstance(payload, dict) and "stage" in payload:
+            # 阶段性信标：只是进度，不是最终报告
+            print("[beacon] %s %s" % (payload.get("stage"), {k: v for k, v in payload.items() if k != "stage"}), flush=True)
+        else:
+            STATE["report"] = payload
+            print("[report] received %d bytes" % len(raw), flush=True)
         self._json({"ok": True})
 
 

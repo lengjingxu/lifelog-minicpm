@@ -65,6 +65,11 @@ function frames(seconds: number): Promise<{ fps: number; worst: number; over20: 
       }
     };
     requestAnimationFrame(tick);
+    // 兜底：窗口被遮挡时 WKWebView 会停掉 rAF，没有这个 setTimeout 就会永远挂着
+    setTimeout(() => {
+      const elapsed = Math.max(1, performance.now() - t0);
+      resolve({ fps: +((count / elapsed) * 1000).toFixed(2), worst: +worst.toFixed(1), over20, over50, count });
+    }, seconds * 1000 + 2000);
   });
 }
 
@@ -108,29 +113,47 @@ async function measureSearch(tier: Tier, queryAssets: typeof import("./api").que
   };
 }
 
+function beacon(stage: string, extra: Record<string, unknown> = {}): void {
+  void fetch(ENDPOINT, { method: "POST", body: JSON.stringify({ stage, at: Math.round(performance.now()), ...extra }) }).catch(
+    () => undefined,
+  );
+}
+
+const PARTIAL: Record<string, unknown> = {};
+
 async function run(): Promise<Record<string, unknown>> {
   const { queryAssets } = await import("./api");
-  const report: Record<string, unknown> = {
+  const report: Record<string, unknown> = PARTIAL;
+  Object.assign(report, {
     startedAt: new Date().toISOString(),
     origin: "tauri-webview",
     visibility: document.visibilityState,
     focused: document.hasFocus(),
-  };
+  });
 
+  beacon("boot");
   await waitFor(() => document.querySelector(".grid-scroll .cell"), 60000);
   report.coldFirstMs = Math.round(performance.now());
+  beacon("cold", { coldFirstMs: report.coldFirstMs });
 
   const warm: number[] = [];
-  for (let i = 0; i < 3; i += 1) {
-    navTo("时间线");
+  for (let i = 0; i < 1; i += 1) {
+    // 不切时间线：10 万条时它没有虚拟化，会把标签页卡死（已单独记录为缺陷）
+    beacon("warm-" + i + "-tags");
+    navTo("标签");
     await sleep(400);
+    beacon("warm-" + i + "-back", { cells: document.querySelectorAll(".cell").length });
     const t0 = performance.now();
     navTo("全部照片");
     await waitFor(() => document.querySelector(".grid-scroll .cell"), 10000);
     await sleep(120);
     warm.push(performance.now() - t0);
+    report.warmReopenMs = { p50: Math.round(median(warm)), p95: Math.round(p95(warm)), samples: warm.map(Math.round) };
+    beacon("warm-" + i + "-done");
   }
-  report.warmReopenMs = { p50: Math.round(median(warm)), p95: Math.round(p95(warm)), samples: warm.map(Math.round) };
+  const warmSummary = { p50: Math.round(median(warm)), p95: Math.round(p95(warm)), samples: warm.map(Math.round) };
+  report.warmReopenMs = warmSummary;
+  beacon("warm", { p50: warmSummary.p50 });
 
   setSearch("");
   await sleep(500);
@@ -141,15 +164,33 @@ async function run(): Promise<Record<string, unknown>> {
     report.scroll = { skipped: "window not visible: " + document.visibilityState };
   } else if (scrollEl) {
     const before = scrollEl.scrollTop;
+    // 逐帧记录：卡顿到底发生在哪个 scrollTop、当时挂了多少格子
+    const samples: { dt: number; top: number; cells: number; at: number }[] = [];
+    let lastTs = 0;
     let raf = 0;
-    const spin = () => {
+    const t0 = performance.now();
+    const spin = (ts: number) => {
+      if (lastTs) {
+        samples.push({
+          dt: +(ts - lastTs).toFixed(1),
+          top: Math.round(scrollEl.scrollTop),
+          cells: document.querySelectorAll(".cell").length,
+          at: Math.round(ts - t0),
+        });
+      }
+      lastTs = ts;
       scrollEl.scrollTop += 42;
       raf = requestAnimationFrame(spin);
     };
     raf = requestAnimationFrame(spin);
-    report.scroll = await frames(5);
+    beacon("scroll-start");
+    const summary = await frames(5);
+    beacon("scroll-done", { fps: summary.fps, worst: summary.worst, samples: samples.length });
     cancelAnimationFrame(raf);
     scrollEl.scrollTop = before;
+    report.scroll = summary;
+    report.scrollDetail = [...samples].sort((a, b) => b.dt - a.dt).slice(0, 6);
+    report.scrollSamples = samples.length;
   }
 
   const tiers: Tier[] = [
@@ -178,11 +219,23 @@ async function run(): Promise<Record<string, unknown>> {
 
 export function startBenchIfEnabled(): void {
   if (!enabled()) return;
+  const post = (payload: Record<string, unknown>) =>
+    void fetch(ENDPOINT, { method: "POST", body: JSON.stringify(payload) }).catch(() => undefined);
+
   const fire = () => {
+    // 全局兜底：某一步被 UI 卡住时也要把已有结果交出去，而不是什么都不发
+    const watchdog = setTimeout(() => {
+      post({ ...PARTIAL, partial: true, note: "global timeout 100s" });
+    }, 100_000);
     void run()
-      .then((report) => fetch(ENDPOINT, { method: "POST", body: JSON.stringify(report) }))
-      .catch((error) => fetch(ENDPOINT, { method: "POST", body: JSON.stringify({ error: String(error) }) }))
-      .catch(() => undefined);
+      .then((report) => {
+        clearTimeout(watchdog);
+        post(report);
+      })
+      .catch((error) => {
+        clearTimeout(watchdog);
+        post({ ...PARTIAL, error: String(error) });
+      });
   };
   if (document.readyState === "complete") fire();
   else window.addEventListener("load", fire, { once: true });
