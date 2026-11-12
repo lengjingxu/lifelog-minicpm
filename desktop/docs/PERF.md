@@ -413,3 +413,23 @@ JS 同步：`GAP = 18`、`minCell 144/176`、`available = vw - 260 - 64`。
 
 这次 bench 的窗口是可见的，滚动是真实测量（不是无头替代）：5s 302 帧、最差 18ms、无 >20ms。
 cold 618 比基线 555 高一点，两次历史采样在 438–769 之间波动，判定为机器噪声而非回退。
+
+### 三层表面 + 一层玻璃（GLASS-MATERIAL @eca4739）
+
+| 层 | 用在哪 | blur |
+| --- | --- | --- |
+| .glass-surface | 压在照片上：分类卡前板、分组前板、检查器、toast、徽标、批量条、识别弹窗 | 有 |
+| 面板层（settings-card / empty-actions 子项） | 应用底色上的卡片 | blur(14px) saturate(1.2) |
+| 控件层（search / chip / 按钮 / 分段 / 分组落点 …） | 输入与控件 | 不 blur |
+
+按「一层玻璃」规则，放着玻璃子元素的容器（.group-rail / .organize-complete / .overlay-root / .dialog-backdrop）
+自身不再 blur；玻璃里的块（stat-box / import-row / import-placeholder / login-line / ocr）改成透明 + 描边。
+
+**自检**（文档给的 nested 脚本）：设置 / 详情 / 识别弹窗 / 整理完成，暗亮各一次——
+玻璃元素 4–28 个，**nested 全部为 0**。
+
+**帧率**：暗 整理 60.16（0 帧）/ 详情 60.44（0）；亮 整理 59.72（1 帧 33.4ms）/ 详情 60.47（0）。
+
+**10 万级 bench**：cold 542ms、warm p50 143ms、滚动 60.33fps（最长帧 18ms，>20ms 0）、RSS 110.4MB。
+
+详情页改成满幅照片 + 380px 悬浮玻璃板（外壳不 blur），字阶按新规范：分类标题 30、张数 40/300、设置 28、整理完成 30、顶栏 16。
