@@ -399,8 +399,8 @@ button:focus-visible, input:focus-visible {
 .timeline-cell .cell { height: 100%; }
 
 /* ---------------- categories ---------------- */
-.category-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 27px 28px 40px; }
-.category-head { display: flex; align-items: flex-start; gap: 14px; margin: 0 1px 24px; }
+.category-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 34px 34px 48px; }
+.category-head { display: flex; align-items: flex-start; gap: 14px; margin: 0 1px 32px; }
 .category-icon {
   width: 38px; height: 38px; border-radius: 11px; flex: none;
   display: grid; place-items: center;
@@ -413,7 +413,7 @@ button:focus-visible, input:focus-visible {
 .category-total { margin-left: auto; text-align: right; padding-top: 3px; }
 .category-total span { display: block; font-size: 23px; font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1; }
 .category-total small { font-size: 9.5px; color: var(--text-faint); }
-.category-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.category-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 20px; }
 .category-card {
   position: relative; aspect-ratio: 4 / 3; overflow: hidden;
   border-radius: 16px; padding: 0; text-align: left;
@@ -435,15 +435,15 @@ button:focus-visible, input:focus-visible {
 /* 信息条改成玻璃前板，不再用压暗渐变。
    注意要压过 .glass-surface 的 position: relative，否则会退回文档流 */
 .category-card .category-front {
-  position: absolute; left: 8px; right: 8px; bottom: 8px;
-  border-radius: 12px; padding: 9px 11px;
+  position: absolute; left: 10px; right: 10px; bottom: 10px;
+  border-radius: 13px; padding: 12px 14px;
 }
 .category-meta { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .category-name {
   display: inline-flex; align-items: center; gap: 5px; min-width: 0;
-  font-size: 13px; font-weight: 600; color: #fff;
+  font-size: 13.5px; font-weight: 600; color: #fff;
 }
-.category-count { margin-left: auto; font-size: 10.5px; color: rgba(255, 255, 255, 0.92); font-variant-numeric: tabular-nums; }
+.category-count { margin-left: auto; font-size: 11px; color: rgba(255, 255, 255, 0.92); font-variant-numeric: tabular-nums; }
 .category-loading {
   height: 240px; display: grid; place-items: center;
   color: var(--text-faint); font-size: 12px;
@@ -765,7 +765,7 @@ button:focus-visible, input:focus-visible {
 
 .group-rail {
   min-height: 0; display: flex; flex-direction: column; gap: 8px;
-  padding: 11px 11px 7px; border-radius: 16px;
+  padding: 14px 14px 10px; border-radius: 16px;
   background: rgba(255,255,255,0.018); box-shadow: 0 0 0 1px var(--line) inset;
 }
 .group-rail-head { display: flex; align-items: center; justify-content: space-between; padding: 0 3px 2px; }
@@ -773,12 +773,12 @@ button:focus-visible, input:focus-visible {
 .group-rail-head em { font-style: normal; min-width: 2ch; text-align: right; font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .group-panels {
   flex: 1; min-height: 0; overflow-y: auto; display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-content: start; padding-right: 2px;
+  grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-content: start; padding-right: 2px;
 }
 .group-rail .group-panel {
   /* 文件夹：tab(22) + body(从 20px 起) + sheets(露边 ~21px) + front(底部 72% 玻璃) */
   position: relative;
-  height: 176px; display: block; padding: 0;
+  height: 192px; display: block; padding: 0;
   background: none; box-shadow: none;
   filter: drop-shadow(0 18px 26px rgba(16,16,20,.14)) drop-shadow(0 3px 8px rgba(16,16,20,.06));
 }

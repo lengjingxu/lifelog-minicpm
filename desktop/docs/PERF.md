@@ -340,3 +340,29 @@ python3 scripts/bench_ui_dev.py --home /tmp/sg-bench-10w --out /tmp/bench-main.j
 模型校验：按 .42 算出的 (154,154,155) 与评审实测的 (151,151,148) 基本一致。
 
 分类卡文字不再套 --text / --text-faint，改用这组压在照片上的专用色；也没有用 text-shadow 充数。
+
+### 密度调整（「宽松」档）
+
+| 位置 | 现在 | 宽松 |
+| --- | --- | --- |
+| .category-scroll padding | 27 28 40 | 34 34 48 |
+| .category-head margin-bottom | 24 | 32 |
+| .category-grid | minmax(220) / gap 12 | minmax(248) / gap 20 |
+| .category-front 内缩 / padding / 圆角 | 8 / 9 11 / 12 | 10 / 12 14 / 13 |
+| .category-name / .category-count | 13 / 10.5 | 13.5 / 11 |
+| .group-rail padding | 11 11 7 | 14 14 10 |
+| .group-panels gap | 8 | 12 |
+| .group-rail .group-panel height | 176 | 192 |
+| .sidebar padding | 0 10 12 | 0 12 16 |
+
+实测（headless 1440×900 / 1280×900）：
+
+| 宽度 | 分类卡列数 | 单卡宽 | 前板 | 前板在卡内 |
+| --- | ---: | ---: | --- | --- |
+| 1440 | 4 | 270px | 250×44 | 是 |
+| 1280 | 3 | 310px | 290×44 | 是 |
+
+整理分组面板 233×192（rail padding 从 11 加到 14、gap 从 8 加到 12 之后，面板比原来窄 5px，不是变宽）；
+五条文件边露出 19.7 / 19.9 / 19.9 / 19.7 / 19.9px，越界 0。
+
+照片网格的 GAP / minCell（utils.ts 的 JS 常量）没有动，10 万级滚动基线不受影响。
