@@ -1320,18 +1320,23 @@ button:focus-visible, input:focus-visible {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 0 0 1px rgba(23, 23, 26, 0.08), 0 8px 22px rgba(30, 30, 40, 0.10);
 }
 
-/* 玻璃里的块一律平铺：不再叠底色、不再叠 blur，只留描边 */
-.stat-box, .import-row, .import-placeholder, .login-line, .ocr,
-.inspector .meta-block, .inspector .ocr {
+/* 玻璃里的块一律平铺（按实际选择器补，作用域要准） */
+.settings-card .login-line, .settings-card .ghost-button, .settings-card .primary-button,
+.settings-card .status-pill, .settings-card .icon-button,
+.inspector .ocr, .inspector .tag-cloud button, .inspector .inspector-actions button,
+.selection-bar button, .selection-bar .ghost-button,
+.recognition-dialog .recognition-block, .recognition-dialog .stat-box,
+.recognition-dialog .import-row, .recognition-dialog .import-placeholder,
+.recognition-dialog .inline-alert, .recognition-dialog .progress-track,
+.group-card .group-cover, .toast .ghost-button {
   background: transparent;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10);
 }
-[data-theme="light"] .stat-box, [data-theme="light"] .import-row,
-[data-theme="light"] .import-placeholder, [data-theme="light"] .login-line,
-[data-theme="light"] .ocr {
-  background: transparent;
+[data-theme="light"] .settings-card .login-line, [data-theme="light"] .inspector .ocr,
+[data-theme="light"] .recognition-dialog .stat-box, [data-theme="light"] .recognition-dialog .import-row,
+[data-theme="light"] .recognition-dialog .import-placeholder, [data-theme="light"] .recognition-dialog .recognition-block {
   box-shadow: inset 0 0 0 1px rgba(23, 23, 26, 0.10);
 }
 
@@ -1383,10 +1388,31 @@ button:focus-visible, input:focus-visible {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 0 0 1px rgba(255, 255, 255, 0.6), 0 24px 60px rgba(20, 20, 30, 0.28);
 }
 
-/* 字阶：分类页标题 30 / 张数 40·300，设置 28，整理完成 30，顶栏 16 */
-.category-head h2 { font-size: 30px; }
-.category-total span { font-size: 40px; font-weight: 300; }
-.category-eyebrow, .eyebrow { letter-spacing: 0.16em; }
-.settings-head h1, .settings-scroll h1 { font-size: 28px; }
-.organize-complete h2, .complete-head h2 { font-size: 30px; }
-.toolbar-title, .view-title { font-size: 16px; }
+/* 容器里有玻璃，自己就不做玻璃 */
+.group-rail, .organize-complete, .overlay-root {
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.group-rail, .overlay-root { box-shadow: none; }
+
+/* 字阶 + 强调色（preview-2026-11-12.css） */
+.category-head h2 { font-size: 30px; margin: 0 0 10px; }
+.category-head p { font-size: 12px; }
+.category-eyebrow { letter-spacing: 0.16em; }
+.category-total span { font-size: 40px; font-weight: 300; letter-spacing: -0.02em; }
+.category-total small { letter-spacing: 0.14em; text-transform: uppercase; }
+.settings-intro { margin-bottom: 34px; }
+.settings-intro h2 { font-size: 28px; }
+.settings-grid { gap: 20px; }
+.complete-head h2 { font-size: 30px; }
+.title-main { font-size: 16px; }
+.month-title { font-size: 16px; }
+.stage-full { padding: 0; }
+.close-btn { top: 18px; right: 18px; width: 34px; height: 34px; border-radius: 11px; }
+.chip { background: rgba(255, 255, 255, 0.05); border-color: var(--line); color: var(--text-dim); }
+[data-theme="light"] .chip { background: rgba(23, 23, 26, 0.04); border-color: var(--line); }
+.tag-cloud button { background: rgba(255, 255, 255, 0.05); border-color: var(--line); color: var(--text-dim); }
+[data-theme="light"] .tag-cloud button { background: rgba(23, 23, 26, 0.04); border-color: var(--line); }
+.tag-cloud button:hover { background: rgba(255, 255, 255, 0.09); color: var(--text); }
+.status-pill { color: var(--text-dim); background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px var(--line); }
