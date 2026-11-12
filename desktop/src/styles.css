@@ -190,7 +190,8 @@ button:focus-visible, input:focus-visible {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
   padding: 11px 10px 2px; border-top: 1px solid var(--line);
   font-size: 10.5px; color: var(--text-faint);
-  background: linear-gradient(180deg, rgba(10,10,12,0) 0%, rgba(10,10,12,0.92) 26%, rgba(10,10,12,0.98) 100%);
+  /* 跟随主题：写死深色会在浅色主题下变成一条黑带 */
+  background: linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--bg) 92%, transparent) 26%, var(--bg) 100%);
 }
 .lib-line { display: flex; align-items: center; gap: 6px; }
 .lib-line .lib-size { margin-left: auto; font-variant-numeric: tabular-nums; }
