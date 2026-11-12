@@ -88,6 +88,34 @@ python3 scripts/measure_state_transitions.py --url http://localhost:5176
 
 结论：三态切换没有引入掉帧，和网格基线（60.05fps / 16.8ms / 0）一致。
 
+## 10 万级基准（第一轮，keyset 改造前）
+
+造数：`scripts/make_bench_db.py`，从真实库复制 schema 与词表，生成 100,000 assets / 116,551 captions / 5,784 days / 2,892 events；缩略图与原图用硬链接指向真实库文件，不额外占盘（DB 87.5MB，造数约 21s）。
+
+```bash
+python3 scripts/make_bench_db.py --source ~/dev/lifelog-minicpm/data/lifelog.sqlite \
+    --rows 100000 --out /tmp/sg-bench-10w
+python3 scripts/bench_100k.py --db /tmp/sg-bench-10w/lifelog.sqlite
+```
+
+| 场景 | 中位 | 最大 |
+| --- | ---: | ---: |
+| 首屏 500 条 | 1.0ms | 4.3ms |
+| 深翻页 OFFSET 50000 | 244.5ms | 244.5ms |
+| 深翻页 OFFSET 95000 | 252.1ms | 252.1ms |
+| 搜索 LIKE（6 字段） | 21.1ms | 24.9ms |
+| 搜索 count | 70.7ms | 79.5ms |
+| 标签精确匹配（高频，11,291 条命中） | 1.2ms | 6.8ms |
+| 标签精确匹配（低频，5 条命中） | 81.5ms | 172.1ms |
+| person LIKE | 1.7ms | 1.9ms |
+| scene = | 1.9ms | 2.0ms |
+| facets 全量扫描 | 74.9ms | 75.7ms |
+| 时间线按月聚合 | 9.2ms | 9.7ms |
+
+结论：只有深翻页破线。同一份数据换 keyset 游标 `(a.taken_at, a.id) < (?, ?)` 后，offset 50k 从 244.5ms 降到 0.8ms、95k 从 252.1ms 降到 1.1ms，且不随深度劣化。
+
+FTS5 实测结论：LIKE 21ms + count 71ms 在 10 万级仍在预算内，暂不引入（推翻原先「>5000 条就上 FTS5」的预估）。
+
 ## 验收脚本的用法（整理视图跨态共享元素）
 
 ```bash
