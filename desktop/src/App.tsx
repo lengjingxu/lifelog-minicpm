@@ -644,7 +644,7 @@ const route = useMemo(readRoute, []);
   const detailIndex = detailAsset ? currentList.findIndex((asset) => asset.id === detailAsset.id) : -1;
   const detailTotal = currentList.length || (detailAsset ? 1 : 0);
 
-  const placeTotal = catKind === "places" ? groups?.length : undefined;
+  const placeTotal = facets?.places?.length ?? 0;
   const closeDetail = useCallback(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setDetailId(null);

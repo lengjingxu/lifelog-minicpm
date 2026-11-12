@@ -35,6 +35,7 @@ export type Facets = {
   albums: [string, number][];
   scenes: [string, number][];
   people: [string, number][];
+  places?: [string, number][];
   months: [string, number][];
 };
 

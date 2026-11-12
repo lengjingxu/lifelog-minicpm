@@ -286,6 +286,7 @@ struct Facets {
     albums: Vec<(String, i64)>,
     scenes: Vec<(String, i64)>,
     people: Vec<(String, i64)>,
+    places: Vec<(String, i64)>,
     months: Vec<(String, i64)>,
 }
 
@@ -514,7 +515,7 @@ fn facets(db: State<'_, Db>) -> Result<Facets, String> {
     // 否则分类卡片的数字（按 caption 行计）会和网格总数（按 asset 计）对不上。
     let mut stmt = conn
         .prepare(
-            "SELECT c.tags, c.scene, c.people FROM assets a \
+            "SELECT c.tags, c.scene, c.people, c.place FROM assets a \
              LEFT JOIN captions c ON c.rowid = ( \
                  SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)",
         )
@@ -522,12 +523,14 @@ fn facets(db: State<'_, Db>) -> Result<Facets, String> {
     let mut tags: HashMap<String, i64> = HashMap::new();
     let mut scenes: HashMap<String, i64> = HashMap::new();
     let mut people: HashMap<String, i64> = HashMap::new();
+    let mut places: HashMap<String, i64> = HashMap::new();
     let rows = stmt
         .query_map([], |row| {
             Ok((
                 row.get::<_, Option<String>>(0)?,
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
             ))
         })
         .map_err(|e| e.to_string())?;
@@ -541,6 +544,10 @@ fn facets(db: State<'_, Db>) -> Result<Facets, String> {
         if let Some(person) = row.2.filter(|p| !p.is_empty()) {
             *people.entry(person).or_insert(0) += 1;
         }
+        // 地点可能是「上海、杭州」，按分隔符拆开计数，与前端分类页同口径
+        for place in split_names(row.3, "places") {
+            *places.entry(place).or_insert(0) += 1;
+        }
     }
     let sorted = |map: HashMap<String, i64>| {
         let mut v: Vec<(String, i64)> = map.into_iter().collect();
@@ -548,6 +555,7 @@ fn facets(db: State<'_, Db>) -> Result<Facets, String> {
         v
     };
     facets.tags = sorted(tags);
+    facets.places = sorted(places);
     facets.user_tags = conn
         .prepare("SELECT tag, count(*) FROM asset_tags GROUP BY tag ORDER BY count(*) DESC")
         .and_then(|mut stmt| {
