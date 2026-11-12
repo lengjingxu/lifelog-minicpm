@@ -1,0 +1,57 @@
+
+/* ===== 侧栏改版（参考：分组菜单 + 白色选中胶囊 + 底部信息块） ===== */
+.sidebar {
+  background: color-mix(in srgb, var(--bg) 92%, #8FA0B8 8%);
+  padding: 0 16px 18px;
+}
+[data-theme="light"] .sidebar {
+  background: color-mix(in srgb, var(--bg) 91%, #7C8CA6 9%);
+}
+
+.brand { padding: 8px 10px 24px; gap: 12px; }
+.brand-mark { width: 30px; height: 30px; border-radius: 10px; }
+.brand-name { font-size: 15px; letter-spacing: 0.01em; }
+.brand-sub { font-size: 9px; letter-spacing: 0.14em; }
+
+.sidebar-search { height: 38px; border-radius: 11px; margin: 0 0 4px; padding: 0 12px; }
+
+.nav-group-label {
+  font-size: 10px; letter-spacing: 0.14em; font-weight: 600;
+  padding: 26px 12px 9px; color: var(--text-faint);
+}
+.nav-item {
+  height: 40px; padding: 0 12px; border-radius: 12px; gap: 12px;
+  font-size: 13.5px; color: var(--text-dim);
+}
+.nav-item:hover { background: rgba(255,255,255,0.045); color: var(--text); }
+[data-theme="light"] .nav-item:hover { background: rgba(23,23,26,0.035); }
+.nav-item.active { background: transparent; box-shadow: none; color: var(--text); }
+.nav-item .dot { display: none; }
+.nav-item .count { font-size: 11px; color: var(--text-faint); }
+
+/* 选中：白色胶囊 + 轻投影（暗色用 8% 白） */
+.nav-indicator {
+  left: 0; right: 0; border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20,20,30,0.06), 0 4px 12px rgba(20,20,30,0.06);
+}
+[data-theme="dark"] .nav-indicator {
+  background: rgba(255,255,255,0.085);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+
+.tag-pill {
+  height: 34px; padding: 0 12px; border-radius: 10px; gap: 10px; font-size: 12.5px;
+}
+.tag-pill.active { background: rgba(255,255,255,0.07); box-shadow: none; }
+[data-theme="light"] .tag-pill.active { background: #fff; box-shadow: 0 1px 2px rgba(20,20,30,0.06); }
+.tag-dot { width: 4px; height: 4px; opacity: 0.55; }
+
+.sidebar-foot { padding: 16px 4px 4px; }
+.sidebar-action { height: 34px; padding: 0 10px; border-radius: 10px; font-size: 12px; gap: 10px; }
+.sidebar-action.active { background: rgba(255,255,255,0.06); }
+[data-theme="light"] .sidebar-action.active { background: #fff; box-shadow: 0 1px 2px rgba(20,20,30,0.06); }
+.lib-line { margin-top: 12px; padding: 0 10px; font-size: 10.5px; }
+.lib-sub { padding: 0 10px; margin-top: 6px; font-size: 9.5px; letter-spacing: 0.02em; }
+.sidebar-live { left: 4px; right: 4px; border-radius: 12px; padding: 10px 11px; }
+

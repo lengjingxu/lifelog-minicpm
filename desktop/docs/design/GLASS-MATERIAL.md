@@ -202,3 +202,50 @@ background:
 **验证**（实测，去线后）
 - 页面里带 border 的元素从 3 个降到 2 个（剩下的是 ⌘K 键帽）
 - 设置卡与页面底色的亮度差：亮色 250.6 vs 239.4，暗色 20.5 vs 11.1 —— 不靠线也能看出卡片边界
+
+## 侧栏：分组菜单 + 白色选中胶囊 + 底部信息块
+
+参考图（学校排课后台）的侧栏做法，吸收四点：
+
+1. **侧栏是独立的一块底色**，比内容区略深、略冷，靠底色分开，不画线
+2. **选中项是白色圆角胶囊**（暗色用 8% 白），不是强调色块，也没有红点
+3. **分组标签**小而疏（10px / 0.14em / 600），组间留 26px
+4. **底部是信息块**：识别进度、设置、库信息成组贴在底部，和菜单用留白分开
+
+```css
+.sidebar { background: color-mix(in srgb, var(--bg) 92%, #8FA0B8 8%); padding: 0 16px 18px; }
+[data-theme="light"] .sidebar { background: color-mix(in srgb, var(--bg) 91%, #7C8CA6 9%); }
+
+.brand { padding: 8px 10px 24px; gap: 12px; }
+.brand-mark { width: 30px; height: 30px; border-radius: 10px; }
+.brand-name { font-size: 15px; }
+.brand-sub { font-size: 9px; letter-spacing: 0.14em; }
+
+.sidebar-search { height: 38px; border-radius: 11px; margin: 0 0 4px; padding: 0 12px; }
+
+.nav-group-label { font-size: 10px; letter-spacing: 0.14em; font-weight: 600; padding: 26px 12px 9px; }
+.nav-item { height: 40px; padding: 0 12px; border-radius: 12px; gap: 12px; font-size: 13.5px; }
+.nav-item.active { background: transparent; box-shadow: none; color: var(--text); }
+.nav-item .dot { display: none; }
+.nav-item .count { font-size: 11px; color: var(--text-faint); }
+
+/* 选中胶囊 */
+.nav-indicator { left: 0; right: 0; border-radius: 12px; background: #fff;
+  box-shadow: 0 1px 2px rgba(20,20,30,0.06), 0 4px 12px rgba(20,20,30,0.06); }
+[data-theme="dark"] .nav-indicator { background: rgba(255,255,255,0.085); box-shadow: 0 1px 2px rgba(0,0,0,0.25); }
+
+.tag-pill { height: 34px; padding: 0 12px; border-radius: 10px; gap: 10px; font-size: 12.5px; }
+.tag-pill.active { background: rgba(255,255,255,0.07); box-shadow: none; }
+[data-theme="light"] .tag-pill.active { background: #fff; box-shadow: 0 1px 2px rgba(20,20,30,0.06); }
+.tag-dot { width: 4px; height: 4px; opacity: 0.55; }
+
+.sidebar-foot { padding: 16px 4px 4px; }
+.sidebar-action { height: 34px; padding: 0 10px; border-radius: 10px; font-size: 12px; gap: 10px; }
+.lib-line { margin-top: 12px; padding: 0 10px; font-size: 10.5px; }
+.lib-sub { padding: 0 10px; margin-top: 6px; font-size: 9.5px; }
+.sidebar-live { left: 4px; right: 4px; border-radius: 12px; padding: 10px 11px; }
+```
+
+**实现注意**：`.nav-indicator` 的高度/位移是 `useLayoutEffect` 里按 `active.offsetHeight` 量的，只在 `view` 变化时重算。改了行高之后，如果当前视图没变，胶囊会停在旧高度——要么在 `resize` 时也同步一次，要么用 `ResizeObserver` 盯 `.nav-item.active`。
+
+**验证**：亮色下选中胶囊与侧栏底色亮度差 ≥ 12 级（实测 245 vs 231），暗色 ≥ 20 级（实测 52 vs 20）；侧栏与内容区底色差亮色约 10 级、暗色约 6 级，不画线也能分开。
