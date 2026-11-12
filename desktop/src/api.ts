@@ -55,7 +55,7 @@ export type Filter = {
   day_to?: string;
   limit?: number;
   offset?: number;
-  /** 深翻页游标：taken_at|day|id，取上一页最后一条；给了游标就忽略 offset。 */
+  /** 深翻页游标：taken_at|id，取上一页最后一条；给了游标就忽略 offset。 */
   cursor?: string;
 };
 
@@ -216,7 +216,7 @@ async function fixtureQuery(filter: Filter): Promise<Asset[]> {
   });
   const limit = Math.max(0, filter.limit ?? 500);
   if (filter.cursor) {
-    const id = filter.cursor.split("|")[2];
+    const id = filter.cursor.split("|")[1];
     const index = filtered.findIndex((asset) => asset.id === id);
     if (index >= 0) return filtered.slice(index + 1, index + 1 + limit);
   }

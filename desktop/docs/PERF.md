@@ -170,3 +170,40 @@ python3 scripts/verify_organize_shared.py --url http://localhost:5177 --out mark
 （搜索/标签这两列是冷页缓存下的首轮数字，热缓存约 20ms。）
 
 结论：LIKE 的劣化是线性的，到 10 万条仍在 100ms 以内；FTS5 还要额外付中文分词与索引维护的代价，不引入。原先「>5000 条就上 FTS5」的预估作废。
+
+### 口径说明（重要）
+
+上面所有 SQL 数字都是**按 src-tauri/src/lib.rs 里的 SQL 抄出来的副本**、用 Python sqlite3 直接跑的，**不是调用 Rust 的查询构造函数**。
+这么做是为了逐条控制变量（索引有无、游标/offset），代价是：IPC 序列化、row->struct 映射、rusqlite 准备语句的开销都不在里面。Rust 侧正确性由 cargo test 保证，端到端延迟用下面的 UI 实测兜底。
+
+## UI 层 10 万级实测（dev 窗口，真实 Tauri WebView）
+
+触发方式（仅 dev）：import.meta.env.DEV 且带 VITE_BENCH=1；生产构建里这段代码被整体剔除（bundle 中 bench 出现次数 0）。
+
+```bash
+python3 scripts/bench_ui_dev.py --home /tmp/sg-bench-10w --out /tmp/bench-ui.json
+```
+
+| 指标 | 实测 |
+| --- | ---: |
+| 冷启动到首帧（dev bundle，未优化） | 1605ms |
+| 再次打开（切走再切回）p50 | 144ms |
+| 搜索 p50（234 命中） | 232ms |
+| 搜索 p50（命中 >500，截断到 500） | 68ms / 13ms |
+| RSS 峰值 | 319.6MB |
+| 滚动 | **18fps，且出现 1 次 3533ms 长帧** |
+
+说明：
+- 搜索是**虚拟滚动渲染**（@tanstack/react-virtual，overscan 2），只挂载视口 +/-2 行；命中数不改变挂载量
+- 冷启动是 dev bundle，生产构建会明显更快；这条不能当发布指标
+- **滚动那 18fps + 一次 3.5s 长帧是待查问题**：单次长任务而不是持续掉帧，怀疑是虚拟列表在滚动中触发了全量 measure 或批量缩略图解码。下一轮定位
+
+## facets 缓存的触发条件（先不动）
+
+facets 冷算 75ms。目前不在每次交互里，只在切视图/刷新时触发一次。
+**加缓存的触发条件**：切视图时若出现 >1 帧（16.8ms）的同步阻塞——即 DevTools 里观察到一个 >16.8ms 的 long task 且归因到 facets，再加 5s 内存缓存。
+低频标签筛选 p95 为 **172.1ms**（5 条命中的极端 case，扫全表），先接受，记录在此。
+
+## FTS5 结论补充
+
+当初的判断是「单库 >5000 条就把 LIKE 换成 FTS5」。10 万级实测推翻了它：LIKE 在 10 万条仍只要 19.9ms（搜索）/ 70.5ms（count），线性增长且没有拐点。FTS5 还要额外付中文分词、索引维护、查询改写的代价，**不引入**。

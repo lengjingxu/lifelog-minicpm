@@ -775,9 +775,7 @@ const route = useMemo(readRoute, []);
     if (loadingMore || !hasMore || view !== "library") return;
     const last = assets[assets.length - 1];
     // 有 taken_at 就走 keyset 游标（深翻页不随页数变慢）；缺失时退回 offset。
-    const cursor = last?.taken_at
-      ? [last.taken_at, last.day ?? "", last.id].join("|")
-      : undefined;
+    const cursor = last?.taken_at ? [last.taken_at, last.id].join("|") : undefined;
     setLoadingMore(true);
     queryAssets({
       query: query || undefined,

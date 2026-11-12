@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE INDEX IF NOT EXISTS idx_assets_day ON assets(day);
 -- 列表按 (taken_at, day, id) 倒序翻页：没有这条索引，10 万级首屏要扫全表（实测 74.8ms -> 0.7ms）。
-CREATE INDEX IF NOT EXISTS idx_assets_taken ON assets(taken_at DESC, day DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_assets_taken ON assets(taken_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_captions_asset ON captions(asset_id);
 """
 

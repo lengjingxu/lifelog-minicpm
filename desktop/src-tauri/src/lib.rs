@@ -270,7 +270,7 @@ fn count_assets(db: State<'_, Db>, filter: Filter) -> Result<i64, String> {
     Ok(total)
 }
 
-/// 深翻页游标，格式 taken_at|day|id。命中时改写 where 并把参数追加到 args 末尾。
+/// 深翻页游标，格式 taken_at|id（二元组）。命中时改写 where 并把参数追加到 args 末尾。
 /// 返回 true 表示这是 keyset 分页，调用方应忽略 offset。
 fn apply_cursor(
     where_sql: &mut String,
@@ -280,20 +280,18 @@ fn apply_cursor(
     let Some(raw) = cursor.map(str::trim).filter(|c| !c.is_empty()) else {
         return false;
     };
-    let parts: Vec<&str> = raw.splitn(3, '|').collect();
-    if parts.len() != 3 || parts[0].is_empty() || parts[2].is_empty() {
+    let parts: Vec<&str> = raw.splitn(2, '|').collect();
+    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
         return false;
     }
     let n = args.len();
     where_sql.push_str(&format!(
-        " AND (a.taken_at, a.day, a.id) < (?{}, ?{}, ?{})",
+        " AND (a.taken_at, a.id) < (?{}, ?{})",
         n + 1,
-        n + 2,
-        n + 3
+        n + 2
     ));
     args.push(rusqlite::types::Value::Text(parts[0].to_string()));
     args.push(rusqlite::types::Value::Text(parts[1].to_string()));
-    args.push(rusqlite::types::Value::Text(parts[2].to_string()));
     true
 }
 
@@ -314,8 +312,8 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     );
 
 
-    // id 同时参与排序与游标比较，保证翻页是严格全序，不会漏行或重复。
-    sql.push_str(" ORDER BY a.taken_at DESC, a.day DESC, a.id DESC LIMIT ?");
+    // 游标是 (taken_at, id) 二元组：同一天/同一秒的多条靠 id 分先后，翻页才是严格全序。
+    sql.push_str(" ORDER BY a.taken_at DESC, a.id DESC LIMIT ?");
     args.push(rusqlite::types::Value::Integer(filter.limit.unwrap_or(500)));
     sql.push_str(" OFFSET ?");
     args.push(rusqlite::types::Value::Integer(if keyset {
@@ -1100,7 +1098,7 @@ mod filter_tests {
     fn cursor_paging_covers_all_rows_without_duplicates() {
         let conn = seed();
         conn.execute_batch(
-            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<1200)
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20000)
              INSERT INTO assets SELECT printf('x%04d', i), '/p/'||i||'.jpg',
                 printf('2024-01-%02d', (i%28)+1),
                 printf('2024-01-%02dT%02d:00:00', (i%28)+1, i%24), 'image' FROM n;",
@@ -1110,7 +1108,7 @@ mod filter_tests {
         let total: i64 = conn
             .query_row("SELECT count(*) FROM assets", [], |r| r.get(0))
             .unwrap();
-        let page = 100i64;
+        let page = 100i64; // 20,000 行 / 100 = 200 页
         let mut cursor: Option<String> = None;
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut pages = 0;
@@ -1127,15 +1125,13 @@ mod filter_tests {
             );
             args.push(rusqlite::types::Value::Integer(page));
             let mut stmt = conn.prepare(&sql).unwrap();
-            let rows: Vec<(String, String, String)> = stmt
-                .query_map(params_from_iter(args.iter()), |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-                })
+            let rows: Vec<(String, String)> = stmt
+                .query_map(params_from_iter(args.iter()), |r| Ok((r.get(0)?, r.get(1)?)))
                 .unwrap()
                 .flatten()
                 .collect();
             assert!(rows.len() as i64 <= page);
-            for (id, _taken, _day) in &rows {
+            for (id, _taken) in &rows {
                 assert!(seen.insert(id.clone()), "翻页出现重复行: {id}");
             }
             pages += 1;
@@ -1143,10 +1139,59 @@ mod filter_tests {
                 break;
             }
             let last = rows.last().unwrap();
-            cursor = Some(format!("{}|{}|{}", last.1, last.2, last.0));
-            assert!(pages < 100, "翻页没有收敛");
+            cursor = Some(format!("{}|{}", last.1, last.0));
+            assert!(pages < 400, "翻页没有收敛");
         }
 
         assert_eq!(seen.len() as i64, total, "翻页覆盖的行数与总数不一致");
+        assert!(pages >= 200, "应该翻满 200 页，实际 {pages}");
+    }
+
+    #[test]
+    fn cursor_paging_handles_identical_timestamps() {
+        // 同一秒的 50 条：只看 taken_at 会漏/重复，必须靠 id 定序。
+        let conn = seed();
+        conn.execute_batch(
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<50)
+             INSERT INTO assets SELECT printf('s%03d', i), '/p/s'||i||'.jpg', '2024-05-01',
+                '2024-05-01T09:00:00', 'image' FROM n;",
+        )
+        .unwrap();
+
+        let total: i64 = conn.query_row("SELECT count(*) FROM assets", [], |r| r.get(0)).unwrap();
+        let page = 10i64;
+        let mut cursor: Option<String> = None;
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut pages = 0;
+
+        loop {
+            let mut f = filter();
+            f.limit = Some(page);
+            let (mut where_sql, mut args) = filter_where(&f, true);
+            apply_cursor(&mut where_sql, &mut args, cursor.as_deref());
+            let sql = format!(
+                "SELECT a.id, a.taken_at FROM assets a {}                  ORDER BY a.taken_at DESC, a.id DESC LIMIT ?",
+                where_sql
+            );
+            args.push(rusqlite::types::Value::Integer(page));
+            let mut stmt = conn.prepare(&sql).unwrap();
+            let rows: Vec<(String, String)> = stmt
+                .query_map(params_from_iter(args.iter()), |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .flatten()
+                .collect();
+            for (id, _taken) in &rows {
+                assert!(seen.insert(id.clone()), "同一秒翻页出现重复行: {id}");
+            }
+            pages += 1;
+            if (rows.len() as i64) < page {
+                break;
+            }
+            let last = rows.last().unwrap();
+            cursor = Some(format!("{}|{}", last.1, last.0));
+            assert!(pages < 100, "同一秒翻页没有收敛");
+        }
+
+        assert_eq!(seen.len() as i64, total, "同一秒数据翻页覆盖不全");
     }
 }
