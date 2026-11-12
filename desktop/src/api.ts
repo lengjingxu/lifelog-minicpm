@@ -55,6 +55,8 @@ export type Filter = {
   day_to?: string;
   limit?: number;
   offset?: number;
+  /** 深翻页游标：taken_at|day|id，取上一页最后一条；给了游标就忽略 offset。 */
+  cursor?: string;
 };
 
 export type LiveStatus = "running" | "done" | "stopped" | "idle";
@@ -212,8 +214,13 @@ async function fixtureQuery(filter: Filter): Promise<Asset[]> {
     if (filter.day_to && (!asset.day || asset.day > filter.day_to)) return false;
     return true;
   });
-  const offset = Math.max(0, filter.offset ?? 0);
   const limit = Math.max(0, filter.limit ?? 500);
+  if (filter.cursor) {
+    const id = filter.cursor.split("|")[2];
+    const index = filtered.findIndex((asset) => asset.id === id);
+    if (index >= 0) return filtered.slice(index + 1, index + 1 + limit);
+  }
+  const offset = Math.max(0, filter.offset ?? 0);
   return filtered.slice(offset, offset + limit);
 }
 

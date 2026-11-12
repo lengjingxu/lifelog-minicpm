@@ -125,3 +125,34 @@ python3 scripts/verify_organize_shared.py --url http://localhost:5177 --out mark
 ```
 
 要求 Python >= 3.9（只用标准库）。脚本默认 150s 看门狗：卡住会打印 `[timeout] stuck at stage: <阶段>` 并以退出码 2 结束。rAF 采样带 `setTimeout` 兜底，页面被遮挡时会返回 `ended: "timeout"` 并把 fps 记成 0，不会挂死。
+
+## 10 万级第二轮：补索引 + keyset 翻页
+
+第一轮的数字是在「已经有 `idx_assets_taken`」的基准库上量的，真实库其实没有这条索引。补测后差距很大，这里更正并补上结论。
+
+### 真实库（32,583 条，原本只有 idx_assets_day）
+
+| 场景 | 无索引 | 有索引 |
+| --- | ---: | ---: |
+| 首屏 500 条 | 74.8ms（最大 304.1ms） | **0.7ms** |
+| OFFSET 20000 | 86.6ms | 27.0ms |
+| keyset 20000 | — | **1.2ms** |
+
+建索引耗时 10.7ms（32.6k 条）。所以即使只有 3 万张，首屏也从 75ms 降到 1ms 以内。
+
+### 10 万条基准库
+
+| 场景 | 中位 |
+| --- | ---: |
+| 首屏 500 条 | 1.1ms |
+| OFFSET 50000 | 252.3ms |
+| OFFSET 95000 | 265.0ms |
+| keyset 50000 | **0.9ms** |
+| keyset 95000 | **0.8ms** |
+
+### 改动
+
+- `lifelog/db.py`：schema 增加 `idx_assets_taken ON assets(taken_at DESC, day DESC, id DESC)`，`init_db()` 会在下次 CLI 运行时为已有库补建
+- `query_assets`：新增可选 `cursor`（`taken_at|day|id`），命中时走 `(a.taken_at, a.day, a.id) < (?, ?, ?)` 并忽略 offset；排序补上 `a.id DESC` 保证严格全序
+- 前端 `loadMore` 传上一页最后一条的游标，`taken_at` 缺失时退回 offset
+- Rust 单测 `cursor_paging_covers_all_rows_without_duplicates`：1,203 行分 13 页翻完，断言无重复、覆盖全部行

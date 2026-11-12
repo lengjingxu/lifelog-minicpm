@@ -773,6 +773,11 @@ const route = useMemo(readRoute, []);
 
   const loadMore = useCallback(() => {
     if (loadingMore || !hasMore || view !== "library") return;
+    const last = assets[assets.length - 1];
+    // 有 taken_at 就走 keyset 游标（深翻页不随页数变慢）；缺失时退回 offset。
+    const cursor = last?.taken_at
+      ? [last.taken_at, last.day ?? "", last.id].join("|")
+      : undefined;
     setLoadingMore(true);
     queryAssets({
       query: query || undefined,
@@ -782,7 +787,8 @@ const route = useMemo(readRoute, []);
       person: person || undefined,
       place: place || undefined,
       limit: PAGE_SIZE,
-      offset: assets.length,
+      cursor,
+      offset: cursor ? 0 : assets.length,
     })
       .then((list) => {
         setAssets((previous) => [...previous, ...list]);
@@ -790,7 +796,7 @@ const route = useMemo(readRoute, []);
       })
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)))
       .finally(() => setLoadingMore(false));
-  }, [loadingMore, hasMore, view, query, tagKey, tags, album, scene, person, place, assets.length, fixtureUserTags]);
+  }, [loadingMore, hasMore, view, query, tagKey, tags, album, scene, person, place, assets, fixtureUserTags]);
 
   useEffect(() => {
     if (view !== "library" || loading || firstGridMarked.current) return;
