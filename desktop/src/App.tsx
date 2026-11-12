@@ -646,7 +646,7 @@ const route = useMemo(readRoute, []);
   // 从时间线点进某个月时，详情计数器要显示这个月的张数，不是整库
   const monthTotal = dayFrom ? months?.find((m) => m.month === dayFrom.slice(0, 7))?.count : undefined;
 
-  const placeTotal = catKind === "places" ? groups?.length : undefined;
+  const placeTotal = facets?.places?.length ?? 0;
   const closeDetail = useCallback(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setDetailId(null);
