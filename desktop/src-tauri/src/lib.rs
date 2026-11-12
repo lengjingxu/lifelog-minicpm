@@ -142,6 +142,132 @@ struct Filter {
 }
 
 #[derive(Serialize)]
+struct MonthRow {
+    month: String,
+    count: i64,
+    cover_id: String,
+    cover_thumb: String,
+}
+
+/// 时间线的月份摘要：10 万条也只有几百行，前端先渲染月份，展开某个月再按 day_from/day_to 分页取照片。
+#[tauri::command]
+fn timeline_months(db: State<'_, Db>) -> Result<Vec<MonthRow>, String> {
+    let guard = db.open()?;
+    let conn = guard.as_ref().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "WITH months AS (                  SELECT substr(day, 1, 7) AS m, count(*) AS n FROM assets WHERE day IS NOT NULL GROUP BY m)              SELECT m, n, (                  SELECT a2.id FROM assets a2 WHERE a2.day >= m || '-01'                    AND a2.day < date(m || '-01', '+1 month')                  ORDER BY a2.taken_at DESC, a2.id DESC LIMIT 1) AS cover              FROM months ORDER BY m DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(MonthRow {
+                month: row.get(0)?,
+                count: row.get(1)?,
+                cover_id: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                cover_thumb: String::new(),
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out: Vec<MonthRow> = rows.flatten().collect();
+    for item in out.iter_mut() {
+        item.cover_thumb = db.thumb_path(&item.cover_id);
+    }
+    Ok(out)
+}
+
+#[derive(Serialize)]
+struct GroupRow {
+    name: String,
+    count: i64,
+    cover_id: String,
+    cover_thumb: String,
+}
+
+fn split_names(value: Option<String>, kind: &str) -> Vec<String> {
+    let Some(raw) = value else { return Vec::new() };
+    let cleaned = raw.trim().to_string();
+    if cleaned.is_empty() || cleaned == "无" || cleaned == "未知" {
+        return Vec::new();
+    }
+    let mut out: Vec<String> = Vec::new();
+    for part in cleaned.split(['、', '，', ',', ';', '；', '/']) {
+        let name = part.trim();
+        if name.is_empty() || name == "无" || name == "未知" {
+            continue;
+        }
+        if kind == "people" && name == "没有" {
+            continue;
+        }
+        if !out.iter().any(|n| n == name) {
+            out.push(name.to_string());
+        }
+    }
+    out
+}
+
+/// 分类页的分组：只返回 name/count/cover，不把 10 万行发给前端。
+/// 顺序按 taken_at 倒序，保证每个分组第一次出现的就是最新那张，用它当封面。
+#[tauri::command]
+fn category_groups(db: State<'_, Db>, kind: String) -> Result<Vec<GroupRow>, String> {
+    let guard = db.open()?;
+    let conn = guard.as_ref().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT a.id, c.tags, c.scene, c.people, c.place FROM assets a              LEFT JOIN captions c ON c.rowid = (                  SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)              ORDER BY a.taken_at DESC, a.id DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut order: Vec<String> = Vec::new();
+    let mut counts: std::collections::HashMap<String, (i64, String)> = std::collections::HashMap::new();
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    for row in rows.flatten() {
+        let (id, tags, scene, people, place) = row;
+        let names = match kind.as_str() {
+            "tags" => tags
+                .as_deref()
+                .and_then(|t| serde_json::from_str::<Vec<String>>(t).ok())
+                .unwrap_or_default(),
+            "scenes" => split_names(scene, "scenes"),
+            "people" => split_names(people, "people"),
+            _ => split_names(place, "places"),
+        };
+        for name in names {
+            match counts.get_mut(&name) {
+                Some(entry) => entry.0 += 1,
+                None => {
+                    order.push(name.clone());
+                    counts.insert(name, (1, id.clone()));
+                }
+            }
+        }
+    }
+
+    let mut out: Vec<GroupRow> = order
+        .into_iter()
+        .map(|name| {
+            let (count, cover_id) = counts.get(&name).cloned().unwrap_or((0, String::new()));
+            GroupRow { name, count, cover_id, cover_thumb: String::new() }
+        })
+        .collect();
+    for item in out.iter_mut() {
+        item.cover_thumb = db.thumb_path(&item.cover_id);
+    }
+    out.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
+    Ok(out)
+}
+
+#[derive(Serialize)]
 struct Stats {
     assets: i64,
     captions: i64,
@@ -921,6 +1047,17 @@ pub fn run() {
     let sidecar = LiveSidecar::new(data_dir.clone(), repo_root());
 
     let app = tauri::Builder::default()
+        // 仅压测用：设置 LIFELOG_BENCH_FOCUS=1 时启动即把窗口置前，
+        // 否则 WKWebView 在后台会节流 rAF，滚动帧率根本测不出来。
+        .setup(|app| {
+            if std::env::var("LIFELOG_BENCH_FOCUS").is_ok() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(Db {
@@ -938,6 +1075,8 @@ pub fn run() {
             delete_records,
             reveal_in_finder,
             facets,
+            timeline_months,
+            category_groups,
             health,
             app_settings,
             rebuild_thumbs,

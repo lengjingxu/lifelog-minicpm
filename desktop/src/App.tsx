@@ -9,6 +9,10 @@ import {
   libraryStats,
   queryAssets,
   countAssets,
+  timelineMonths,
+  categoryGroups,
+  type MonthSummary,
+  type GroupSummary,
   type Asset,
   type Facets,
   type Health,
@@ -39,23 +43,19 @@ import { RecognitionDialog } from "./components/RecognitionDialog";
 import { SettingsView } from "./components/SettingsView";
 import { useLiveController } from "./live";
 import {
-  buildCategories,
   gridColumnCount,
   matchesFilters,
   matchesSearch,
-  peopleList,
-  splitList,
   unique,
   yearRange,
   type CategoryKind,
-  type Drilldown,
   type View,
 } from "./utils";
 
 type Density = "comfort" | "compact";
 
+const EXPORT_LIMIT = 100000;
 const PAGE_SIZE = 200;
-const ALL_LIMIT = 100000;
 const APP_START = performance.now();
 
 function readRoute() {
@@ -85,12 +85,6 @@ function readRoute() {
   };
 }
 
-const CATEGORY_LABEL: Record<CategoryKind, string> = {
-  tags: "标签",
-  people: "人物",
-  places: "地点",
-  scenes: "场景",
-};
 
 function extractMessage(err: unknown): string {
   const raw = String(err);
@@ -109,14 +103,19 @@ type ToastState = { text: string; action?: ToastAction };
 
 const route = useMemo(readRoute, []);
   const [view, setView] = useState<View>(route.query ? "library" : route.view);
-  const [drilldown, setDrilldown] = useState<Drilldown>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [facets, setFacets] = useState<Facets | null>(null);
   const [healthInfo, setHealthInfo] = useState<Health | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
+  // 只给整理视图用，上限 500，不再把整库读进内存
   const [allAssets, setAllAssets] = useState<Asset[] | null>(null);
+  const [months, setMonths] = useState<MonthSummary[] | null>(null);
+  // 按 kind 缓存，避免在标签/全部照片之间来回切时反复重算聚合（一次扫描 100k 约 370ms）
+  const [groupsByKind, setGroupsByKind] = useState<Record<string, GroupSummary[]>>({});
+  const [catKind, setCatKind] = useState<CategoryKind>("tags");
+  const [dayFrom, setDayFrom] = useState<string | null>(null);
+  const [dayTo, setDayTo] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [allLoading, setAllLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [totalCount, setTotalCount] = useState<number | null>(null);
@@ -354,7 +353,8 @@ const route = useMemo(readRoute, []);
           scene: scene || undefined,
           person: person || undefined,
           place: place || undefined,
-          limit: 100000,
+          // 导出是一次性批量操作，不是列表渲染；这里保留全量，不走 queryAssets 的 2000 上限
+          limit: EXPORT_LIMIT,
           offset: 0,
         },
         target,
@@ -514,6 +514,8 @@ const route = useMemo(readRoute, []);
       scene: scene || undefined,
       person: person || undefined,
       place: place || undefined,
+      day_from: dayFrom ?? undefined,
+      day_to: dayTo ?? undefined,
       limit: PAGE_SIZE,
       offset: 0,
     };
@@ -550,10 +552,9 @@ const route = useMemo(readRoute, []);
     return () => {
       cancelled = true;
     };
-  }, [view, query, tagKey, tags.length, scene, person, place, album, dataVersion, localRemoved, fixtureAlbums, fixtureUserTags]);
+  }, [view, query, tagKey, tags.length, scene, person, place, album, dayFrom, dayTo, dataVersion, localRemoved, fixtureAlbums, fixtureUserTags]);
 
-  const needsAll =
-    view === "timeline" || view === "tags" || view === "people" || view === "places" || view === "organize";
+  const needsAll = view === "organize";
 
   useEffect(() => {
     if (view === "organize" || recognitionOpen) void live.activate();
@@ -583,8 +584,7 @@ const route = useMemo(readRoute, []);
   useEffect(() => {
     if (!needsAll || allAssets !== null) return;
     let cancelled = false;
-    setAllLoading(true);
-    queryAssets({ limit: ALL_LIMIT })
+    queryAssets({ limit: 500 })
       .then((list) => {
         if (!cancelled) setAllAssets(list);
       })
@@ -592,7 +592,6 @@ const route = useMemo(readRoute, []);
         if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
       })
       .finally(() => {
-        if (!cancelled) setAllLoading(false);
       });
     return () => {
       cancelled = true;
@@ -607,40 +606,45 @@ const route = useMemo(readRoute, []);
     );
   }, [assets, tags, scene, person, place, query]);
 
-  const categoryAssets = useMemo(() => {
-    if (!drilldown || !allAssets) return [];
-    return allAssets.filter((asset) => {
-      if (drilldown.kind === "tags") return asset.tags.includes(drilldown.name);
-      if (drilldown.kind === "people") return peopleList(asset.people).includes(drilldown.name);
-      if (drilldown.kind === "scenes") return asset.scene === drilldown.name;
-      return splitList(asset.place).includes(drilldown.name);
-    });
-  }, [allAssets, drilldown]);
+  useEffect(() => {
+    if (view !== "timeline" || months) return;
+    let cancelled = false;
+    timelineMonths()
+      .then((list) => { if (!cancelled) setMonths(list); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [view, months]);
+
+  useEffect(() => {
+    if (view !== "tags" && view !== "people" && view !== "places") return;
+    if (groupsByKind[catKind]) return;
+    let cancelled = false;
+    categoryGroups(catKind)
+      .then((list) => { if (!cancelled) setGroupsByKind((prev) => ({ ...prev, [catKind]: list })); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [view, catKind, groupsByKind]);
+
+  const groups = groupsByKind[catKind] ?? null;
 
   const currentList = useMemo(() => {
     if (view === "library") return filteredAssets;
-    if (view === "timeline") return allAssets ?? [];
-    if (drilldown) return categoryAssets;
     return [];
-  }, [view, filteredAssets, allAssets, drilldown, categoryAssets]);
+  }, [view, filteredAssets]);
 
   const detailAsset = useMemo(() => {
     if (!detailId) return null;
     return (
       currentList.find((asset) => asset.id === detailId) ??
       assets.find((asset) => asset.id === detailId) ??
-      allAssets?.find((asset) => asset.id === detailId) ??
       null
     );
-  }, [detailId, currentList, assets, allAssets]);
+  }, [detailId, currentList, assets]);
 
   const detailIndex = detailAsset ? currentList.findIndex((asset) => asset.id === detailAsset.id) : -1;
   const detailTotal = currentList.length || (detailAsset ? 1 : 0);
 
-  const placeTotal = useMemo(
-    () => (allAssets ? buildCategories(allAssets, "places").length : 0),
-    [allAssets],
-  );
+  const placeTotal = catKind === "places" ? groups?.length : undefined;
   const closeDetail = useCallback(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setDetailId(null);
@@ -715,7 +719,6 @@ const route = useMemo(readRoute, []);
 
   const applyTag = useCallback((tag: string) => {
     setView("library");
-    setDrilldown(null);
     setTags((previous) => unique([...previous, tag]));
     setDetailId(null);
   }, []);
@@ -724,7 +727,6 @@ const route = useMemo(readRoute, []);
     setQueryInput(value);
     if (value.trim()) {
       setView("library");
-      setDrilldown(null);
     }
     if (searchTimer.current) window.clearTimeout(searchTimer.current);
     searchTimer.current = window.setTimeout(() => {
@@ -750,7 +752,8 @@ const route = useMemo(readRoute, []);
     setScene(null);
     setPerson(null);
     setPlace(null);
-    setDrilldown(null);
+    setDayFrom(null);
+    setDayTo(null);
   }, []);
 
   const viewAlbumTag = useCallback(
@@ -771,6 +774,34 @@ const route = useMemo(readRoute, []);
     [clearAll],
   );
 
+  const openCategory = useCallback(
+    (kind: CategoryKind, name: string) => {
+      clearAll();
+      if (kind === "tags") setTags([name]);
+      else if (kind === "scenes") setScene(name);
+      else if (kind === "people") setPerson(name);
+      else setPlace(name);
+      setView("library");
+    },
+    [clearAll],
+  );
+
+  const openMonth = useCallback(
+    (month: string) => {
+      clearAll();
+      setDayFrom(month + "-01");
+      setDayTo(month + "-31");
+      setView("library");
+    },
+    [clearAll],
+  );
+
+  useEffect(() => {
+    if (view === "tags" || view === "people" || view === "places") {
+      setCatKind(view);
+    }
+  }, [view]);
+
   const loadMore = useCallback(() => {
     if (loadingMore || !hasMore || view !== "library") return;
     const last = assets[assets.length - 1];
@@ -786,6 +817,8 @@ const route = useMemo(readRoute, []);
       scene: scene || undefined,
       person: person || undefined,
       place: place || undefined,
+      day_from: dayFrom ?? undefined,
+      day_to: dayTo ?? undefined,
       limit: PAGE_SIZE,
       cursor,
       offset: cursor ? 0 : assets.length,
@@ -796,7 +829,7 @@ const route = useMemo(readRoute, []);
       })
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)))
       .finally(() => setLoadingMore(false));
-  }, [loadingMore, hasMore, view, query, tagKey, tags, album, scene, person, place, assets, fixtureUserTags]);
+  }, [loadingMore, hasMore, view, query, tagKey, tags, album, scene, person, place, dayFrom, dayTo, assets, fixtureUserTags]);
 
   useEffect(() => {
     if (view !== "library" || loading || firstGridMarked.current) return;
@@ -963,13 +996,12 @@ const route = useMemo(readRoute, []);
   ]);
 
   const range = yearRange(stats);
-  const categoryCount = drilldown ? categoryAssets.length : (allAssets?.length ?? stats?.assets ?? 0);
+  const categoryCount = view === "organize" ? (allAssets?.length ?? 0) : (stats?.assets ?? 0);
   const title = (() => {
     if (view === "organize") return "整理视图";
     if (view === "settings") return "设置";
     if (album) return `相册 · ${album}`;
     if (query) return `搜索 “${query}”`;
-    if (drilldown) return `${CATEGORY_LABEL[drilldown.kind]} · ${drilldown.name}`;
     if (view === "timeline") return "时间线";
     if (view === "tags") return "标签";
     if (view === "people") return "人物";
@@ -1008,13 +1040,6 @@ const route = useMemo(readRoute, []);
   if (scene) conditions.push({ key: "scene", label: `场景 · ${scene}`, remove: () => setScene(null) });
   if (person) conditions.push({ key: "person", label: `人物 · ${person}`, remove: () => setPerson(null) });
   if (place) conditions.push({ key: "place", label: `地点 · ${place}`, remove: () => setPlace(null) });
-  if (drilldown) {
-    conditions.push({
-      key: "drilldown",
-      label: `${CATEGORY_LABEL[drilldown.kind]} · ${drilldown.name}`,
-      remove: () => setDrilldown(null),
-    });
-  }
 
   const content = (() => {
     if (error && view !== "organize" && view !== "settings") {
@@ -1049,46 +1074,21 @@ const route = useMemo(readRoute, []);
     }
 
     if (view === "tags" || view === "people" || view === "places") {
-      if (!drilldown) {
-        return (
-          <Categories
-            kind={view}
-            assets={allAssets ?? []}
-            loading={allLoading || allAssets === null}
-            onPick={(kind, name) => setDrilldown({ kind, name })}
-          />
-        );
-      }
-      if (allLoading || allAssets === null) return <LoadingState label="正在读取分类照片…" />;
-      if (categoryAssets.length === 0) {
-        return <EmptyState mode="search" onChoose={handleEmptyChoice} onReset={() => setDrilldown(null)} />;
-      }
       return (
-        <VirtualGrid
-          key={`${view}-${drilldown.kind}-${drilldown.name}`}
-          assets={categoryAssets}
-          columns={columns}
-          selection={new Set(selection)}
-          multi={selection.length > 1}
-          onSelect={handleSelect}
-          onOpen={openDetail}
+        <Categories
+          kind={catKind}
+          groups={groups ?? []}
+          loading={groups === null}
+          onPick={openCategory}
+          onKindChange={(next) => setCatKind(next)}
         />
       );
     }
 
     if (view === "timeline") {
-      if (allLoading || allAssets === null) return <LoadingState label="正在整理时间线…" />;
-      if (allAssets.length === 0) return <EmptyState onChoose={handleEmptyChoice} />;
-      return (
-        <Timeline
-          assets={allAssets}
-          compact={density === "compact"}
-          selection={new Set(selection)}
-          multi={selection.length > 1}
-          onSelect={handleSelect}
-          onOpen={openDetail}
-        />
-      );
+      if (months === null) return <LoadingState label="正在整理时间线…" />;
+      if (months.length === 0) return <EmptyState onChoose={handleEmptyChoice} />;
+      return <Timeline months={months} onOpenMonth={openMonth} />;
     }
 
     if (loading && assets.length === 0) return <LoadingState label="正在读取本地相册…" />;
@@ -1126,23 +1126,20 @@ const route = useMemo(readRoute, []);
         activeAlbum={album}
         activePerson={person}
         activePlace={place}
-        placeTotal={placeTotal}
+        placeTotal={placeTotal ?? 0}
         onNavigate={navigate}
         onTag={applyTag}
         onAlbum={(name) => {
           setView("library");
-          setDrilldown(null);
           setAlbum((current) => (current === name ? null : name));
         }}
         onPerson={(name) => {
           setView("library");
-          setDrilldown(null);
           setPerson(name);
           setDetailId(null);
         }}
         onPlace={(name) => {
           setView("library");
-          setDrilldown(null);
           setPlace(name);
           setDetailId(null);
         }}

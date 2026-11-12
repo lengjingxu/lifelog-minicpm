@@ -359,6 +359,21 @@ button:focus-visible, input:focus-visible {
 }
 
 /* ---------------- timeline ---------------- */
+.month-row {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 8px 10px; border-radius: 12px; text-align: left;
+  color: var(--text-dim);
+}
+.month-row:hover { background: var(--bg-hover); color: var(--text); }
+.month-cover {
+  width: 72px; height: 72px; flex: none; border-radius: 9px; overflow: hidden;
+  background: rgba(255,255,255,0.04); box-shadow: 0 0 0 1px var(--line) inset;
+}
+.month-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.month-meta { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.month-meta .month-title { font-size: 13px; color: var(--text); }
+.month-meta .month-count { font-size: 10.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+
 .timeline-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 20px 36px; }
 .month-group { padding-top: 1px; }
 .month-header {
