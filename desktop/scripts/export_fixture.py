@@ -147,9 +147,33 @@ def main() -> None:
         "people": pairs(people_count),
         "months": [[month, count] for month, count in sorted(months_count.items(), reverse=True)],
     }
+
+    # 去重分组：库里跑过 lifelog dedup 才带上，浏览器预览才能看到 ×N 折叠。
+    dups: list[dict] = []
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if {"dup_groups", "dup_members"} <= tables:
+        groups: dict[int, dict] = {}
+        for row in conn.execute(
+            "SELECT g.id, g.keeper_id, g.reason, m.asset_id, m.distance "
+            "FROM dup_groups g JOIN dup_members m ON m.group_id = g.id "
+            "ORDER BY g.id, m.distance IS NULL, m.distance, m.asset_id"
+        ):
+            group = groups.setdefault(
+                row[0],
+                {
+                    "id": row[0],
+                    "keeper_id": row[1],
+                    "reason": row[2],
+                    "count": 0,
+                    "members": [],
+                },
+            )
+            group["members"].append({"asset_id": row[3], "distance": row[4]})
+            group["count"] += 1
+        dups = list(groups.values())
     conn.close()
 
-    payload = {"stats": stats, "assets": assets, "facets": facets}
+    payload = {"stats": stats, "assets": assets, "facets": facets, "dups": dups}
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {args.out} · {len(assets)} assets · {args.out.stat().st_size} bytes")

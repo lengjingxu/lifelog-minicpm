@@ -7,7 +7,7 @@
     "first_day": "2026-11-03",
     "last_day": "2026-11-06",
     "db_path": "lifelog.sqlite",
-    "db_size": 69632
+    "db_size": 143360
   },
   "assets": [
     {
@@ -561,5 +561,23 @@
         24
       ]
     ]
-  }
+  },
+  "dups": [
+    {
+      "id": 1,
+      "keeper_id": "282ed349ee25a367",
+      "reason": "l1",
+      "count": 2,
+      "members": [
+        {
+          "asset_id": "282ed349ee25a367",
+          "distance": 0
+        },
+        {
+          "asset_id": "46f44c8d40e38ef0",
+          "distance": 6
+        }
+      ]
+    }
+  ]
 }

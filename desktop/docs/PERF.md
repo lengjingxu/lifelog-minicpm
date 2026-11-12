@@ -324,3 +324,25 @@ python3 scripts/bench_ui_dev.py --home /tmp/sg-bench-10w --out /tmp/bench-main.j
 结论：玻璃材质没有给滚动加成本——两种模式下都没有 >20ms 的帧。
 不能直接和之前的 75fps 对比：那是 75Hz 显示器上的同步帧率，无头环境最高只到 60Hz；
 解锁后 507fps 说明渲染侧有大量余量，瓶颈不在这一层。
+
+## 去重层（dup_groups）对 10 万级的影响（2026-11-13）
+
+去重只加了一条只读 IPC 和一次 O(n) 折叠，没有碰 `queryAssets` 的分页/游标。
+
+| 项 | 实测 |
+| --- | ---: |
+| `dup_groups()` SQL（2,000 成员，约 2% 重复） | 0.9ms |
+| `dup_groups()` SQL（100,000 成员，bench 库极端值） | 64ms |
+| 滚动（无头 100k fixture，带 dups） | 55.2fps，1 帧 >20ms |
+| 滚动（无头 100k fixture，不带 dups） | 55.0fps，1 帧 >20ms |
+| 滚动（解锁帧率，带 / 不带 dups） | 483 / 478fps |
+| RSS 峰值（release bench 构建） | 109–110MB |
+| 冷启动到首帧（release bench 构建） | 529 / 674ms（窗口不可见时抖动 ±70ms） |
+
+口径与限制：
+- 本机测的时候屏幕处于锁屏状态（`document.visibilityState=hidden`），真实窗口的 warm 重开与滚动帧率测不出来，
+  和本文档前面「这台机器窗口拿不到前台」是同一条限制；warm 的 1.8–2.2s 是隐藏窗口下 rAF 被节流的已知假象。
+- 无头 100k fixture 的 A/B（带 dups / 不带 dups）逐项一致，说明折叠层没有给滚动加成本；
+  那次 433ms 长帧两边都有，来自 60MB fixture 的解析，不是去重引入的。
+- 60Hz 封顶下 55fps 与本文档 60.26fps 的差异来自这次探针每帧都改 `scrollTop`（更激进），不是回归。
+

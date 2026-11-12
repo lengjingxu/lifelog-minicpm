@@ -7,6 +7,8 @@ import { Thumb } from "./Thumb";
 
 type Props = {
   assets: Asset[];
+  /** keeper_id -> 同组张数，用来在角上标 ×N */
+  dupCounts?: Map<string, number>;
   columns: number;
   selection: Set<string>;
   multi: boolean;
@@ -19,6 +21,7 @@ type Props = {
 
 export function VirtualGrid({
   assets,
+  dupCounts,
   columns,
   selection,
   multi,
@@ -128,6 +131,7 @@ export function VirtualGrid({
                   <Thumb
                     key={asset.id}
                     asset={asset}
+                    dupCount={dupCounts?.get(asset.id)}
                     selected={selection.has(asset.id)}
                     multi={multi}
                     onSelect={onSelect}
