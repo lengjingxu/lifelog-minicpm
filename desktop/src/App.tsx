@@ -643,6 +643,8 @@ const route = useMemo(readRoute, []);
 
   const detailIndex = detailAsset ? currentList.findIndex((asset) => asset.id === detailAsset.id) : -1;
   const detailTotal = currentList.length || (detailAsset ? 1 : 0);
+  // 从时间线点进某个月时，详情计数器要显示这个月的张数，不是整库
+  const monthTotal = dayFrom ? months?.find((m) => m.month === dayFrom.slice(0, 7))?.count : undefined;
 
   const placeTotal = catKind === "places" ? groups?.length : undefined;
   const closeDetail = useCallback(() => {
@@ -1212,7 +1214,7 @@ const route = useMemo(readRoute, []);
         <Detail
           asset={detailAsset}
           index={Math.max(0, detailIndex)}
-          total={view === "library" ? Math.max(detailTotal, stats?.assets ?? 0) : detailTotal}
+          total={view === "library" ? (monthTotal ?? Math.max(detailTotal, stats?.assets ?? 0)) : detailTotal}
           origin={detailOrigin}
           onClose={closeDetail}
           closing={detailClosing}
