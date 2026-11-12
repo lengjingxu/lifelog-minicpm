@@ -35,9 +35,24 @@ fi
 echo "[2/5] 签名"
 SIGNED=0
 if [ -n "$IDENTITY" ] && security find-identity -v -p codesigning | grep -qF "$IDENTITY"; then
-  codesign --force --deep --options runtime --timestamp --sign "$IDENTITY" "$APP"
-  codesign --verify --strict --verbose=2 "$APP"
-  echo "  已签名：$IDENTITY"
+  # 不要用 codesign --deep：Apple 明确不建议，嵌套代码可能被漏签，
+  # 公证会以 signature invalid 拒绝且很难定位。显式从内到外签。
+  while IFS= read -r -d '' nested; do
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$nested"
+  done < <(find "$APP/Contents" -type f -name "*.dylib" -print0 -o -type f -name "*.so" -print0)
+  if [ -d "$APP/Contents/Frameworks" ]; then
+    while IFS= read -r -d '' fw; do
+      codesign --force --options runtime --timestamp --sign "$IDENTITY" "$fw"
+    done < <(find "$APP/Contents/Frameworks" -maxdepth 1 -name "*.framework" -print0)
+  fi
+  if [ -d "$APP/Contents/MacOS" ]; then
+    while IFS= read -r -d '' exe; do
+      codesign --force --options runtime --timestamp --sign "$IDENTITY" "$exe"
+    done < <(find "$APP/Contents/MacOS" -maxdepth 1 -type f -perm -111 -print0)
+  fi
+  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+  codesign --verify --deep --strict --verbose=2 "$APP"
+  echo "  已签名（由内到外，未用 --deep）：$IDENTITY"
   SIGNED=1
 else
   echo "  跳过：本机没有匹配的签名身份（security find-identity -p codesigning 为空）"
