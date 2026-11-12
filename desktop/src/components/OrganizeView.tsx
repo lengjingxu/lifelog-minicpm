@@ -66,11 +66,11 @@ const MAX_SLOTS = 8;
  * 面板不整体旋转，所以这里不需要再补容器角度。
  */
 const SHEET_GEOMETRY = [
-  { w: 30, left: 29, top: 36.0, rot: -8 },
-  { w: 46, left: 53, top: 35.4, rot: 4 },
-  { w: 28, left: 90, top: 35.0, rot: -5 },
-  { w: 52, left: 113, top: 37.1, rot: 7 },
-  { w: 34, left: 154, top: 34.7, rot: -3 },
+  { w: 30, left: 29, top: 40.5, rot: -8 },
+  { w: 46, left: 53, top: 39.9, rot: 4 },
+  { w: 28, left: 90, top: 39.5, rot: -5 },
+  { w: 52, left: 113, top: 41.6, rot: 7 },
+  { w: 34, left: 154, top: 39.2, rot: -3 },
 ];
 const FLIGHT_MS = 620;
 
