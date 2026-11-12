@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   AlertCircle,
   ArrowRight,
@@ -60,6 +60,18 @@ type Props = {
 
 const MAX_FLIGHTS = 3;
 const MAX_SLOTS = 8;
+/**
+ * 五条文件边：宽度/角度照 glass-folders 的 Archives（30/46/28/52/34，-8…+7°）。
+ * top 已按各自旋转角补偿——旋转后的包围盒会比元素本身高，不补偿的话露出高度会参差。
+ * 面板不整体旋转，所以这里不需要再补容器角度。
+ */
+const SHEET_GEOMETRY = [
+  { w: 30, left: 29, top: 31.3, rot: -8 },
+  { w: 46, left: 53, top: 30.7, rot: 4 },
+  { w: 28, left: 90, top: 30.4, rot: -5 },
+  { w: 52, left: 113, top: 32.4, rot: 7 },
+  { w: 34, left: 154, top: 30.0, rot: -3 },
+];
 const FLIGHT_MS = 620;
 
 function hash(value: string): number {
@@ -674,6 +686,29 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
               <div className="group-panels">
                 {groups.map((group) => (
                   <section className={clsx("group-panel", group.name === "未归类" && "failed")} key={group.name}>
+                    <span className="group-tab" aria-hidden="true" />
+                    <span className="group-sheets" aria-hidden="true">
+                      {SHEET_GEOMETRY.map((sheet, index) => {
+                        const card = group.cards[index];
+                        return (
+                          <i
+                            className={"group-sheet sheet-tone-" + index}
+                            key={index}
+                            style={{
+                              width: sheet.w,
+                              left: sheet.left,
+                              top: sheet.top,
+                              transform: "rotate(" + sheet.rot + "deg)",
+                            } as CSSProperties}
+                          >
+                            {card?.asset ? (
+                              <img src={assetSrc(card.asset.thumb)} alt="" loading="lazy" />
+                            ) : null}
+                          </i>
+                        );
+                      })}
+                    </span>
+                    <div className="group-front glass-surface on-color">
                     <header>
                       <span className="group-dot" />
                       <span>{group.name}</span>
@@ -703,6 +738,7 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
                           ) : null}
                         </div>
                       ))}
+                    </div>
                     </div>
                   </section>
                 ))}

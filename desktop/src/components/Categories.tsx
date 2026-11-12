@@ -96,14 +96,15 @@ export function Categories({ kind, groups, loading, onPick, onKindChange }: Prop
             >
               <span className="category-cover">
                 <Cover thumb={group.cover_thumb} />
-                <span className="category-scrim" />
               </span>
-              <span className="category-meta">
-                <span className="category-name">
-                  <Hash size={12} strokeWidth={1.8} />
-                  {group.name}
+              <span className="category-front glass-surface on-color">
+                <span className="category-meta">
+                  <span className="category-name">
+                    <Hash size={12} strokeWidth={1.8} />
+                    {group.name}
+                  </span>
+                  <span className="category-count">{group.count} 张</span>
                 </span>
-                <span className="category-count">{group.count} 张</span>
               </span>
             </button>
           ))}
