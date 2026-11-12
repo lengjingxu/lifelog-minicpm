@@ -19,7 +19,7 @@
 
   /* 玻璃材质（对齐 docs/design/GLASS-MATERIAL.md） */
   --glass-bg: rgba(14, 14, 17, 0.26);
-  --glass-bg-oncolor: rgba(14, 14, 17, 0.42);
+  --glass-bg-oncolor: rgba(14, 14, 17, 0.62);
   --glass-blur: blur(10px) saturate(1.6);
   --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.10);
   --glass-border: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
@@ -405,8 +405,8 @@ button:focus-visible, input:focus-visible {
 .timeline-cell .cell { height: 100%; }
 
 /* ---------------- categories ---------------- */
-.category-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 27px 28px 40px; }
-.category-head { display: flex; align-items: flex-start; gap: 14px; margin: 0 1px 24px; }
+.category-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 34px 34px 48px; }
+.category-head { display: flex; align-items: flex-start; gap: 14px; margin: 0 1px 32px; }
 .category-icon {
   width: 38px; height: 38px; border-radius: 11px; flex: none;
   display: grid; place-items: center;
@@ -419,7 +419,7 @@ button:focus-visible, input:focus-visible {
 .category-total { margin-left: auto; text-align: right; padding-top: 3px; }
 .category-total span { display: block; font-size: 23px; font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1; }
 .category-total small { font-size: 9.5px; color: var(--text-faint); }
-.category-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.category-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 20px; }
 .category-card {
   position: relative; aspect-ratio: 4 / 3; overflow: hidden;
   border-radius: 16px; padding: 0; text-align: left;
@@ -441,15 +441,15 @@ button:focus-visible, input:focus-visible {
 /* 信息条改成玻璃前板，不再用压暗渐变。
    注意要压过 .glass-surface 的 position: relative，否则会退回文档流 */
 .category-card .category-front {
-  position: absolute; left: 8px; right: 8px; bottom: 8px;
-  border-radius: 12px; padding: 9px 11px;
+  position: absolute; left: 10px; right: 10px; bottom: 10px;
+  border-radius: 13px; padding: 12px 14px;
 }
 .category-meta { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .category-name {
   display: inline-flex; align-items: center; gap: 5px; min-width: 0;
-  font-size: 13px; font-weight: 600; color: var(--text);
+  font-size: 13.5px; font-weight: 600; color: #fff;
 }
-.category-count { margin-left: auto; font-size: 10.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.category-count { margin-left: auto; font-size: 11px; color: rgba(255, 255, 255, 0.92); font-variant-numeric: tabular-nums; }
 .category-loading {
   height: 240px; display: grid; place-items: center;
   color: var(--text-faint); font-size: 12px;
@@ -772,7 +772,7 @@ button:focus-visible, input:focus-visible {
 
 .group-rail {
   min-height: 0; display: flex; flex-direction: column; gap: 8px;
-  padding: 11px 11px 7px; border-radius: 16px;
+  padding: 14px 14px 10px; border-radius: 16px;
   background: rgba(255,255,255,0.018); box-shadow: 0 0 0 1px var(--line) inset;
 }
 .group-rail-head { display: flex; align-items: center; justify-content: space-between; padding: 0 3px 2px; }
@@ -780,12 +780,12 @@ button:focus-visible, input:focus-visible {
 .group-rail-head em { font-style: normal; min-width: 2ch; text-align: right; font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .group-panels {
   flex: 1; min-height: 0; overflow-y: auto; display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-content: start; padding-right: 2px;
+  grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-content: start; padding-right: 2px;
 }
 .group-rail .group-panel {
   /* 文件夹：tab(22) + body(从 20px 起) + sheets(露边 ~21px) + front(底部 72% 玻璃) */
   position: relative;
-  height: 176px; display: block; padding: 0;
+  height: 192px; display: block; padding: 0;
   background: none; box-shadow: none;
   filter: drop-shadow(0 18px 26px rgba(16,16,20,.14)) drop-shadow(0 3px 8px rgba(16,16,20,.06));
 }
@@ -1103,6 +1103,10 @@ button:focus-visible, input:focus-visible {
 [data-theme="light"] .sidebar,
 [data-theme="light"] .toolbar,
 [data-theme="light"] .inspector { box-shadow: inset 0 1px 0 rgba(255,255,255,0.9); }
+
+/* 分类卡文字压在照片上的玻璃面，颜色单独给，不跟主题的 --text 走 */
+[data-theme="light"] .category-card .category-name { color: #17171A; }
+[data-theme="light"] .category-card .category-count { color: rgba(23, 23, 26, 0.72); }
 [data-theme="light"] .skeleton { background: linear-gradient(100deg, rgba(22,22,26,0.05) 30%, rgba(22,22,26,0.10) 50%, rgba(22,22,26,0.05) 70%); background-size: 200% 100%; }
 
 /* 视图切换：内容从下方 6px 淡入 */
@@ -1253,3 +1257,263 @@ button:focus-visible, input:focus-visible {
   box-shadow: 0 0 0 1px var(--line) inset; font-size: 11.5px;
 }
 .selection-bar .selection-delete:hover { color: var(--accent); box-shadow: 0 0 0 1px var(--accent-line) inset; }
+
+/* ================= 密度：宽松二档（docs/design/DENSITY-LOOSE.md @9ed9dab） ================= */
+.app { grid-template-columns: 260px minmax(0, 1fr); }
+.sidebar { padding: 0 18px 20px; }
+.brand { padding: 6px 12px 22px; gap: 11px; }
+.sidebar-search { height: 38px; padding: 0 13px; margin: 0 2px 10px; }
+.sidebar-scroll { padding: 6px 2px 196px; }
+.nav-group-label { padding: 24px 12px 10px; }
+.nav-item { padding: 11px 26px 11px 14px; gap: 11px; font-size: 13.5px; }
+.tag-pill { padding: 9px 12px; }
+.sidebar-foot { padding: 18px 14px 6px; }
+
+.toolbar { min-height: 72px; padding: 18px 32px 16px 28px; gap: 14px; }
+.search { height: 40px; padding: 0 14px; }
+.condition-bar { padding: 0 32px 18px; min-height: 46px; gap: 16px; }
+
+.grid-scroll { padding: 24px 32px 56px; }
+.timeline-scroll { padding: 0 32px 56px; }
+.month-row { gap: 18px; padding: 12px 14px; }
+.month-cover { width: 88px; height: 88px; }
+.month-header { padding: 22px 1px 14px; }
+.timeline-grid { gap: 18px; }
+
+.category-scroll { padding: 44px 44px 64px; }
+.category-head { margin: 0 1px 40px; }
+.category-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 26px; }
+.category-card .category-front { left: 12px; right: 12px; bottom: 12px; padding: 14px 16px; border-radius: 14px; }
+.category-name { font-size: 14px; }
+.category-count { font-size: 11.5px; }
+
+.organize-shell { padding: 20px 32px 24px; }
+.organize-top { padding: 4px 4px 34px; }
+.organize-hud { height: 60px; padding: 11px 14px 11px 18px; margin-bottom: 18px; gap: 24px; }
+.group-rail { padding: 18px 18px 14px; }
+.group-panels { gap: 16px; }
+.group-rail .group-panel { height: 208px; }
+
+.overlay-root { grid-template-columns: minmax(0, 1fr) 380px; }
+.stage { padding: 56px 60px; }
+.stage-full { padding: 64px 32px 32px; }
+.file-name { margin: 0 0 28px; }
+.caption { margin: 0 0 28px; line-height: 1.75; }
+.meta-grid { gap: 11px 14px; margin: 0 0 28px; }
+.tag-cloud { gap: 9px; margin-bottom: 28px; }
+.ocr { padding: 14px 15px; }
+.inspector-actions { gap: 12px; margin-top: 32px; padding-top: 24px; }
+.inspector-actions button { min-height: 36px; }
+
+.settings-scroll { padding: 40px 44px 64px; }
+.settings-intro { margin-bottom: 30px; }
+.settings-grid { gap: 18px; }
+.settings-card { padding: 24px; }
+
+/* ================= 三层表面 + 一层玻璃（GLASS-MATERIAL @eca4739） ================= */
+
+/* 面板层：压在应用底色上的卡片容器。注意「一层玻璃」规则：
+   装着玻璃子元素的容器（.group-rail / .organize-complete / 识别弹窗 / 检查器）自己不做玻璃。 */
+.settings-card,
+.empty-actions > * {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028));
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+[data-theme="light"] .settings-card,
+[data-theme="light"] .empty-actions > * {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.74));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 0 0 1px rgba(23, 23, 26, 0.08), 0 8px 22px rgba(30, 30, 40, 0.10);
+}
+
+/* 玻璃里的块一律平铺（按实际选择器补，作用域要准） */
+.settings-card .login-line, .settings-card .ghost-button, .settings-card .primary-button,
+.settings-card .status-pill, .settings-card .icon-button,
+.inspector .ocr, .inspector .tag-cloud button, .inspector .inspector-actions button,
+.selection-bar button, .selection-bar .ghost-button,
+.recognition-dialog .recognition-block, .recognition-dialog .stat-box,
+.recognition-dialog .import-row, .recognition-dialog .import-placeholder,
+.recognition-dialog .inline-alert, .recognition-dialog .progress-track,
+.group-card .group-cover, .toast .ghost-button {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10);
+}
+[data-theme="light"] .settings-card .login-line, [data-theme="light"] .inspector .ocr,
+[data-theme="light"] .recognition-dialog .stat-box, [data-theme="light"] .recognition-dialog .import-row,
+[data-theme="light"] .recognition-dialog .import-placeholder, [data-theme="light"] .recognition-dialog .recognition-block {
+  box-shadow: inset 0 0 0 1px rgba(23, 23, 26, 0.10);
+}
+
+/* 控件层：不 blur，只有 tint + 上高光 + 描边 */
+.search, .sidebar-search, .view-switch, .density-switch, .icon-button,
+.close-btn, .ghost-button, .mark-controls input, .mark-controls select,
+.chip, .status-pill, .group-target, .tag-cloud button, .inspector-actions button {
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09), inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+}
+[data-theme="light"] .search, [data-theme="light"] .sidebar-search, [data-theme="light"] .view-switch,
+[data-theme="light"] .density-switch, [data-theme="light"] .icon-button, [data-theme="light"] .close-btn,
+[data-theme="light"] .ghost-button, [data-theme="light"] .mark-controls input, [data-theme="light"] .mark-controls select,
+[data-theme="light"] .chip, [data-theme="light"] .status-pill, [data-theme="light"] .group-target,
+[data-theme="light"] .tag-cloud button, [data-theme="light"] .inspector-actions button {
+  background: rgba(23, 23, 26, 0.035);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 0 0 1px rgba(23, 23, 26, 0.10);
+}
+.view-switch, .density-switch { background: rgba(255, 255, 255, 0.03); }
+[data-theme="light"] .view-switch, [data-theme="light"] .density-switch { background: rgba(23, 23, 26, 0.03); }
+
+/* 强调色只留给「选中 / 实时」：chip / 标签按钮 / 状态胶囊改中性 */
+.chip, .tag-cloud button, .status-pill {
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+[data-theme="light"] .chip, [data-theme="light"] .tag-cloud button, [data-theme="light"] .status-pill {
+  background: rgba(23, 23, 26, 0.05);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* 详情页：满幅照片 + 悬浮玻璃板（外壳不再做玻璃） */
+.overlay-root { display: block; padding: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.dialog-backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; }
+.stage { position: absolute; inset: 0; padding: 0; }
+.stage-image { height: 100%; }
+.inspector {
+  position: absolute; right: 24px; top: 24px; bottom: 24px; width: 380px;
+  border-radius: 20px; padding: 28px 26px; overflow-y: auto;
+  background: linear-gradient(180deg, rgba(14, 14, 17, 0.62), rgba(14, 14, 17, 0.72));
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(24px) saturate(1.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.10), 0 24px 60px rgba(0, 0, 0, 0.45);
+  border-left: 0;
+}
+[data-theme="light"] .inspector {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.70));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 0 0 1px rgba(255, 255, 255, 0.6), 0 24px 60px rgba(20, 20, 30, 0.28);
+}
+
+/* 容器里有玻璃，自己就不做玻璃 */
+.group-rail, .organize-complete, .overlay-root {
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.group-rail, .overlay-root { box-shadow: none; }
+
+/* 字阶 + 强调色（preview-2026-11-12.css） */
+.category-head h2 { font-size: 30px; margin: 0 0 10px; }
+.category-head p { font-size: 12px; }
+.category-eyebrow { letter-spacing: 0.16em; }
+.category-total span { font-size: 40px; font-weight: 300; letter-spacing: -0.02em; }
+.category-total small { letter-spacing: 0.14em; text-transform: uppercase; }
+.settings-intro { margin-bottom: 34px; }
+.settings-intro h2 { font-size: 28px; }
+.settings-grid { gap: 20px; }
+.complete-head h2 { font-size: 30px; }
+.title-main { font-size: 16px; }
+.month-title { font-size: 16px; }
+.stage-full { padding: 0; }
+.close-btn { top: 18px; right: 18px; width: 34px; height: 34px; border-radius: 11px; }
+.chip { background: rgba(255, 255, 255, 0.05); border-color: var(--line); color: var(--text-dim); }
+[data-theme="light"] .chip { background: rgba(23, 23, 26, 0.04); border-color: var(--line); }
+.tag-cloud button { background: rgba(255, 255, 255, 0.05); border-color: var(--line); color: var(--text-dim); }
+[data-theme="light"] .tag-cloud button { background: rgba(23, 23, 26, 0.04); border-color: var(--line); }
+.tag-cloud button:hover { background: rgba(255, 255, 255, 0.09); color: var(--text); }
+.status-pill { color: var(--text-dim); background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px var(--line); }
+
+/* ================= 去分割线：靠留白和底色分层（preview @a765df2） ================= */
+.sidebar { border-right: 0; background: color-mix(in srgb, var(--bg) 55%, transparent); }
+.toolbar { border-bottom: 0; }
+.sidebar-foot { border-top: 0; padding-top: 16px; }
+.toolbar-divider { display: none; }
+.inspector { border-left: 0; }
+.inspector-actions { border-top: 0; padding-top: 20px; }
+.shortcut-row { border-top: 0; }
+.condition-bar { border: 0; }
+
+/* 控件不再描边，只靠底色 */
+.search, .sidebar-search, .view-switch, .density-switch, .icon-button,
+.close-btn, .ghost-button, .mark-controls input, .mark-controls select,
+.chip, .status-pill, .group-target, .tag-cloud button, .inspector-actions button {
+  box-shadow: none;
+}
+.view-switch, .density-switch { background: rgba(255, 255, 255, 0.035); }
+[data-theme="light"] .view-switch, [data-theme="light"] .density-switch { background: rgba(23, 23, 26, 0.04); }
+.view-switch button.active, .density-switch button.active { background: rgba(255, 255, 255, 0.09); box-shadow: none; }
+[data-theme="light"] .view-switch button.active, [data-theme="light"] .density-switch button.active { background: rgba(255, 255, 255, 0.95); }
+
+/* 面板只留上高光 + 外投影，不要整圈描边 */
+.settings-card, .stat-box, .import-row, .import-placeholder,
+.organize-complete, .login-line, .ocr, .empty-actions > * {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+[data-theme="light"] .settings-card, [data-theme="light"] .stat-box, [data-theme="light"] .import-row,
+[data-theme="light"] .import-placeholder, [data-theme="light"] .organize-complete,
+[data-theme="light"] .login-line, [data-theme="light"] .ocr, [data-theme="light"] .empty-actions > * {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 8px 22px rgba(30, 30, 40, 0.09);
+}
+
+/* 玻璃面也去掉整圈描边，只留顶部高光 */
+.glass-surface { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 18px 44px rgba(0, 0, 0, 0.32); }
+[data-theme="light"] .glass-surface { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 18px 40px rgba(20, 20, 30, 0.16); }
+
+/* 玻璃里的平铺块也没有整圈了，只留一根上高光，靠间距分块 */
+.settings-card .login-line, .inspector .ocr,
+.recognition-dialog .recognition-block, .recognition-dialog .stat-box,
+.recognition-dialog .import-row, .recognition-dialog .import-placeholder,
+.recognition-dialog .inline-alert, .recognition-dialog .progress-track,
+.group-card .group-cover, .toast .ghost-button, .selection-bar button {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* ================= 侧栏改版（sidebar-preview @cf7c1ec） ================= */
+.sidebar { background: color-mix(in srgb, var(--bg) 92%, #8FA0B8 8%); padding: 0 16px 18px; }
+[data-theme="light"] .sidebar { background: color-mix(in srgb, var(--bg) 91%, #7C8CA6 9%); }
+
+.brand { padding: 8px 10px 24px; gap: 12px; }
+.brand-mark { width: 30px; height: 30px; border-radius: 10px; }
+.brand-name { font-size: 15px; letter-spacing: 0.01em; }
+.brand-sub { font-size: 9px; letter-spacing: 0.14em; }
+
+.sidebar-search { height: 38px; border-radius: 11px; margin: 0 0 4px; padding: 0 12px; }
+
+.nav-group-label {
+  font-size: 10px; letter-spacing: 0.14em; font-weight: 600;
+  padding: 26px 12px 9px; color: var(--text-faint);
+}
+.nav-item {
+  height: 40px; padding: 0 12px; border-radius: 12px; gap: 12px;
+  font-size: 13.5px; color: var(--text-dim);
+}
+.nav-item:hover { background: rgba(255, 255, 255, 0.045); color: var(--text); }
+[data-theme="light"] .nav-item:hover { background: rgba(23, 23, 26, 0.035); }
+.nav-item.active { background: transparent; box-shadow: none; color: var(--text); }
+.nav-item .dot { display: none; }
+.nav-item .count { font-size: 11px; color: var(--text-faint); }
+
+/* 选中：白色胶囊 + 轻投影（暗色用 8% 白） */
+.nav-indicator {
+  left: 0; right: 0; border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 30, 0.06), 0 4px 12px rgba(20, 20, 30, 0.06);
+}
+[data-theme="dark"] .nav-indicator {
+  background: rgba(255, 255, 255, 0.085);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.tag-pill { height: 34px; padding: 0 12px; border-radius: 10px; gap: 10px; font-size: 12.5px; }
+.tag-pill.active { background: rgba(255, 255, 255, 0.07); box-shadow: none; }
+[data-theme="light"] .tag-pill.active { background: #fff; box-shadow: 0 1px 2px rgba(20, 20, 30, 0.06); }
+.tag-dot { width: 4px; height: 4px; opacity: 0.55; }
+
+.sidebar-foot { padding: 16px 4px 4px; }
+.sidebar-action { height: 34px; padding: 0 10px; border-radius: 10px; font-size: 12px; gap: 10px; }
+.sidebar-action.active { background: rgba(255, 255, 255, 0.06); }
+[data-theme="light"] .sidebar-action.active { background: #fff; box-shadow: 0 1px 2px rgba(20, 20, 30, 0.06); }
+.lib-line { margin-top: 12px; padding: 0 10px; font-size: 10.5px; }
+.lib-sub { padding: 0 10px; margin-top: 6px; font-size: 9.5px; letter-spacing: 0.02em; }
+.sidebar-live { left: 4px; right: 4px; border-radius: 12px; padding: 10px 11px; }
