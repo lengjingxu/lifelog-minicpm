@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import type { Facets, Health, LiveStatus, Stats } from "../api";
-import { useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { formatBytes, type View } from "../utils";
 
 type Props = {
@@ -68,7 +68,9 @@ export function Sidebar({
   const indicatorRef = useRef<HTMLSpanElement | null>(null);
   const firstRun = useRef(true);
 
-  useLayoutEffect(() => {
+  // 胶囊高度/位移按当前 active 行实时量。只在 view 变化时量的话，
+  // 改了行高（或窗口缩放）而当前视图没变，胶囊会停在旧尺寸。
+  const measureIndicator = useCallback(() => {
     const list = navRef.current;
     const indicator = indicatorRef.current;
     if (!list || !indicator) return;
@@ -84,7 +86,25 @@ export function Sidebar({
     indicator.style.opacity = "1";
     indicator.style.height = `${active.offsetHeight}px`;
     indicator.style.transform = `translateY(${active.offsetTop}px)`;
-  }, [view]);
+  }, []);
+
+  useLayoutEffect(() => {
+    measureIndicator();
+  }, [view, measureIndicator]);
+
+  useEffect(() => {
+    const list = navRef.current;
+    if (!list) return;
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => measureIndicator()) : null;
+    observer?.observe(list);
+    const active = list.querySelector<HTMLElement>(".nav-item.active");
+    if (active) observer?.observe(active);
+    window.addEventListener("resize", measureIndicator);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measureIndicator);
+    };
+  }, [view, measureIndicator]);
 
   const tags = facets?.tags ?? [];
   const albums = facets?.albums ?? [];
