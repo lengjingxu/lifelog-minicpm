@@ -1,55 +1,59 @@
-import { useMemo, type CSSProperties, type MouseEvent } from "react";
-import type { Asset } from "../api";
+import { useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { assetSrc, type MonthSummary } from "../api";
 import { monthLabel } from "../utils";
-import { Thumb } from "./Thumb";
 
 type Props = {
-  assets: Asset[];
-  compact: boolean;
-  selection: Set<string>;
-  multi: boolean;
-  onSelect: (asset: Asset, event: MouseEvent) => void;
-  onOpen: (asset: Asset) => void;
+  months: MonthSummary[];
+  onOpenMonth: (month: string) => void;
 };
 
-export function Timeline({ assets, compact, selection, multi, onSelect, onOpen }: Props) {
-  const groups = useMemo(() => {
-    const map = new Map<string, Asset[]>();
-    for (const asset of assets) {
-      const month = asset.day?.slice(0, 7) || "unknown";
-      const list = map.get(month);
-      if (list) list.push(asset);
-      else map.set(month, [asset]);
-    }
-    return [...map.entries()].sort(([a], [b]) => b.localeCompare(a));
-  }, [assets]);
-
-  const style = { "--cell-min": compact ? "132px" : "160px" } as CSSProperties;
+/**
+ * 时间线只渲染月份摘要（10 万条也就一百多行），点月份再回图库按月分页。
+ * 之前是把全库塞进内存再 groups.map -> list.map 全量渲染，10 万条会生成 10 万个格子。
+ */
+export function Timeline({ months, onOpenMonth }: Props) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: months.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 104,
+    overscan: 3,
+  });
 
   return (
-    <div className="timeline-scroll" data-timeline-scroll>
-      {groups.map(([month, list], groupIndex) => (
-        <section className="month-group" key={month}>
-          <div className="month-header">
-            <span className="month-title">{month === "unknown" ? "时间未知" : monthLabel(month)}</span>
-            <span className="month-count">· {list.length} 张</span>
-            {groupIndex === 0 && <span className="month-hint">最近</span>}
-          </div>
-          <div className="timeline-grid" style={style}>
-            {list.map((asset) => (
-              <div className="timeline-cell" key={asset.id}>
-                <Thumb
-                  asset={asset}
-                  selected={selection.has(asset.id)}
-                  multi={multi}
-                  onSelect={onSelect}
-                  onOpen={onOpen}
-                />
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
+    <div className="timeline-scroll" data-timeline-scroll ref={scrollRef}>
+      <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+        {virtualizer.getVirtualItems().map((item) => {
+          const month = months[item.index];
+          return (
+            <button
+              type="button"
+              key={month.month}
+              className="month-row"
+              onClick={() => onOpenMonth(month.month)}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                height: item.size,
+                transform: "translateY(" + item.start + "px)",
+              }}
+            >
+              <span className="month-cover">
+                {month.cover_thumb ? (
+                  <img src={assetSrc(month.cover_thumb)} alt="" loading="lazy" decoding="async" draggable={false} />
+                ) : null}
+              </span>
+              <span className="month-meta">
+                <span className="month-title">{month.month === "unknown" ? "时间未知" : monthLabel(month.month)}</span>
+                <span className="month-count">· {month.count} 张</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

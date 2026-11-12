@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { Hash, Layers, MapPin, Tags, Users } from "lucide-react";
-import { assetSrc, type Asset } from "../api";
-import { buildCategories, type CategoryKind } from "../utils";
+import { assetSrc, type GroupSummary } from "../api";
+import type { CategoryKind } from "../utils";
 
 type Props = {
   kind: CategoryKind;
-  assets: Asset[];
+  groups: GroupSummary[];
   loading: boolean;
   onPick: (kind: CategoryKind, name: string) => void;
+  onKindChange: (kind: CategoryKind) => void;
 };
 
 const COPY: Record<CategoryKind, { title: string; note: string; icon: typeof Tags }> = {
@@ -18,13 +19,13 @@ const COPY: Record<CategoryKind, { title: string; note: string; icon: typeof Tag
   scenes: { title: "场景", note: "按模型识别的场景浏览，代表图取该场景下最新一张。", icon: Layers },
 };
 
-function Cover({ asset }: { asset: Asset }) {
+function Cover({ thumb }: { thumb: string }) {
   const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [asset.id]);
-  if (failed) return <span className="category-cover-fallback" aria-hidden="true" />;
+  useEffect(() => setFailed(false), [thumb]);
+  if (!thumb || failed) return <span className="category-cover-fallback" aria-hidden="true" />;
   return (
     <img
-      src={assetSrc(asset.thumb)}
+      src={assetSrc(thumb)}
       alt=""
       loading="lazy"
       decoding="async"
@@ -41,10 +42,9 @@ const TABS: { kind: CategoryKind; label: string }[] = [
   { kind: "scenes", label: "场景" },
 ];
 
-export function Categories({ kind, assets, loading, onPick }: Props) {
+export function Categories({ kind, groups, loading, onPick, onKindChange }: Props) {
   const [activeKind, setActiveKind] = useState<CategoryKind>(kind);
   useEffect(() => setActiveKind(kind), [kind]);
-  const groups = useMemo(() => buildCategories(assets, activeKind), [assets, activeKind]);
   const copy = COPY[activeKind];
   const Icon = copy.icon;
 
@@ -73,7 +73,7 @@ export function Categories({ kind, assets, loading, onPick }: Props) {
             role="tab"
             aria-selected={activeKind === tab.kind}
             className={clsx("category-tab", activeKind === tab.kind && "active")}
-            onClick={() => setActiveKind(tab.kind)}
+            onClick={() => { setActiveKind(tab.kind); onKindChange(tab.kind); }}
           >
             {tab.label}
           </button>
@@ -92,10 +92,10 @@ export function Categories({ kind, assets, loading, onPick }: Props) {
               className="category-card"
               key={group.name}
               onClick={() => onPick(activeKind, group.name)}
-              style={{ animationDelay: `${Math.min(index, 10) * 24}ms` }}
+              style={{ animationDelay: Math.min(index, 10) * 24 + "ms" }}
             >
               <span className="category-cover">
-                <Cover asset={group.cover} />
+                <Cover thumb={group.cover_thumb} />
                 <span className="category-scrim" />
               </span>
               <span className="category-meta">

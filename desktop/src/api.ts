@@ -226,15 +226,66 @@ async function fixtureQuery(filter: Filter): Promise<Asset[]> {
 
 export async function countAssets(filter: Filter): Promise<number> {
   if (!isTauri) {
+    // fixture 只有几十条，这里给个足够大的上限即可，不涉及真实库
     const rows = await fixtureQuery({ ...filter, limit: 100000, offset: 0 });
     return rows.length;
   }
   return invoke<number>("count_assets", { filter });
 }
 
+/** 守卫：任何一次取图都不许超过 2000 条，避免再把整库塞进内存（10 万条约 40MB JSON）。 */
+export const MAX_PAGE_LIMIT = 2000;
+
 export async function queryAssets(filter: Filter): Promise<Asset[]> {
+  if ((filter.limit ?? 0) > MAX_PAGE_LIMIT) {
+    throw new Error("queryAssets limit " + filter.limit + " 超过上限 " + MAX_PAGE_LIMIT + "，请改成分页");
+  }
   if (!isTauri) return fixtureQuery(filter);
   return invoke<Asset[]>("query_assets", { filter });
+}
+
+export type MonthSummary = { month: string; count: number; cover_id: string; cover_thumb: string };
+export type GroupSummary = { name: string; count: number; cover_id: string; cover_thumb: string };
+
+const SPLIT_RE = /[、，,;；/]/;
+
+export async function timelineMonths(): Promise<MonthSummary[]> {
+  if (!isTauri) {
+    const rows = await fixtureQuery({ limit: MAX_PAGE_LIMIT, offset: 0 });
+    const map = new Map<string, MonthSummary>();
+    for (const asset of rows) {
+      const month = asset.day?.slice(0, 7) || "unknown";
+      const hit = map.get(month);
+      if (hit) hit.count += 1;
+      else map.set(month, { month, count: 1, cover_id: asset.id, cover_thumb: asset.thumb });
+    }
+    return [...map.values()].sort((a, b) => b.month.localeCompare(a.month));
+  }
+  return invoke<MonthSummary[]>("timeline_months");
+}
+
+export async function categoryGroups(kind: "tags" | "people" | "places" | "scenes"): Promise<GroupSummary[]> {
+  if (!isTauri) {
+    const rows = await fixtureQuery({ limit: MAX_PAGE_LIMIT, offset: 0 });
+    const map = new Map<string, GroupSummary>();
+    for (const asset of rows) {
+      const names =
+        kind === "tags"
+          ? asset.tags
+          : kind === "people"
+            ? (asset.people ?? "").split(SPLIT_RE).map((v) => v.trim()).filter((v) => v && v !== "无" && v !== "未知" && v !== "没有")
+            : kind === "scenes"
+              ? (asset.scene ? [asset.scene] : [])
+              : (asset.place ?? "").split(SPLIT_RE).map((v) => v.trim()).filter((v) => v && v !== "无" && v !== "未知");
+      for (const name of new Set(names)) {
+        const hit = map.get(name);
+        if (hit) hit.count += 1;
+        else map.set(name, { name, count: 1, cover_id: asset.id, cover_thumb: asset.thumb });
+      }
+    }
+    return [...map.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "zh-CN"));
+  }
+  return invoke<GroupSummary[]>("category_groups", { kind });
 }
 
 /* ------------------------------------------------------------------ */
