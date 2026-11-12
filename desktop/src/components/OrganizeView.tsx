@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   AlertCircle,
   ArrowRight,
@@ -674,6 +674,19 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
               <div className="group-panels">
                 {groups.map((group) => (
                   <section className={clsx("group-panel", group.name === "未归类" && "failed")} key={group.name}>
+                    <span className="group-tab" aria-hidden="true" />
+                    <span className="group-sheets" aria-hidden="true">
+                      {group.cards.slice(0, 2).map((card, index) => (
+                        <i
+                          className="group-sheet"
+                          key={card.id}
+                          style={{ "--r": index === 0 ? "-7deg" : "7deg" } as CSSProperties}
+                        >
+                          {card.asset ? <img src={assetSrc(card.asset.thumb)} alt="" loading="lazy" /> : null}
+                        </i>
+                      ))}
+                    </span>
+                    <div className="group-front glass-surface on-color">
                     <header>
                       <span className="group-dot" />
                       <span>{group.name}</span>
@@ -703,6 +716,7 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
                           ) : null}
                         </div>
                       ))}
+                    </div>
                     </div>
                   </section>
                 ))}

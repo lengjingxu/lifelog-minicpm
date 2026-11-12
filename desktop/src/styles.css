@@ -17,12 +17,14 @@
   --scroll-thumb: rgba(255,255,255,0.08);
   --scroll-thumb-hover: rgba(255,255,255,0.14);
 
-  /* 液态玻璃 */
-  --glass-bg: linear-gradient(180deg, rgba(255,255,255,0.085), rgba(255,255,255,0.035));
-  --glass-blur: saturate(180%) blur(28px);
-  --glass-border: rgba(255,255,255,0.16);
-  --glass-highlight: rgba(255,255,255,0.42);
-  --glass-shadow: 0 24px 70px rgba(0,0,0,0.55), 0 2px 10px rgba(0,0,0,0.35);
+  /* 玻璃材质（对齐 docs/design/GLASS-MATERIAL.md） */
+  --glass-bg: rgba(14, 14, 17, 0.26);
+  --glass-bg-oncolor: rgba(14, 14, 17, 0.42);
+  --glass-blur: blur(10px) saturate(1.6);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  --glass-border: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.10), transparent);
+  --glass-shadow: 0 10px 24px rgba(16, 16, 20, 0.28);
 
   /* 动效 */
   /* 曲线：进入 / 小件落位 / 离开 / 位移 / 回弹 / 弹簧 */
@@ -71,11 +73,13 @@
   --scroll-thumb: rgba(23,23,26,0.14);
   --scroll-thumb-hover: rgba(23,23,26,0.24);
 
-  --glass-bg: linear-gradient(180deg, rgba(255,255,255,0.86), rgba(255,255,255,0.66));
-  --glass-blur: saturate(180%) blur(28px);
-  --glass-border: rgba(255,255,255,0.85);
-  --glass-highlight: rgba(255,255,255,0.95);
-  --glass-shadow: 0 24px 60px rgba(30,30,40,0.16), 0 2px 8px rgba(30,30,40,0.08);
+  --glass-bg: rgba(255, 255, 255, 0.62);
+  --glass-bg-oncolor: rgba(255, 255, 255, 0.80);
+  --glass-blur: blur(18px) saturate(1.35);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  --glass-border: inset 0 0 0 1px rgba(255, 255, 255, 0.85);
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.42), transparent);
+  --glass-shadow: 0 10px 24px rgba(16, 16, 20, 0.10);
 
   color-scheme: light;
 }
@@ -330,8 +334,7 @@ button:focus-visible, input:focus-visible {
 .cell .badge {
   position: absolute; top: 7px; left: 7px; z-index: 2;
   padding: 2px 6px; border-radius: 5px;
-  font-size: 9.5px; line-height: 1.45; color: rgba(255,255,255,0.8);
-  background: rgba(0,0,0,0.5); backdrop-filter: blur(8px);
+  font-size: 9.5px; line-height: 1.45; color: var(--text);
 }
 .cell .overlay {
   position: absolute; inset: auto 0 0 0; z-index: 1;
@@ -413,14 +416,15 @@ button:focus-visible, input:focus-visible {
 .category-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .category-card {
   position: relative; aspect-ratio: 4 / 3; overflow: hidden;
-  border-radius: 14px; padding: 0; text-align: left;
+  border-radius: 16px; padding: 0; text-align: left;
   background: var(--bg-elevated);
-  box-shadow: 0 0 0 1px var(--line) inset;
+  /* 双层 drop-shadow：与 glass-folders 参考一致 */
+  filter: drop-shadow(0 26px 34px rgba(16,16,20,.16)) drop-shadow(0 4px 10px rgba(16,16,20,.08));
   animation: category-in var(--duration-sm) var(--ease-out) both;
-  transition: transform var(--dur-fast) var(--ease-out-strong), box-shadow var(--dur-fast) var(--ease-out);
+  transition: transform var(--dur-fast) var(--ease-out-strong);
 }
 @keyframes category-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
-.category-card:hover { transform: translateY(-2px); box-shadow: 0 0 0 1px var(--line-strong) inset, 0 16px 34px rgba(0,0,0,0.35); }
+.category-card:hover { transform: translateY(-3px); }
 .category-cover { position: absolute; inset: 0; display: block; background: rgba(255,255,255,0.03); }
 .category-cover img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 400ms var(--ease-out); }
 .category-card:hover .category-cover img { transform: scale(1.025); }
@@ -428,20 +432,18 @@ button:focus-visible, input:focus-visible {
   position: absolute; inset: 0;
   background: linear-gradient(145deg, rgba(255,255,255,0.07), rgba(255,255,255,0.015));
 }
-.category-scrim {
-  position: absolute; inset: 0;
-  background: linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0.12) 56%, transparent 78%);
+/* 信息条改成玻璃前板，不再用压暗渐变。
+   注意要压过 .glass-surface 的 position: relative，否则会退回文档流 */
+.category-card .category-front {
+  position: absolute; left: 8px; right: 8px; bottom: 8px;
+  border-radius: 12px; padding: 9px 11px;
 }
-.category-meta {
-  position: absolute; left: 14px; right: 14px; bottom: 12px;
-  display: flex; align-items: flex-end; gap: 8px;
-}
+.category-meta { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .category-name {
   display: inline-flex; align-items: center; gap: 5px; min-width: 0;
-  font-size: 13px; font-weight: 600; color: #fff;
-  text-shadow: 0 1px 8px rgba(0,0,0,0.35);
+  font-size: 13px; font-weight: 600; color: var(--text);
 }
-.category-count { margin-left: auto; font-size: 10.5px; color: rgba(255,255,255,0.66); font-variant-numeric: tabular-nums; }
+.category-count { margin-left: auto; font-size: 10.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .category-loading {
   height: 240px; display: grid; place-items: center;
   color: var(--text-faint); font-size: 12px;
@@ -497,7 +499,6 @@ button:focus-visible, input:focus-visible {
   border-left: 1px solid var(--line);
   padding: 49px 22px 24px;
   overflow-y: auto;
-  background: rgba(255,255,255,0.018);
 }
 .close-btn {
   position: absolute; top: 14px; right: 17px;
@@ -585,10 +586,8 @@ button:focus-visible, input:focus-visible {
 
 .toast {
   position: fixed; z-index: 90; left: 50%; bottom: 22px; transform: translateX(-50%);
-  padding: 9px 15px; border-radius: 10px;
-  background: rgba(28,28,31,0.94); color: var(--text); font-size: 11.5px;
-  box-shadow: 0 0 0 1px var(--line-strong) inset, 0 12px 30px rgba(0,0,0,0.45);
-  backdrop-filter: blur(16px);
+  padding: 9px 15px; border-radius: 12px;
+  color: var(--text); font-size: 11.5px;
   animation: toast-in var(--duration-sm) var(--ease-out);
 }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 5px); } to { opacity: 1; transform: translate(-50%, 0); } }
@@ -687,9 +686,8 @@ button:focus-visible, input:focus-visible {
 .organize-hud {
   flex: none; display: flex; align-items: center; gap: 17px;
   height: 48px; padding: 7px 10px 7px 14px; margin-bottom: 10px;
-  border-radius: 13px; background: rgba(21,21,24,0.72);
-  box-shadow: 0 0 0 1px var(--line) inset, 0 12px 36px rgba(0,0,0,0.18);
-  backdrop-filter: blur(18px) saturate(1.15); position: relative; z-index: 12;
+  border-radius: 13px;
+  position: relative; z-index: 12;
 }
 .hud-live { display: inline-flex; align-items: center; gap: 7px; min-width: 58px; font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
 .hud-metric { display: inline-flex; align-items: baseline; gap: 5px; color: var(--text-faint); font-size: 9.5px; white-space: nowrap; }
@@ -778,9 +776,45 @@ button:focus-visible, input:focus-visible {
   grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-content: start; padding-right: 2px;
 }
 .group-rail .group-panel {
+  /* 文件夹：tab(22) + body(从 20px 起) + sheets(露边 ~21px) + front(底部 72% 玻璃) */
   position: relative;
-  height: 156px; display: flex; flex-direction: column;
+  height: 176px; display: block; padding: 0;
+  background: none; box-shadow: none;
+  filter: drop-shadow(0 18px 26px rgba(16,16,20,.14)) drop-shadow(0 3px 8px rgba(16,16,20,.06));
 }
+.group-rail .group-panel::before {
+  content: ""; position: absolute; inset: 20px 0 0 0; border-radius: 16px;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5);
+  pointer-events: none;
+}
+.group-rail .group-panel.failed::before {
+  background: rgba(255, 74, 74, .06);
+  box-shadow: inset 0 0 0 1px rgba(255, 74, 74, .18);
+}
+.group-tab {
+  position: absolute; left: 12px; top: 0; width: 27%; height: 22px;
+  border-radius: 10px 10px 0 0;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), inset 0 -1px 0 rgba(16, 16, 20, .06);
+}
+.group-sheets { position: absolute; inset: 0; pointer-events: none; }
+.group-sheet {
+  position: absolute; top: 31px; width: 40px; height: 28px;
+  border-radius: 2px; overflow: hidden;
+  transform: rotate(var(--r, -7deg));
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(16, 16, 20, .10);
+}
+.group-sheet:nth-child(1) { left: 26%; }
+.group-sheet:nth-child(2) { left: 56%; background: var(--accent-soft); }
+.group-sheet img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.group-rail .group-panel .group-front {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 72%;
+  border-radius: 16px; padding: 8px; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.group-rail .group-panel .group-target-grid { flex: 1; min-height: 0; }
 /* 超出容量时的说明：绝对定位，出现/消失不影响布局 */
 .group-cap {
   position: absolute; right: 10px; bottom: 8px; z-index: 2;
@@ -797,6 +831,7 @@ button:focus-visible, input:focus-visible {
 }
 @keyframes group-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .group-panel.failed { background: rgba(255,74,74,0.045); box-shadow: 0 0 0 1px rgba(255,74,74,0.18) inset; }
+.group-rail .group-panel.failed { background: none; box-shadow: none; }
 .group-panel header { display: flex; align-items: center; gap: 5px; font-size: 10px; margin-bottom: 7px; }
 .group-panel header span:nth-child(2) { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-panel header strong { margin-left: auto; min-width: 2.4ch; text-align: right; font-size: 9.5px; color: var(--text-faint); font-weight: 500; font-variant-numeric: tabular-nums; }
@@ -882,10 +917,6 @@ button:focus-visible, input:focus-visible {
 .recognition-dialog {
   width: min(960px, 94vw); max-height: 90vh; overflow-y: auto;
   padding: 22px; border-radius: 20px;
-  background:
-    radial-gradient(700px 240px at 12% -10%, rgba(255,74,74,0.07), transparent 65%),
-    linear-gradient(155deg, rgba(27,27,31,0.97), rgba(14,14,17,0.98));
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.11) inset, 0 36px 100px rgba(0,0,0,0.62);
   animation: dialog-in var(--duration-md) var(--ease-out) both;
 }
 @keyframes dialog-in { from { opacity: 0; transform: translateY(7px) scale(0.992); } to { opacity: 1; transform: none; } }
@@ -1023,44 +1054,34 @@ button:focus-visible, input:focus-visible {
 .condition-bar { background: color-mix(in srgb, var(--bg) 76%, transparent); }
 
 /* 液态玻璃：只给压在图片/复杂背景上的面（识别弹窗、toast、检查器、整理分组卡、缩略图徽标） */
+/* 统一玻璃面：参数来自 docs/design/GLASS-MATERIAL.md
+   - 底色/模糊/内高光/内描边/柔光/投影 全部走令牌，各组件不再自己写一套
+   - 顶部柔光做成背景层（46% 高），压不到正文
+   - .on-color：背后是照片/彩色内容时用的更实底色（亮色 .62 -> .80） */
 .glass-surface {
-  --g-tint: 30, 30, 34;
-  --g-density: 0.68;
-  --g-blur: 26px;
-  --g-sat: 1.6;
-  --g-bri: 0.86;
-  background: linear-gradient(
-    180deg,
-    rgba(var(--g-tint), calc(var(--g-density) + 0.05)),
-    rgba(var(--g-tint), var(--g-density))
-  );
-  -webkit-backdrop-filter: blur(var(--g-blur)) saturate(var(--g-sat)) brightness(var(--g-bri));
-  backdrop-filter: blur(var(--g-blur)) saturate(var(--g-sat)) brightness(var(--g-bri));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.42),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
-    0 24px 70px rgba(0, 0, 0, 0.55),
-    0 2px 10px rgba(0, 0, 0, 0.35);
-  corner-shape: round;
+  position: relative;
+  background-color: var(--glass-bg);
+  background-image: var(--glass-sheen);
+  background-size: 100% 46%;
+  background-repeat: no-repeat;
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-highlight), var(--glass-border), var(--glass-shadow);
 }
 
-[data-theme="light"] .glass-surface {
-  --g-tint: 255, 255, 255;
-  --g-density: 0.72;
-  --g-sat: 1.3;
-  --g-bri: 1.02;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.92),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.72),
-    0 20px 50px rgba(30, 30, 40, 0.18),
-    0 2px 8px rgba(30, 30, 40, 0.08);
+.glass-surface.on-color {
+  background-color: var(--glass-bg-oncolor);
 }
 
+/* prefers-reduced-transparency：退化为实心，不穿透 */
 @media (prefers-reduced-transparency: reduce) {
-  .glass-surface {
+  /* 退化为实心：不模糊、不半透（.on-color 的 .80 也要压掉，否则仍然透） */
+  .glass-surface,
+  .glass-surface.on-color {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
-    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    background-color: var(--bg);
+    background-image: none;
   }
 }
 
