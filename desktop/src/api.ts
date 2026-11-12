@@ -16,6 +16,8 @@ export type Asset = {
   mood: string | null;
   tags: string[];
   ocr_text: string | null;
+  /** 美学分（0-10），按月查看时用于排序；库里没有评分表时为 null */
+  score?: number | null;
 };
 
 export type Stats = {

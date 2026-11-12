@@ -122,6 +122,8 @@ struct AssetRow {
     mood: Option<String>,
     tags: Vec<String>,
     ocr_text: Option<String>,
+    /// 美学分（0-10）。库里没有 asset_quality 表时为 None。
+    score: Option<f64>,
 }
 
 #[derive(Deserialize, Default)]
@@ -154,11 +156,17 @@ struct MonthRow {
 fn timeline_months(db: State<'_, Db>) -> Result<Vec<MonthRow>, String> {
     let guard = db.open()?;
     let conn = guard.as_ref().unwrap();
-    let mut stmt = conn
-        .prepare(
-            "WITH months AS (                  SELECT substr(day, 1, 7) AS m, count(*) AS n FROM assets WHERE day IS NOT NULL GROUP BY m)              SELECT m, n, (                  SELECT a2.id FROM assets a2 WHERE a2.day >= m || '-01'                    AND a2.day < date(m || '-01', '+1 month')                  ORDER BY a2.taken_at DESC, a2.id DESC LIMIT 1) AS cover              FROM months ORDER BY m DESC",
-        )
-        .map_err(|e| e.to_string())?;
+    // 月份封面取这个月美学分最高的一张；没有评分表就退回最新一张。
+    let cover_order = if has_table(conn, "asset_quality") {
+        "ORDER BY COALESCE((SELECT q.score FROM asset_quality q WHERE q.asset_id = a2.id), -1) DESC, a2.taken_at DESC, a2.id DESC"
+    } else {
+        "ORDER BY a2.taken_at DESC, a2.id DESC"
+    };
+    let sql = format!(
+        "WITH months AS (                  SELECT substr(day, 1, 7) AS m, count(*) AS n FROM assets WHERE day IS NOT NULL GROUP BY m)              SELECT m, n, (                  SELECT a2.id FROM assets a2 WHERE a2.day >= m || '-01'                    AND a2.day < date(m || '-01', '+1 month')                  {} LIMIT 1) AS cover              FROM months ORDER BY m DESC",
+        cover_order
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
             Ok(MonthRow {
@@ -212,11 +220,20 @@ fn split_names(value: Option<String>, kind: &str) -> Vec<String> {
 fn category_groups(db: State<'_, Db>, kind: String) -> Result<Vec<GroupRow>, String> {
     let guard = db.open()?;
     let conn = guard.as_ref().unwrap();
-    let mut stmt = conn
-        .prepare(
-            "SELECT a.id, c.tags, c.scene, c.people, c.place FROM assets a              LEFT JOIN captions c ON c.rowid = (                  SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)              ORDER BY a.taken_at DESC, a.id DESC",
+    // 分类卡的封面 = 该分类里美学分最高的一张（第一次出现的成员即封面）。
+    let (score_join, order_by) = if has_table(conn, "asset_quality") {
+        (
+            " LEFT JOIN asset_quality q ON q.asset_id = a.id",
+            "ORDER BY COALESCE(q.score, -1) DESC, a.taken_at DESC, a.id DESC",
         )
-        .map_err(|e| e.to_string())?;
+    } else {
+        ("", "ORDER BY a.taken_at DESC, a.id DESC")
+    };
+    let sql = format!(
+        "SELECT a.id, c.tags, c.scene, c.people, c.place FROM assets a              LEFT JOIN captions c ON c.rowid = (                  SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1){}              {}",
+        score_join, order_by
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let mut order: Vec<String> = Vec::new();
     let mut counts: std::collections::HashMap<String, (i64, String)> = std::collections::HashMap::new();
     let rows = stmt
@@ -497,6 +514,34 @@ fn apply_cursor(
     true
 }
 
+/// 按月查看时的游标：score|taken_at|id。分数优先，同分按时间，再按 id。
+fn apply_score_cursor(
+    where_sql: &mut String,
+    args: &mut Vec<rusqlite::types::Value>,
+    cursor: Option<&str>,
+) -> bool {
+    let Some(raw) = cursor.map(str::trim).filter(|c| !c.is_empty()) else {
+        return false;
+    };
+    let parts: Vec<&str> = raw.splitn(3, '|').collect();
+    if parts.len() != 3 || parts[2].is_empty() {
+        return false;
+    }
+    let Ok(score) = parts[0].parse::<f64>() else {
+        return false;
+    };
+    args.push(rusqlite::types::Value::Real(score));
+    args.push(rusqlite::types::Value::Text(parts[1].to_string()));
+    args.push(rusqlite::types::Value::Text(parts[2].to_string()));
+    where_sql.push_str(&format!(
+        " AND (COALESCE(q.score,-1), COALESCE(a.taken_at,''), a.id) < (?{}, ?{}, ?{})",
+        args.len() - 2,
+        args.len() - 1,
+        args.len()
+    ));
+    true
+}
+
 #[tauri::command]
 fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, String> {
     let guard = db.open()?;
@@ -507,20 +552,38 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
         return Err("数据库缺少 taken_sort 列，请先运行一次 lifelog CLI 升级索引".to_string());
     }
     let key_col = if has_sort { "a.taken_sort" } else { "a.taken_at" };
-    let keyset = apply_cursor(&mut where_sql, &mut args, filter.cursor.as_deref(), key_col);
+    // 按月看（时间线点进某个月）时，月内按美学分排序；没有评分表就退回时间序。
+    let score_mode = filter.day_from.is_some()
+        && filter.day_to.is_some()
+        && has_table(conn, "asset_quality");
+    let keyset = if score_mode {
+        apply_score_cursor(&mut where_sql, &mut args, filter.cursor.as_deref())
+    } else {
+        apply_cursor(&mut where_sql, &mut args, filter.cursor.as_deref(), key_col)
+    };
+    let score_col = if score_mode { ", q.score" } else { "" };
+    let score_join = if score_mode {
+        " LEFT JOIN asset_quality q ON q.asset_id = a.id"
+    } else {
+        ""
+    };
     let mut sql = format!(
         "SELECT a.id, a.path, a.day, a.taken_at, a.kind, \
-                c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text \
+                c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text{} \
          FROM assets a \
          LEFT JOIN captions c ON c.rowid = ( \
-             SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1) \
+             SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1){} \
          {}",
-        where_sql
+        score_col, score_join, where_sql
     );
 
 
     // 游标是 (taken_sort, id) 二元组：同一秒的多条靠 id 分先后，翻页才是严格全序。
-    sql.push_str(&format!(" ORDER BY {key_col} DESC, a.id DESC LIMIT ?"));
+    if score_mode {
+        sql.push_str(" ORDER BY COALESCE(q.score,-1) DESC, COALESCE(a.taken_at,'') DESC, a.id DESC LIMIT ?");
+    } else {
+        sql.push_str(&format!(" ORDER BY {key_col} DESC, a.id DESC LIMIT ?"));
+    }
     args.push(rusqlite::types::Value::Integer(filter.limit.unwrap_or(500)));
     sql.push_str(" OFFSET ?");
     args.push(rusqlite::types::Value::Integer(if keyset {
@@ -550,6 +613,7 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
                 mood: row.get(10)?,
                 tags: parse_tags(row.get(11)?),
                 ocr_text: row.get(12)?,
+                score: row.get(13).ok(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -1373,6 +1437,71 @@ mod filter_tests {
 
         assert_eq!(seen.len() as i64, total, "翻页覆盖的行数与总数不一致");
         assert!(pages >= 200, "应该翻满 200 页，实际 {pages}");
+    }
+
+    #[test]
+    fn month_view_orders_by_score_and_pages_with_score_cursor() {
+        // 时间线点进某个月：月内按美学分降序，翻页用 score|taken_at|id 游标。
+        let conn = seed();
+        conn.execute_batch("CREATE TABLE asset_quality (asset_id TEXT PRIMARY KEY, score REAL);")
+            .unwrap();
+        let scores = [5.0, 1.0, 9.0, 3.0, 7.0, 2.0];
+        for (index, score) in scores.iter().enumerate() {
+            let id = format!("s{index}");
+            conn.execute(
+                "INSERT INTO assets VALUES (?,?,?,?,?)",
+                rusqlite::params![
+                    id,
+                    format!("/p/{index}.jpg"),
+                    "2024-01-10",
+                    format!("2024-01-10T10:0{index}:00"),
+                    "image"
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO asset_quality VALUES (?,?)",
+                rusqlite::params![format!("s{index}"), score],
+            )
+            .unwrap();
+        }
+
+        let mut f = filter();
+        f.day_from = Some("2024-01-01".to_string());
+        f.day_to = Some("2024-01-31".to_string());
+        f.limit = Some(2);
+
+        let mut seen: Vec<String> = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..4 {
+            let (mut where_sql, mut args) = filter_where(&f, true);
+            if cursor.is_some() {
+                assert!(apply_score_cursor(&mut where_sql, &mut args, cursor.as_deref()));
+            }
+            let sql = format!(
+                "SELECT a.id, a.taken_at, q.score FROM assets a                  LEFT JOIN asset_quality q ON q.asset_id = a.id {}                  ORDER BY COALESCE(q.score,-1) DESC, COALESCE(a.taken_at,'') DESC, a.id DESC LIMIT 2",
+                where_sql
+            );
+            let mut stmt = conn.prepare(&sql).unwrap();
+            let rows: Vec<(String, String, f64)> = stmt
+                .query_map(params_from_iter(args.iter()), |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                })
+                .unwrap()
+                .flatten()
+                .collect();
+            if rows.is_empty() {
+                break;
+            }
+            for (id, _taken, _score) in &rows {
+                assert!(!seen.contains(id), "翻页出现重复行: {id}");
+                seen.push(id.clone());
+            }
+            let last = rows.last().unwrap();
+            cursor = Some(format!("{}|{}|{}", last.2, last.1, last.0));
+        }
+
+        assert_eq!(seen, vec!["s2", "s4", "s0", "s3", "s5", "s1"]);
     }
 
     #[test]
