@@ -1308,6 +1308,67 @@ mod filter_tests {
     }
 
     #[test]
+    fn month_filter_paging_covers_all_rows_in_month() {
+        // 时间线点月份后走的就是这条路：day_from/day_to + 游标翻页。
+        // 一个月可能超过一页（500），必须能翻完且不串到相邻月份。
+        let conn = seed();
+        conn.execute_batch(
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<600)
+             INSERT INTO assets SELECT printf('jan%04d', i), '/p/'||i||'.jpg',
+                printf('2024-01-%02d', (i%28)+1),
+                printf('2024-01-%02dT%02d:00:00', (i%28)+1, i%24), 'image' FROM n;
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<40)
+             INSERT INTO assets SELECT printf('feb%04d', i), '/p/f'||i||'.jpg',
+                printf('2024-02-%02d', (i%28)+1),
+                printf('2024-02-%02dT%02d:00:00', (i%28)+1, i%24), 'image' FROM n;",
+        )
+        .unwrap();
+
+        let mut cursor: Option<String> = None;
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let page = 100i64;
+        let mut pages = 0;
+
+        loop {
+            let mut f = filter();
+            f.limit = Some(page);
+            f.day_from = Some("2024-01-01".to_string());
+            f.day_to = Some("2024-01-31".to_string());
+            let (mut where_sql, mut args) = filter_where(&f, true);
+            apply_cursor(&mut where_sql, &mut args, cursor.as_deref(), "a.taken_at");
+            let sql = format!(
+                "SELECT a.id, a.taken_at, a.day FROM assets a {}                  ORDER BY a.taken_at DESC, a.day DESC, a.id DESC LIMIT ?",
+                where_sql
+            );
+            args.push(rusqlite::types::Value::Integer(page));
+            let mut stmt = conn.prepare(&sql).unwrap();
+            let rows: Vec<(String, String, String)> = stmt
+                .query_map(params_from_iter(args.iter()), |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .flatten()
+                .collect();
+            assert!(!rows.is_empty(), "第 {pages} 页为空但还没翻完");
+            for (id, _taken, day) in &rows {
+                assert!(day.starts_with("2024-01"), "翻到了月份外的行: {id} {day}");
+                assert!(seen.insert(id.clone()), "翻页出现重复行: {id}");
+            }
+            pages += 1;
+            if (rows.len() as i64) < page {
+                break;
+            }
+            let last = rows.last().unwrap();
+            cursor = Some(format!("{}|{}", last.1, last.0));
+            assert!(pages < 20, "翻页没有收敛");
+        }
+
+        let jan: i64 = conn
+            .query_row("SELECT count(*) FROM assets WHERE day LIKE '2024-01%'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(seen.len() as i64, jan, "一个月内的行没有翻全");
+        assert!(pages >= 6, "600 行 / 100 应至少 6 页，实际 {pages}");
+    }
+
+    #[test]
     fn cursor_paging_handles_identical_timestamps() {
         // 同一秒的 50 条：只看 taken_at 会漏/重复，必须靠 id 定序。
         let conn = seed();
