@@ -107,7 +107,6 @@ async function measureSearch(tier: Tier, queryAssets: typeof import("./api").que
     const list = await queryAssets({ query: tier.query, limit: 500 });
     samples.push(performance.now() - started);
     rows = list.length;
-    await sleep(80);
   }
   return {
     label: tier.label,
@@ -166,19 +165,19 @@ async function run(): Promise<Record<string, unknown>> {
   report.warmReopenMs = warmSummary;
   beacon("warm", { p50: warmSummary.p50 });
 
+  beacon("clear-search");
   setSearch("");
   await sleep(500);
+  beacon("clear-search-done", { cells: document.querySelectorAll(".cell").length });
 
-  // 滚动必须在窗口可见时测：驱动脚本会持续把窗口置前，这里最多等 20s
-  for (let waited = 0; waited < 20000 && document.visibilityState !== "visible"; waited += 200) {
-    await sleep(200);
-  }
   report.visibilityBeforeScroll = document.visibilityState;
+  beacon("visibility", { state: document.visibilityState, grid: !!document.querySelector(".grid-scroll") });
 
   const scrollEl = document.querySelector<HTMLElement>(".grid-scroll");
   if (scrollEl && document.visibilityState !== "visible") {
     // 窗口被遮挡时 WKWebView 会节流 rAF，这时测出来的 fps 无意义，直接标记跳过
     report.scroll = { skipped: "window not visible: " + document.visibilityState };
+    beacon("scroll-skip", { state: document.visibilityState });
   } else if (scrollEl) {
     const before = scrollEl.scrollTop;
     // 逐帧记录：卡顿到底发生在哪个 scrollTop、当时挂了多少格子
@@ -215,11 +214,13 @@ async function run(): Promise<Record<string, unknown>> {
     { label: "mid", query: (import.meta.env.VITE_BENCH_Q2 as string) || "公园" },
     { label: "high", query: (import.meta.env.VITE_BENCH_Q3 as string) || "风景" },
   ];
+  beacon("search-start");
   const searches = [];
   for (const tier of tiers) {
     searches.push(await measureSearch(tier, queryAssets));
   }
   report.search = searches;
+  beacon("search-done", { n: searches.length });
   report.visibilityAfter = document.visibilityState;
 
   setSearch("");
