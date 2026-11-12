@@ -125,3 +125,85 @@ python3 scripts/verify_organize_shared.py --url http://localhost:5177 --out mark
 ```
 
 要求 Python >= 3.9（只用标准库）。脚本默认 150s 看门狗：卡住会打印 `[timeout] stuck at stage: <阶段>` 并以退出码 2 结束。rAF 采样带 `setTimeout` 兜底，页面被遮挡时会返回 `ended: "timeout"` 并把 fps 记成 0，不会挂死。
+
+## 10 万级第二轮：补索引 + keyset 翻页
+
+第一轮的数字是在「已经有 `idx_assets_taken`」的基准库上量的，真实库其实没有这条索引。补测后差距很大，这里更正并补上结论。
+
+### 真实库（32,583 条，原本只有 idx_assets_day）
+
+| 场景 | 无索引 | 有索引 |
+| --- | ---: | ---: |
+| 首屏 500 条 | 74.8ms（最大 304.1ms） | **0.7ms** |
+| OFFSET 20000 | 86.6ms | 27.0ms |
+| keyset 20000 | — | **1.2ms** |
+
+建索引耗时 10.7ms（32.6k 条）。所以即使只有 3 万张，首屏也从 75ms 降到 1ms 以内。
+
+### 10 万条基准库
+
+| 场景 | 中位 |
+| --- | ---: |
+| 首屏 500 条 | 1.1ms |
+| OFFSET 50000 | 252.3ms |
+| OFFSET 95000 | 265.0ms |
+| keyset 50000 | **0.9ms** |
+| keyset 95000 | **0.8ms** |
+
+### 改动
+
+- `lifelog/db.py`：schema 增加 `idx_assets_taken ON assets(taken_at DESC, day DESC, id DESC)`，`init_db()` 会在下次 CLI 运行时为已有库补建
+- `query_assets`：新增可选 `cursor`（`taken_at|day|id`），命中时走 `(a.taken_at, a.day, a.id) < (?, ?, ?)` 并忽略 offset；排序补上 `a.id DESC` 保证严格全序
+- 前端 `loadMore` 传上一页最后一条的游标，`taken_at` 缺失时退回 offset
+- Rust 单测 `cursor_paging_covers_all_rows_without_duplicates`：1,203 行分 13 页翻完，断言无重复、覆盖全部行
+
+### FTS5 门槛：5k / 50k / 100k 三档
+
+同一套 SQL（最新一条 caption 的子查询 + LIKE 六字段），都有 idx_assets_taken：
+
+| 条数 | 首屏 500 | 搜索 LIKE | 搜索 count | 低频标签 | facets |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 5,000 | 0.9ms | 3.1ms | 3.0ms | 3.1ms | 3.3ms |
+| 50,000 | 0.8ms | 30.6ms | 28.9ms | 33.9ms | 36.8ms |
+| 100,000 | 0.9ms | 73.1ms | 71.4ms | 82.1ms | 74.9ms |
+
+（搜索/标签这两列是冷页缓存下的首轮数字，热缓存约 20ms。）
+
+结论：LIKE 的劣化是线性的，到 10 万条仍在 100ms 以内；FTS5 还要额外付中文分词与索引维护的代价，不引入。原先「>5000 条就上 FTS5」的预估作废。
+
+### 口径说明（重要）
+
+上面所有 SQL 数字都是**按 src-tauri/src/lib.rs 里的 SQL 抄出来的副本**、用 Python sqlite3 直接跑的，**不是调用 Rust 的查询构造函数**。
+这么做是为了逐条控制变量（索引有无、游标/offset），代价是：IPC 序列化、row->struct 映射、rusqlite 准备语句的开销都不在里面。Rust 侧正确性由 cargo test 保证，端到端延迟用下面的 UI 实测兜底。
+
+## UI 层 10 万级实测（dev 窗口，真实 Tauri WebView）
+
+触发方式（仅 dev）：import.meta.env.DEV 且带 VITE_BENCH=1；生产构建里这段代码被整体剔除（bundle 中 bench 出现次数 0）。
+
+```bash
+python3 scripts/bench_ui_dev.py --home /tmp/sg-bench-10w --out /tmp/bench-ui.json
+```
+
+| 指标 | 实测 |
+| --- | ---: |
+| 冷启动到首帧（dev bundle，未优化） | 1605ms |
+| 再次打开（切走再切回）p50 | 144ms |
+| 搜索 p50（234 命中） | 232ms |
+| 搜索 p50（命中 >500，截断到 500） | 68ms / 13ms |
+| RSS 峰值 | 319.6MB |
+| 滚动 | **18fps，且出现 1 次 3533ms 长帧** |
+
+说明：
+- 搜索是**虚拟滚动渲染**（@tanstack/react-virtual，overscan 2），只挂载视口 +/-2 行；命中数不改变挂载量
+- 冷启动是 dev bundle，生产构建会明显更快；这条不能当发布指标
+- **滚动那 18fps + 一次 3.5s 长帧是待查问题**：单次长任务而不是持续掉帧，怀疑是虚拟列表在滚动中触发了全量 measure 或批量缩略图解码。下一轮定位
+
+## facets 缓存的触发条件（先不动）
+
+facets 冷算 75ms。目前不在每次交互里，只在切视图/刷新时触发一次。
+**加缓存的触发条件**：切视图时若出现 >1 帧（16.8ms）的同步阻塞——即 DevTools 里观察到一个 >16.8ms 的 long task 且归因到 facets，再加 5s 内存缓存。
+低频标签筛选 p95 为 **172.1ms**（5 条命中的极端 case，扫全表），先接受，记录在此。
+
+## FTS5 结论补充
+
+当初的判断是「单库 >5000 条就把 LIKE 换成 FTS5」。10 万级实测推翻了它：LIKE 在 10 万条仍只要 19.9ms（搜索）/ 70.5ms（count），线性增长且没有拐点。FTS5 还要额外付中文分词、索引维护、查询改写的代价，**不引入**。

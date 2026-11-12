@@ -51,6 +51,21 @@ def main():
     out["deep_offset_50k"] = timed(conn, SELECT + " ORDER BY a.taken_at DESC, a.day DESC LIMIT ? OFFSET ?", (500, 50000), repeats=1)
     out["deep_offset_95k"] = timed(conn, SELECT + " ORDER BY a.taken_at DESC, a.day DESC LIMIT ? OFFSET ?", (500, 95000), repeats=1)
 
+    # keyset 对照：与 query_assets 的 cursor 分支同一形状
+    order = " ORDER BY a.taken_at DESC, a.id DESC LIMIT 500"
+    for label, skip in (("keyset_50k", 50000), ("keyset_95k", 95000)):
+        row = conn.execute(
+            "select taken_at, id from assets order by taken_at desc, id desc limit 1 offset ?",
+            (skip,),
+        ).fetchone()
+        if row:
+            out[label] = timed(
+                conn,
+                SELECT + " WHERE (a.taken_at, a.id) < (?, ?)" + order,
+                row,
+                repeats=2,
+            )
+
     q = "%公园%"
     out["search_like"] = timed(
         conn,
