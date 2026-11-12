@@ -115,3 +115,13 @@ python3 scripts/bench_100k.py --db /tmp/sg-bench-10w/lifelog.sqlite
 结论：只有深翻页破线。同一份数据换 keyset 游标 `(a.taken_at, a.id) < (?, ?)` 后，offset 50k 从 244.5ms 降到 0.8ms、95k 从 252.1ms 降到 1.1ms，且不随深度劣化。
 
 FTS5 实测结论：LIKE 21ms + count 71ms 在 10 万级仍在预算内，暂不引入（推翻原先「>5000 条就上 FTS5」的预估）。
+
+## 验收脚本的用法（整理视图跨态共享元素）
+
+```bash
+npm run dev -- --port 5177
+python3 scripts/verify_organize_shared.py --url http://localhost:5177 --out marketing/shots --only main --timeout 120
+python3 scripts/verify_organize_shared.py --url http://localhost:5177 --out marketing/shots --only reduced
+```
+
+要求 Python >= 3.9（只用标准库）。脚本默认 150s 看门狗：卡住会打印 `[timeout] stuck at stage: <阶段>` 并以退出码 2 结束。rAF 采样带 `setTimeout` 兜底，页面被遮挡时会返回 `ended: "timeout"` 并把 fps 记成 0，不会挂死。

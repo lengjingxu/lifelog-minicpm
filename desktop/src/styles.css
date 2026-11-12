@@ -762,7 +762,16 @@ button:focus-visible, input:focus-visible {
   grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-content: start; padding-right: 2px;
 }
 .group-rail .group-panel {
+  position: relative;
   height: 156px; display: flex; flex-direction: column;
+}
+/* 超出容量时的说明：绝对定位，出现/消失不影响布局 */
+.group-cap {
+  position: absolute; right: 10px; bottom: 8px; z-index: 2;
+  padding: 1px 5px; border-radius: 4px;
+  font-size: 9px; color: var(--text-faint);
+  background: rgba(10, 10, 12, 0.72);
+  box-shadow: 0 0 0 1px var(--line) inset;
 }
 .group-rail .group-panel header { flex: none; }
 .group-panel {
