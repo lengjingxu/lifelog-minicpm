@@ -56,3 +56,52 @@ background:
 - 帧率：`python3 scripts/measure_fps.py --scenario both --seconds 4`，两套主题 fps ≥ 58、`>20ms` 帧数为 0；整理三态用 `measure_state_transitions.py`
 - `prefers-reduced-transparency: reduce` 时全部退化为实心，不得出现透明穿透
 
+
+## 三层表面系统（2026-11-12 补）
+
+主人看完截图说「还有很多组件没有对齐最新的玻璃 ui 的设计风格」。原因是之前只把 `.glass-surface` 用在了压在照片上的面（分类卡、整理分组、检查器、toast、徽标、批量条、识别弹窗），其余卡片/控件还是旧的「半透明实心 + 1px 描边」。统一成三层：
+
+| 层 | 用在哪 | 特征 |
+| --- | --- | --- |
+| `.glass-surface`（已有） | 压在照片/复杂背景上：分类卡前板、整理分组前板、检查器、toast、缩略图徽标、批量条、识别弹窗 | 有 blur，alpha 按亮/暗与是否压照片区分 |
+| `.glass-panel`（新增） | 压在应用底色上的卡片容器：设置卡、统计块、导入行、导入占位、分组栏、整理完成面板、登录行、OCR 块、空状态操作卡 | 轻 blur + 上高光 + 外投影 |
+| `.glass-control`（新增） | 输入与控件：搜索框、侧栏搜索、分段切换、图标按钮、关闭按钮、ghost 按钮、数字输入、chip、状态胶囊、分组落点、标签按钮、检查器操作按钮 | 不 blur，只有 tint + 上高光 + 描边 |
+
+```css
+/* 面板层 */
+.settings-card, .stat-box, .import-row, .import-placeholder, .group-rail,
+.organize-complete, .login-line, .ocr, .empty-actions > * {
+  background: linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.028));
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), inset 0 0 0 1px rgba(255,255,255,0.08), 0 8px 24px rgba(0,0,0,0.18);
+}
+[data-theme="light"] .settings-card, [data-theme="light"] .stat-box, [data-theme="light"] .import-row,
+[data-theme="light"] .import-placeholder, [data-theme="light"] .group-rail,
+[data-theme="light"] .organize-complete, [data-theme="light"] .login-line,
+[data-theme="light"] .ocr, [data-theme="light"] .empty-actions > * {
+  background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,255,255,0.74));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.95), inset 0 0 0 1px rgba(23,23,26,0.08), 0 8px 22px rgba(30,30,40,0.10);
+}
+
+/* 控件层 */
+.search, .sidebar-search, .view-switch, .density-switch, .icon-button,
+.close-btn, .ghost-button, .mark-controls input, .mark-controls select,
+.chip, .status-pill, .group-target, .tag-cloud button, .inspector-actions button {
+  background: rgba(255,255,255,0.045);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.09), inset 0 0 0 1px rgba(255,255,255,0.09);
+}
+[data-theme="light"] .search, [data-theme="light"] .sidebar-search, [data-theme="light"] .view-switch,
+[data-theme="light"] .density-switch, [data-theme="light"] .icon-button, [data-theme="light"] .close-btn,
+[data-theme="light"] .ghost-button, [data-theme="light"] .mark-controls input, [data-theme="light"] .mark-controls select,
+[data-theme="light"] .chip, [data-theme="light"] .status-pill, [data-theme="light"] .group-target,
+[data-theme="light"] .tag-cloud button, [data-theme="light"] .inspector-actions button {
+  background: rgba(23,23,26,0.035);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), inset 0 0 0 1px rgba(23,23,26,0.10);
+}
+/* 分段控件的外壳比内部按钮再淡一档 */
+.view-switch, .density-switch { background: rgba(255,255,255,0.03); }
+[data-theme="light"] .view-switch, [data-theme="light"] .density-switch { background: rgba(23,23,26,0.03); }
+```
+
+**不要动**：`.toolbar` / `.sidebar` / `.condition-bar`（底下是纯色，保持半透明实心）；`.cell`（网格性能敏感，只保留徽标玻璃）。
