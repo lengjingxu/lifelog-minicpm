@@ -19,7 +19,7 @@
 
   /* 玻璃材质（对齐 docs/design/GLASS-MATERIAL.md） */
   --glass-bg: rgba(14, 14, 17, 0.26);
-  --glass-bg-oncolor: rgba(14, 14, 17, 0.42);
+  --glass-bg-oncolor: rgba(14, 14, 17, 0.62);
   --glass-blur: blur(10px) saturate(1.6);
   --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.10);
   --glass-border: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
@@ -441,9 +441,9 @@ button:focus-visible, input:focus-visible {
 .category-meta { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .category-name {
   display: inline-flex; align-items: center; gap: 5px; min-width: 0;
-  font-size: 13px; font-weight: 600; color: var(--text);
+  font-size: 13px; font-weight: 600; color: #fff;
 }
-.category-count { margin-left: auto; font-size: 10.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.category-count { margin-left: auto; font-size: 10.5px; color: rgba(255, 255, 255, 0.92); font-variant-numeric: tabular-nums; }
 .category-loading {
   height: 240px; display: grid; place-items: center;
   color: var(--text-faint); font-size: 12px;
@@ -1096,6 +1096,10 @@ button:focus-visible, input:focus-visible {
 [data-theme="light"] .sidebar,
 [data-theme="light"] .toolbar,
 [data-theme="light"] .inspector { box-shadow: inset 0 1px 0 rgba(255,255,255,0.9); }
+
+/* 分类卡文字压在照片上的玻璃面，颜色单独给，不跟主题的 --text 走 */
+[data-theme="light"] .category-card .category-name { color: #17171A; }
+[data-theme="light"] .category-card .category-count { color: rgba(23, 23, 26, 0.72); }
 [data-theme="light"] .skeleton { background: linear-gradient(100deg, rgba(22,22,26,0.05) 30%, rgba(22,22,26,0.10) 50%, rgba(22,22,26,0.05) 70%); background-size: 200% 100%; }
 
 /* 视图切换：内容从下方 6px 淡入 */
