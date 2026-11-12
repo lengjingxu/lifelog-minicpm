@@ -105,3 +105,58 @@ background:
 ```
 
 **不要动**：`.toolbar` / `.sidebar` / `.condition-bar`（底下是纯色，保持半透明实心）；`.cell`（网格性能敏感，只保留徽标玻璃）。
+
+## 一层玻璃（硬规则）
+
+主人原话：「现在页面有大量的一层层的卡片玻璃的重复，一层玻璃套一层。只可以有一层。」
+
+当前实测：详情页 `.overlay-root`（blur 26px）里套了 `.inspector.glass-surface`；识别弹窗里套了统计块/导入行；设置卡里套了登录行；分组栏里套了分组卡——都是两层。
+
+**规则**
+1. 一个视觉堆叠里只允许一个元素带 `backdrop-filter`。
+2. 容器里如果装着玻璃子元素，容器自己不做玻璃（`.group-rail`、`.organize-complete`、`.overlay-root`）。
+3. 玻璃里面的块一律平铺：`background: transparent` + `backdrop-filter: none` + 只留 `inset 0 0 0 1px rgba(255,255,255,.10)` 描边。需要区分层次就靠间距和描边，不要再叠一层底色。
+
+**自检命令**（DevTools Console，返回 `nested: 0` 才算过）
+```js
+(() => {
+  const g = [...document.querySelectorAll('*')].filter(el => {
+    const cs = getComputedStyle(el), b = cs.backdropFilter || cs.webkitBackdropFilter;
+    return b && b !== 'none';
+  });
+  const pairs = [];
+  for (const x of g) {
+    const inner = g.filter(o => o !== x && x.contains(o));
+    if (inner.length) pairs.push(x.className + ' > ' + inner.map(o => o.className).join(','));
+  }
+  return { glass: g.length, nested: pairs.length, pairs };
+})()
+```
+
+## 详情页：满幅照片 + 悬浮玻璃板
+
+参考图的做法是玻璃压满幅大图，不是把信息栏切成独立一列。
+
+```css
+.overlay-root { display: block; padding: 0; backdrop-filter: none; }
+.stage { position: absolute; inset: 0; padding: 0; }
+.stage-image { height: 100%; }
+.inspector {
+  position: absolute; right: 24px; top: 24px; bottom: 24px; width: 380px;
+  border-radius: 20px; padding: 28px 26px; overflow-y: auto;
+  background: linear-gradient(180deg, rgba(14,14,17,0.62), rgba(14,14,17,0.72));
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(24px) saturate(1.4);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 0 0 0 1px rgba(255,255,255,0.10), 0 24px 60px rgba(0,0,0,0.45);
+}
+[data-theme="light"] .inspector {
+  background: linear-gradient(180deg, rgba(255,255,255,0.82), rgba(255,255,255,0.70));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.95), inset 0 0 0 1px rgba(255,255,255,0.6), 0 24px 60px rgba(20,20,30,0.28);
+}
+```
+
+## 字阶与强调色
+
+- 分类页标题 20 → **30px**，张数数字 **40px / 300 字重**，眉标字距 0.13 → **0.16em**；中间层（11–13px 正文）不动
+- 设置标题 23 → **28px**，整理完成标题 22 → **30px**，顶栏标题 15 → **16px**
+- 强调色只保留给「选中 / 实时」：`.chip`、`.tag-cloud button`、`.status-pill` 改中性（`rgba(255,255,255,.05)` + `var(--line)` 描边），主按钮和选中态继续用红
