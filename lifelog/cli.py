@@ -489,7 +489,12 @@ def main(argv=None) -> int:
         raise
     except Exception as exc:
         # 顶层兜底：不打印 traceback（异常里可能带含 token 的 URL），只给一行脱敏信息。
-        message = sync_xiaomi._sanitize(str(exc)) if _safe_sync() else str(exc)[:200]
+        message = str(exc)[:200]
+        try:
+            from . import sync_xiaomi
+            message = sync_xiaomi._sanitize(message)
+        except Exception:
+            pass
         print(json.dumps({"stage": "failed", "message": message}, ensure_ascii=False))
         return 4
 

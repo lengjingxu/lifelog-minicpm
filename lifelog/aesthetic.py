@@ -17,7 +17,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from . import config, db
+from . import config, db, paths
 
 MODEL = "clip-vit-l14+laion-ava1"
 MODEL_VERSION = "1"
@@ -125,21 +125,12 @@ def score_paths(paths: list[Path], batch: int = 16) -> list[float]:
 
 
 def resolve_path(stored: Path) -> Path | None:
-    """库搬过家时，按 photos/月份/文件名 的相对位置找回来。"""
-    if stored.exists():
-        return stored
-    tail = Path(*stored.parts[-2:])
-    candidate = config.DATA_DIR / "photos" / tail
-    return candidate if candidate.exists() else None
+    resolved = paths.resolve(stored)
+    return resolved if resolved.exists() else None
 
 
 def thumb_path(asset_id: str) -> Path | None:
-    """优先用缩略图：解码 256px 比原图快一个数量级。"""
-    for candidate in (config.DATA_DIR / "thumbs" / f"{asset_id}.jpg",
-                      config.DATA_DIR / "thumbs" / "full" / f"{asset_id}.jpg"):
-        if candidate.exists():
-            return candidate
-    return None
+    return paths.thumb(asset_id)
 
 
 def build(limit: int | None = None, batch: int = 16, progress=None) -> dict:
