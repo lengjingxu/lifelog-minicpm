@@ -3,7 +3,17 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "desktop/docs/**"
+      - "desktop/marketing/**"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "desktop/docs/**"
+      - "desktop/marketing/**"
   workflow_dispatch:
 
 concurrency:
@@ -30,7 +40,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
       - name: 装前端依赖
         run: npm ci
         working-directory: desktop
