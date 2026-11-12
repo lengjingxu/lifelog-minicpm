@@ -2,18 +2,24 @@
 """整理视图「跨态共享节点」验收：节点唯一性 / 图片不重复请求 / 落位帧等价 / CLS / reduced-motion / 三态帧率。
 
 要求 Python >= 3.9（只用标准库）。
-总超时默认 150s：卡住会打印当前阶段并以退出码 2 结束，不会静默挂死。
+
+健壮性：
+- 看门狗跑在独立线程，超时先 faulthandler.dump_traceback（能看出主线程卡在哪一层）再 os._exit(2)
+- 每个 CDP 调用都有 socket 超时，页面卡死不会无限阻塞
+- 日志每行带 PID 与时间，写入用 append；--log 指定文件，默认 stderr
+- 单实例锁 /tmp/sg-verify.lock：已有活实例时直接退出（退出码 3），避免两个实例互相截断输出
 
 用法:
-    python3 scripts/verify_organize_shared.py --url http://localhost:5177 --out /tmp/vs --only main
-    python3 scripts/verify_organize_shared.py --url http://localhost:5177 --out /tmp/vs --only reduced
+    python3 scripts/verify_organize_shared.py --url http://localhost:5177 --out /tmp/vs --only main --timeout 60
 """
 from __future__ import annotations
 
 import argparse
 import base64
+import faulthandler
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -23,27 +29,86 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from measure_fps import CHROME, Cdp, free_port  # noqa: E402
 
+LOCK_PATH = "/tmp/sg-verify.lock"
+STAGE = {"name": "init", "since": time.time()}
+LOG = {"fh": None}
 
-STAGE = {"name": "init"}
+
+def log(message: str) -> None:
+    line = "[%d] [%s] %s" % (os.getpid(), time.strftime("%H:%M:%S"), message)
+    print(line, flush=True)
+    if LOG["fh"]:
+        LOG["fh"].write(line + chr(10))
+        LOG["fh"].flush()
 
 
 def stage(name: str) -> None:
     STAGE["name"] = name
-    print("[stage] " + name, flush=True)
+    STAGE["since"] = time.time()
+    log("[stage] " + name)
 
 
 def start_watchdog(seconds: float) -> None:
-    def fire() -> None:
-        print("[timeout] stuck at stage: " + STAGE["name"], file=sys.stderr, flush=True)
-        os._exit(2)
+    deadline = time.time() + seconds
 
-    timer = threading.Timer(seconds, fire)
-    timer.daemon = True
-    timer.start()
+    def loop() -> None:
+        while True:
+            if time.time() >= deadline:
+                log("[timeout] stuck at stage: %s (%.0fs in stage)" % (STAGE["name"], time.time() - STAGE["since"]))
+                faulthandler.dump_traceback(file=sys.stderr)
+                sys.stderr.flush()
+                os._exit(2)
+            time.sleep(0.5)
+
+    thread = threading.Thread(target=loop, name="watchdog", daemon=True)
+    thread.start()
 
 
-# 带 setTimeout 兜底的 rAF 采样：页面被遮挡/后台节流时 rAF 不触发，
-# 原实现会永远等不到 resolve（这就是在别人机器上挂死的原因）。
+def acquire_lock() -> None:
+    try:
+        with open(LOCK_PATH, "r", encoding="utf-8") as f:
+            pid = int((f.read() or "0").strip() or 0)
+    except Exception:
+        pid = 0
+    if pid and pid != os.getpid():
+        try:
+            os.kill(pid, 0)
+            log("[lock] another run is alive (pid=%d), exit" % pid)
+            raise SystemExit(3)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            pass
+    with open(LOCK_PATH, "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
+
+
+def release_lock() -> None:
+    try:
+        with open(LOCK_PATH, "r", encoding="utf-8") as f:
+            if (f.read() or "").strip() == str(os.getpid()):
+                os.remove(LOCK_PATH)
+    except Exception:
+        pass
+
+
+def call_timeout(cdp, method: str, params=None, seconds: float = 15):
+    """给单个 CDP 调用加硬超时：页面卡死时抛 TimeoutError，而不是无限阻塞。"""
+    cdp.sock.settimeout(seconds)
+    try:
+        return cdp.call(method, params or {})
+    except socket.timeout:
+        raise TimeoutError("CDP %s timed out after %.0fs" % (method, seconds))
+
+
+def eval_timeout(cdp, expression: str, await_promise: bool = False, seconds: float = 20):
+    cdp.sock.settimeout(seconds)
+    try:
+        return cdp.eval(expression, await_promise=await_promise)
+    except socket.timeout:
+        raise TimeoutError("Runtime.evaluate timed out after %.0fs" % seconds)
+
+
 RAF_SAFE = """(async (seconds) => {
   const t0 = performance.now();
   let frames = 0, worst = 0, over20 = 0, last = t0;
@@ -142,23 +207,24 @@ DONE = "document.body.innerText.includes('查看相册')"
 
 
 def click(cdp, text):
-    return cdp.eval(
+    return eval_timeout(
+        cdp,
         "(() => { const b=[...document.querySelectorAll('button,a')]"
         ".find((x)=>(x.textContent||'').trim().startsWith(" + json.dumps(text) + "));"
-        " if(!b) return 'not-found'; b.click(); return 'ok'; })()"
+        " if(!b) return 'not-found'; b.click(); return 'ok'; })()",
     )
 
 
 def shot(cdp, path):
-    r = cdp.call("Page.captureScreenshot", {"format": "png"})
+    r = call_timeout(cdp, "Page.captureScreenshot", {"format": "png"}, seconds=20)
     with open(path, "wb") as f:
         f.write(base64.b64decode(r["result"]["data"]))
-    print("[shot] " + path, flush=True)
+    log("[shot] " + path)
 
 
 def launch(url, theme, reduced, tag):
     port = free_port()
-    prof = "/tmp/sg-org-%s-%d" % (tag, int(time.time()))
+    prof = "/tmp/sg-org-%s-%d" % (tag, os.getpid())
     chrome = subprocess.Popen(
         [CHROME, "--headless=new", "--disable-gpu",
          "--disable-background-timer-throttling",
@@ -184,17 +250,17 @@ def launch(url, theme, reduced, tag):
         raise SystemExit("no chrome target")
 
     cdp = Cdp(ws)
-    cdp.call("Runtime.enable")
-    cdp.call("Page.enable")
-    cdp.call("Page.bringToFront")
+    call_timeout(cdp, "Runtime.enable")
+    call_timeout(cdp, "Page.enable")
+    call_timeout(cdp, "Page.bringToFront")
     if reduced:
-        cdp.call("Emulation.setEmulatedMedia", {
+        call_timeout(cdp, "Emulation.setEmulatedMedia", {
             "features": [{"name": "prefers-reduced-motion", "value": "reduce"}],
         })
     full = url + ("&" if "?" in url else "?") + "theme=" + theme
-    cdp.call("Page.navigate", {"url": full})
+    call_timeout(cdp, "Page.navigate", {"url": full}, seconds=30)
     time.sleep(4)
-    cdp.eval(INSTRUMENT)
+    eval_timeout(cdp, INSTRUMENT)
     return chrome, cdp
 
 
@@ -207,7 +273,7 @@ def run_main(args):
         result["nav"] = click(cdp, "整理视图")
         time.sleep(1.6)
         stage("measure idle fps")
-        result["fps_idle"] = cdp.eval(RAF_SAFE + "(2.5)", await_promise=True)
+        result["fps_idle"] = eval_timeout(cdp, RAF_SAFE + "(2.5)", await_promise=True)
         stage("start session")
         result["start"] = click(cdp, "开始整理")
 
@@ -215,7 +281,7 @@ def run_main(args):
         shots = 0
         t0 = time.time()
         while time.time() - t0 < 26:
-            flying = cdp.eval(FLYING) or 0
+            flying = eval_timeout(cdp, FLYING)
             if isinstance(flying, (int, float)) and flying > 0:
                 shot(cdp, os.path.join(args.out, "p2-shared-takeoff.png"))
                 time.sleep(0.28)
@@ -227,28 +293,28 @@ def run_main(args):
             time.sleep(0.05)
 
         stage("measure running fps")
-        result["fps_running"] = cdp.eval(RAF_SAFE + "(3)", await_promise=True)
+        result["fps_running"] = eval_timeout(cdp, RAF_SAFE + "(3)", await_promise=True)
 
         stage("wait for completion")
         deadline = time.time() + 90
         while time.time() < deadline:
-            if cdp.eval(DONE):
+            if eval_timeout(cdp, DONE):
                 break
             time.sleep(0.5)
         time.sleep(0.8)
 
         stage("measure done fps")
-        result["fps_done"] = cdp.eval(RAF_SAFE + "(2.5)", await_promise=True)
+        result["fps_done"] = eval_timeout(cdp, RAF_SAFE + "(2.5)", await_promise=True)
         shot(cdp, os.path.join(args.out, "p2-shared-done.png"))
 
         stage("collect results")
         result["shots"] = shots
-        result["dup"] = cdp.eval(DUP)
-        result["cls"] = cdp.eval("window.__cls")
-        result["cls_entries"] = cdp.eval("window.__clsN")
-        result["landing"] = cdp.eval("JSON.stringify(window.__landing || [])")
-        result["anim_keys"] = cdp.eval("JSON.stringify([...new Set(window.__animKeys || [])])")
-        result["img_reqs"] = cdp.eval("(window.__imgReqs||[]).length")
+        result["dup"] = eval_timeout(cdp, DUP)
+        result["cls"] = eval_timeout(cdp, "window.__cls")
+        result["cls_entries"] = eval_timeout(cdp, "window.__clsN")
+        result["landing"] = eval_timeout(cdp, "JSON.stringify(window.__landing || [])")
+        result["anim_keys"] = eval_timeout(cdp, "JSON.stringify([...new Set(window.__animKeys || [])])")
+        result["img_reqs"] = eval_timeout(cdp, "(window.__imgReqs||[]).length")
     finally:
         chrome.terminate()
     return result
@@ -269,14 +335,14 @@ def run_reduced(args):
         dups = 0
         max_flying = 0
         while time.time() - t0 < 25:
-            dups = max(dups, int(cdp.eval(DUP) or 0))
-            max_flying = max(max_flying, int(cdp.eval(FLYING) or 0))
-            if cdp.eval(DONE):
+            dups = max(dups, int(eval_timeout(cdp, DUP) or 0))
+            max_flying = max(max_flying, int(eval_timeout(cdp, FLYING) or 0))
+            if eval_timeout(cdp, DONE):
                 break
             time.sleep(0.1)
         out["dup"] = dups
         out["max_flying"] = max_flying
-        out["keys"] = cdp.eval("JSON.stringify([...new Set(window.__animKeys || [])])")
+        out["keys"] = eval_timeout(cdp, "JSON.stringify([...new Set(window.__animKeys || [])])")
     finally:
         chrome.terminate()
     return out
@@ -288,34 +354,46 @@ def main():
     ap.add_argument("--out", default="marketing/shots")
     ap.add_argument("--only", choices=["main", "reduced", "both"], default="both")
     ap.add_argument("--timeout", type=float, default=150.0)
+    ap.add_argument("--log", default="")
     args = ap.parse_args()
+
+    if args.log:
+        LOG["fh"] = open(args.log, "a", encoding="utf-8", buffering=1)
+    acquire_lock()
     os.makedirs(args.out, exist_ok=True)
+    log("[start] only=%s timeout=%.0fs out=%s" % (args.only, args.timeout, args.out))
     start_watchdog(args.timeout)
 
-    if args.only == "reduced":
-        print(json.dumps(run_reduced(args), ensure_ascii=False, indent=1), flush=True)
-        return
+    try:
+        if args.only == "reduced":
+            log(json.dumps(run_reduced(args), ensure_ascii=False, indent=1))
+            return
 
-    r = run_main(args)
-    summary = {k: v for k, v in r.items() if k != "landing"}
-    print(json.dumps(summary, ensure_ascii=False, indent=1), flush=True)
+        r = run_main(args)
+        summary = {k: v for k, v in r.items() if k != "landing"}
+        log(json.dumps(summary, ensure_ascii=False, indent=1))
 
-    landing = json.loads(r.get("landing") or "[]")
-    print("landing samples: %d" % len(landing), flush=True)
-    bad = 0
-    for item in landing[:8]:
-        delta = max(abs(item["a"][i] - item["b"][i]) for i in range(4))
-        op = [float(x) for x in item["opacity"]]
-        ok = delta <= 0.5 and item["radius"][0] == item["radius"][1] and abs(op[0] - op[1]) < 0.01
-        if not ok:
-            bad += 1
-        print("   %s delta=%.2fpx radius=%s opacity=%s complete=%s newImg=%s nodes=%s %s"
-              % (item["id"], delta, item["radius"], item["opacity"], item["complete"],
-                 item["newImg"], item["nodes"], "OK" if ok else "MISMATCH"), flush=True)
-    print("landing mismatches: %d" % bad, flush=True)
+        landing = json.loads(r.get("landing") or "[]")
+        log("landing samples: %d" % len(landing))
+        bad = 0
+        for item in landing[:8]:
+            delta = max(abs(item["a"][i] - item["b"][i]) for i in range(4))
+            op = [float(x) for x in item["opacity"]]
+            ok = delta <= 0.5 and item["radius"][0] == item["radius"][1] and abs(op[0] - op[1]) < 0.01
+            if not ok:
+                bad += 1
+            log("   %s delta=%.2fpx radius=%s opacity=%s complete=%s newImg=%s nodes=%s %s"
+                % (item["id"], delta, item["radius"], item["opacity"], item["complete"],
+                   item["newImg"], item["nodes"], "OK" if ok else "MISMATCH"))
+        log("landing mismatches: %d" % bad)
 
-    if args.only == "both":
-        print(json.dumps(run_reduced(args), ensure_ascii=False, indent=1), flush=True)
+        if args.only == "both":
+            log(json.dumps(run_reduced(args), ensure_ascii=False, indent=1))
+    except TimeoutError as exc:
+        log("[abort] %s at stage %s" % (exc, STAGE["name"]))
+        raise SystemExit(2)
+    finally:
+        release_lock()
 
 
 if __name__ == "__main__":
