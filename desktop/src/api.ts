@@ -121,10 +121,21 @@ export type AppSettings = {
 
 export type RebuildResult = { ok: boolean; code?: number | null; stdout?: string; stderr?: string };
 
+export type DupMember = { asset_id: string; distance: number | null };
+
+export type DupGroup = {
+  id: number;
+  keeper_id: string;
+  reason: string;
+  count: number;
+  members: DupMember[];
+};
+
 type Fixture = {
   stats: Stats;
   assets: Asset[];
   facets: Facets;
+  dups?: DupGroup[];
 };
 
 type TauriWindow = Window & { __TAURI_INTERNALS__?: unknown };
@@ -172,6 +183,12 @@ export async function libraryStats(): Promise<Stats> {
 export async function getFacets(): Promise<Facets> {
   if (!isTauri) return (await loadFixture()).facets;
   return invoke<Facets>("facets");
+}
+
+/** 去重分组（只读）。老库没有去重表时后端返回空数组。 */
+export async function dupGroups(): Promise<DupGroup[]> {
+  if (!isTauri) return (await loadFixture()).dups ?? [];
+  return invoke<DupGroup[]>("dup_groups");
 }
 
 export async function health(): Promise<Health> {

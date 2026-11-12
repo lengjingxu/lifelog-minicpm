@@ -336,6 +336,12 @@ button:focus-visible, input:focus-visible {
   padding: 2px 6px; border-radius: 5px;
   font-size: 9.5px; line-height: 1.45; color: var(--text);
 }
+.cell .dup-badge {
+  position: absolute; top: 7px; right: 7px; z-index: 2;
+  padding: 2px 6px; border-radius: 5px;
+  font-size: 9.5px; line-height: 1.45; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
 .cell .overlay {
   position: absolute; inset: auto 0 0 0; z-index: 1;
   padding: 24px 9px 8px;
@@ -510,6 +516,7 @@ button:focus-visible, input:focus-visible {
 .inspector-kicker { font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 6px; }
 .inspector h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 4px; }
 .file-name { margin: 0 0 20px; font-size: 10.5px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dup-note { margin: -12px 0 18px; font-size: 10.5px; color: var(--accent); }
 .caption { font-size: 12.5px; line-height: 1.68; color: rgba(245,243,242,0.84); margin: 0 0 20px; }
 .section-label { font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); margin: 0 0 8px; }
 .meta-grid { display: grid; grid-template-columns: 66px 1fr; gap: 7px 10px; font-size: 11.5px; margin: 0 0 20px; }

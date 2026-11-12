@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import aggregate, caption, config, db, ingest, models, ocr, profile, query
+from . import aesthetic, aggregate, caption, config, db, ingest, models, ocr, profile, query
 
 
 def cmd_fetch_model(args) -> int:
@@ -69,6 +69,39 @@ def cmd_search(args) -> int:
 def cmd_stats(args) -> int:
     stats = aggregate.compute_stats()
     print(aggregate.stats_to_text(stats))
+    return 0
+
+
+def cmd_dedup(args) -> int:
+    from . import dedup
+
+    if not (args.build or args.stats or args.export):
+        args.stats = True
+
+    with db.session() as con:
+        if args.build:
+            def progress(stats):
+                print(json.dumps(stats, ensure_ascii=False), file=sys.stderr, flush=True)
+
+            result = dedup.build(con, limit=args.limit, progress=progress)
+            print(json.dumps(result, ensure_ascii=False))
+        if args.stats:
+            print(json.dumps(dedup.stats(con), ensure_ascii=False))
+        if args.export:
+            payload = dedup.export(con)
+            destination = Path(args.export).expanduser()
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+            print(
+                json.dumps(
+                    {
+                        "export": str(destination),
+                        "groups": len(payload["groups"]),
+                        "members": sum(len(group["members"]) for group in payload["groups"]),
+                    },
+                    ensure_ascii=False,
+                )
+            )
     return 0
 
 
@@ -280,6 +313,21 @@ def cmd_album_list(args) -> int:
     return 0
 
 
+def cmd_aesthetic(args) -> int:
+    if args.stats:
+        print(json.dumps(aesthetic.stats(), ensure_ascii=False))
+        return 0
+    if args.stars:
+        print(json.dumps({"stars": aesthetic.recompute_stars()}, ensure_ascii=False))
+        return 0
+    def progress(done, total):
+        print(f"[aesthetic] {done}/{total}", flush=True)
+    result = aesthetic.build(limit=args.limit, batch=args.batch, progress=progress)
+    result.update(aesthetic.stats())
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lifelog", description="本地相册 → MiniCPM → 生活档案")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -293,6 +341,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hash", action="store_true", help="按内容哈希去重（慢）")
     p.add_argument("--limit", type=int)
     p.set_defaults(func=cmd_ingest)
+
+    p = sub.add_parser("aesthetic", help="本地美学评分（CLIP ViT-L/14 + LAION 头）")
+    p.add_argument("--build", action="store_true", help="给未打分的照片补分")
+    p.add_argument("--limit", type=int)
+    p.add_argument("--batch", type=int, default=16)
+    p.add_argument("--stats", action="store_true", help="查看分数分布")
+    p.add_argument("--stars", action="store_true", help="按库内分位数重算 1-5 星")
+    p.set_defaults(func=cmd_aesthetic)
 
     p = sub.add_parser("caption", help="用 MiniCPM 逐张识别")
     p.add_argument("--model", default="minicpm-v-4.7-1b")
@@ -335,6 +391,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("stats", help="查看统计底稿")
     p.set_defaults(func=cmd_stats)
+
+    p = sub.add_parser("dedup", help="库内去重：L0 字节 + L1 dHash + 连拍")
+    p.add_argument("--build", action="store_true", help="增量算哈希并重建分组（可中断续跑）")
+    p.add_argument("--stats", action="store_true", help="查看去重统计（默认动作）")
+    p.add_argument("--export", metavar="OUT.json", help="全量导出去重分组")
+    p.add_argument("--limit", type=int, help="本次最多处理 N 张（调试用）")
+    p.set_defaults(func=cmd_dedup)
 
     p = sub.add_parser("sync", help="从小米云盘同步相册到本地")
     p.add_argument("--dry-run", action="store_true", help="只出计划：列新增/已存在，不下载、不写 state")
@@ -426,7 +489,12 @@ def main(argv=None) -> int:
         raise
     except Exception as exc:
         # 顶层兜底：不打印 traceback（异常里可能带含 token 的 URL），只给一行脱敏信息。
-        message = sync_xiaomi._sanitize(str(exc)) if _safe_sync() else str(exc)[:200]
+        message = str(exc)[:200]
+        try:
+            from . import sync_xiaomi
+            message = sync_xiaomi._sanitize(message)
+        except Exception:
+            pass
         print(json.dumps({"stage": "failed", "message": message}, ensure_ascii=False))
         return 4
 

@@ -6,13 +6,14 @@ import { kindLabel } from "../utils";
 
 type Props = {
   asset: Asset;
+  dupCount?: number;
   selected?: boolean;
   multi?: boolean;
   onSelect: (asset: Asset, event: MouseEvent) => void;
   onOpen: (asset: Asset, rect?: DOMRect) => void;
 };
 
-export function Thumb({ asset, selected, multi, onSelect, onOpen }: Props) {
+export function Thumb({ asset, dupCount, selected, multi, onSelect, onOpen }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [useOriginal, setUseOriginal] = useState(false);
@@ -64,6 +65,11 @@ export function Thumb({ asset, selected, multi, onSelect, onOpen }: Props) {
         )}
       </span>
       <span className="badge glass-surface">{kindLabel(asset)}</span>
+      {dupCount && dupCount > 1 && (
+        <span className="dup-badge glass-surface" title={`同组 ${dupCount} 张，已折叠`}>
+          ×{dupCount}
+        </span>
+      )}
       <span className="overlay">
         <span>{asset.caption || "尚未识别"}</span>
       </span>

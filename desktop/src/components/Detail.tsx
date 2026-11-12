@@ -15,6 +15,7 @@ import { kindLabel, peopleList, splitList, timeLabel } from "../utils";
 
 type Props = {
   asset: Asset;
+  dup?: { count: number; keeperId: string };
   index: number;
   total: number;
   onClose: () => void;
@@ -35,7 +36,7 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
   );
 }
 
-export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, onAction, origin, closing = false }: Props) {
+export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTag, onAction, origin, closing = false }: Props) {
   const [fullLoaded, setFullLoaded] = useState(false);
   const [fullFailed, setFullFailed] = useState(false);
   const fullRef = useRef<HTMLImageElement | null>(null);
@@ -152,6 +153,11 @@ export function Detail({ asset, index, total, onClose, onPrev, onNext, onTag, on
         <div className="inspector-kicker">{kindLabel(asset)} · 详情</div>
         <h2>{timeLabel(asset.taken_at)}</h2>
         <p className="file-name" title={asset.path}>{asset.path.split("/").pop()}</p>
+        {dup && dup.count > 1 && (
+          <p className="dup-note">
+            {dup.keeperId === asset.id ? `同组 ${dup.count} 张 · 保留这张` : `同组 ${dup.count} 张 · 已折叠`}
+          </p>
+        )}
 
         <div className="section-label">AI 描述</div>
         <p className="caption">{asset.caption || "这张照片还没有 AI 描述。"}</p>

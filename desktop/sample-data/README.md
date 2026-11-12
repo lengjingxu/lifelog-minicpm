@@ -6,6 +6,9 @@
 - `photos/`：原图（`path` 字段是相对路径，客户端按 `data_dir` 解析）
 - `thumbs/`：360px 缩略图（客户端直接读，不会再生成）
 
+库里已经跑过一次 `lifelog dedup`：`dup_groups` / `dup_members` 有 1 组重复
+（两张 10:15 的截图，尺寸差几个像素），用来预览网格折叠与「同组 N 张」。
+
 启动时指向这里：
 
 ```bash
