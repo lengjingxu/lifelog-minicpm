@@ -11,10 +11,16 @@ type Tier = { label: string; query: string };
 
 const ENDPOINT = (import.meta.env.VITE_BENCH_ENDPOINT as string) || "http://127.0.0.1:8799/bench";
 
+/**
+ * 两种入口：
+ * 1) dev：import.meta.env.DEV + VITE_BENCH / ?bench=1
+ * 2) bench 专用构建：VITE_BENCH_BUILD=1（正式发布构建两者都是 false，整段被剔除）
+ */
 function enabled(): boolean {
-  if (!import.meta.env.DEV) return false;
+  const benchBuild = import.meta.env.VITE_BENCH_BUILD === "1";
+  if (!import.meta.env.DEV && !benchBuild) return false;
   const flag = new URLSearchParams(location.search).get("bench");
-  return flag === "1" || import.meta.env.VITE_BENCH === "1";
+  return flag === "1" || import.meta.env.VITE_BENCH === "1" || benchBuild;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -151,12 +157,23 @@ async function run(): Promise<Record<string, unknown>> {
     report.warmReopenMs = { p50: Math.round(median(warm)), p95: Math.round(p95(warm)), samples: warm.map(Math.round) };
     beacon("warm-" + i + "-done");
   }
-  const warmSummary = { p50: Math.round(median(warm)), p95: Math.round(p95(warm)), samples: warm.map(Math.round) };
+  const warmSummary = {
+    definition: "switch-away-and-back(标签 -> 全部照片)，不关窗；coldFirstMs 才是进程启动到首帧",
+    p50: Math.round(median(warm)),
+    p95: Math.round(p95(warm)),
+    samples: warm.map(Math.round),
+  };
   report.warmReopenMs = warmSummary;
   beacon("warm", { p50: warmSummary.p50 });
 
   setSearch("");
   await sleep(500);
+
+  // 滚动必须在窗口可见时测：驱动脚本会持续把窗口置前，这里最多等 20s
+  for (let waited = 0; waited < 20000 && document.visibilityState !== "visible"; waited += 200) {
+    await sleep(200);
+  }
+  report.visibilityBeforeScroll = document.visibilityState;
 
   const scrollEl = document.querySelector<HTMLElement>(".grid-scroll");
   if (scrollEl && document.visibilityState !== "visible") {
