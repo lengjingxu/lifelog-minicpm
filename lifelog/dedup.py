@@ -21,7 +21,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config, db
+from . import config, paths, db
 
 DHASH_WIDTH = 9
 DHASH_HEIGHT = 8
@@ -30,6 +30,9 @@ HAMMING_MAX = 6
 DHASH2_SIZE = (17, 16)
 DHASH2_MAX = 24
 BURST_GAP_SECONDS = 3
+SIG_SIDE = 8          # 8x8 灰度签名，用来复核 dHash 的候选
+SIG_MAX_DIFF = 14     # 同图（缩放/重编码）的签名平均差
+BURST_SIG_MAX = 26    # 连拍相邻帧的签名平均差
 SHARP_SIDE = 256
 BATCH_SIZE = 200
 
@@ -70,9 +73,8 @@ def file_sha256(path: Path, chunk: int = 1 << 20) -> str:
 
 
 def asset_path(raw: str) -> Path:
-    """assets.path 可能是相对路径（示例库、老库），按 DATA_DIR 解析。"""
-    path = Path(raw)
-    return path if path.is_absolute() else config.DATA_DIR / path
+    """assets.path 可能是相对路径，也可能因为库搬家而失效——交给 paths.resolve 兜底。"""
+    return paths.resolve(raw)
 
 
 def dhash_from_gray(gray) -> int:
@@ -121,16 +123,39 @@ def scan_image(path: Path) -> dict:
             ImageFilter.Kernel((3, 3), (0, 1, 0, 1, -4, 1, 0, 1, 0), scale=1, offset=128)
         )
         sharp = ImageStat.Stat(edges).var[0]
+        sig = thumb.resize((SIG_SIDE, SIG_SIDE), Image.Resampling.BOX).tobytes()
     return {
         "w": width,
         "h": height,
         "dhash": dhash_hex(bits),
         "dhash2": f"{bits2:064x}",
         "sharp": round(float(sharp), 3),
+        "sig": sig,
     }
 
 
 # ---------------------------------------------------------------- 增量计算
+
+
+def sig_diff(left, right) -> float | None:
+    """8x8 灰度签名的平均绝对差；任一方缺失返回 None。"""
+    if not left or not right or len(left) != len(right):
+        return None
+    return sum(abs(a - b) for a, b in zip(left, right)) / len(left)
+
+
+def sig_close(left, right, limit: float) -> bool:
+    """签名够近才算同一张；缺失签名一律不合并（宁可漏，不可错）。"""
+    diff = sig_diff(left, right)
+    return diff is not None and diff <= limit
+
+
+def _ensure_columns(con) -> None:
+    """老库的 asset_hash 没有 sig 列，补上（SQLite 不支持 IF NOT EXISTS 加列）。"""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(asset_hash)")}
+    if "sig" not in columns:
+        con.execute("ALTER TABLE asset_hash ADD COLUMN sig BLOB")
+        con.commit()
 
 
 def _multi_size_buckets(con) -> set[int]:
@@ -146,7 +171,7 @@ def _pending(con, limit: int | None) -> list:
     sql = (
         "SELECT a.id, a.path, a.kind, a.size FROM assets a "
         "LEFT JOIN asset_hash h ON h.asset_id = a.id "
-        "WHERE h.asset_id IS NULL ORDER BY a.size, a.id"
+        "WHERE h.asset_id IS NULL OR h.status = 'error' OR h.sig IS NULL ORDER BY a.size, a.id"
     )
     rows = con.execute(sql).fetchall()
     return rows[:limit] if limit else rows
@@ -183,6 +208,7 @@ def build(con, limit: int | None = None, progress=None) -> dict:
     ).lastrowid
     con.commit()
 
+    _ensure_columns(con)
     multi = _multi_size_buckets(con)
     pending = _pending(con, limit)
     total = len(pending)
@@ -208,13 +234,13 @@ def build(con, limit: int | None = None, progress=None) -> dict:
                 digest = None
 
         if kind == "video":
-            batch.append((asset_id, digest, None, None, None, None, _now_iso(), "ok", None))
+            batch.append((asset_id, digest, None, None, None, None, _now_iso(), "ok", None, None))
             stats["videos"] += 1
         else:
             try:
                 info = scan_image(asset_path(path))
             except Exception:
-                batch.append((asset_id, digest, None, None, None, None, _now_iso(), "error", None))
+                batch.append((asset_id, digest, None, None, None, None, _now_iso(), "error", None, None))
                 stats["errors"] += 1
             else:
                 batch.append(
@@ -228,6 +254,7 @@ def build(con, limit: int | None = None, progress=None) -> dict:
                         _now_iso(),
                         "ok",
                         info["sharp"],
+                        info["sig"],
                     )
                 )
                 stats["images"] += 1
@@ -235,8 +262,8 @@ def build(con, limit: int | None = None, progress=None) -> dict:
         if len(batch) >= BATCH_SIZE:
             con.executemany(
                 "INSERT OR REPLACE INTO asset_hash "
-                "(asset_id, sha256, dhash, dhash2, w, h, computed_at, status, sharp) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
+                "(asset_id, sha256, dhash, dhash2, w, h, computed_at, status, sharp, sig) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
                 batch,
             )
             stats["hashed"] += len(batch)
@@ -254,8 +281,8 @@ def build(con, limit: int | None = None, progress=None) -> dict:
     if batch:
         con.executemany(
             "INSERT OR REPLACE INTO asset_hash "
-            "(asset_id, sha256, dhash, dhash2, w, h, computed_at, status, sharp) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "(asset_id, sha256, dhash, dhash2, w, h, computed_at, status, sharp, sig) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             batch,
         )
         stats["hashed"] += len(batch)
@@ -367,7 +394,7 @@ def _parse_time(value: str | None) -> datetime | None:
 
 def _group_rows(con) -> list:
     return con.execute(
-        "SELECT a.id, a.taken_at, a.day, a.kind, h.sha256, h.dhash, h.dhash2, h.w, h.h, h.sharp "
+        "SELECT a.id, a.taken_at, a.day, a.kind, h.sha256, h.dhash, h.dhash2, h.w, h.h, h.sharp, h.sig "
         "FROM assets a JOIN asset_hash h ON h.asset_id = a.id "
         "WHERE h.status = 'ok'"
     ).fetchall()
@@ -375,10 +402,11 @@ def _group_rows(con) -> list:
 
 def group(con) -> dict:
     """从 asset_hash 重建 dup_groups / dup_members（只读 asset_hash，不读原图）。"""
+    _ensure_columns(con)
     rows = _group_rows(con)
     union = _Union()
     info: dict[str, dict] = {}
-    for asset_id, taken_at, day, kind, sha256, dhash, dhash2, width, height, sharp in rows:
+    for asset_id, taken_at, day, kind, sha256, dhash, dhash2, width, height, sharp, sig in rows:
         union.add(asset_id)
         info[asset_id] = {
             "taken_at": taken_at,
@@ -390,6 +418,7 @@ def group(con) -> dict:
             "w": width,
             "h": height,
             "sharp": sharp,
+            "sig": sig,
         }
 
     def keeper_key(asset_id: str):
@@ -422,8 +451,12 @@ def group(con) -> dict:
     for items in timed.values():
         items.sort()
         for previous, current in zip(items, items[1:]):
-            if (current[0] - previous[0]).total_seconds() <= BURST_GAP_SECONDS:
-                union.union(previous[1], current[1], "burst")
+            if (current[0] - previous[0]).total_seconds() > BURST_GAP_SECONDS:
+                continue
+            # 同一秒导出的截图也会满足「同天 + 同分辨率 + <=3s」，必须再过一道像素门槛
+            if not sig_close(info[previous[1]]["sig"], info[current[1]]["sig"], BURST_SIG_MAX):
+                continue
+            union.union(previous[1], current[1], "burst")
 
     # L1：以每个连通块的中心点做星型聚类（中心点 = 邻居最多的那张，不是质量最好的）。
     # 不做传递闭包：A~B、B~C 但 A 与 C 差很远时，链式合并会把一批无关照片连成一坨。
@@ -507,20 +540,49 @@ def group(con) -> dict:
         if cluster != root:
             bucket_reasons[cluster].add("l1")
 
+    def split_by_sig(members: list[str]) -> list[list[str]]:
+        """dHash 只负责找候选；最终是否同图由 8x8 灰度签名复核。
+
+        低纹理图（白底截图、大片天空）的 dHash 会撞车，只靠汉明距离会把
+        完全不同的照片并成一组——本机 239 张库实测出现过 4 张不同截图同组。
+        """
+        parent = {member: member for member in members}
+
+        def find(item):
+            while parent[item] != item:
+                parent[item] = parent[parent[item]]
+                item = parent[item]
+            return item
+
+        for index, left in enumerate(members):
+            for right in members[index + 1:]:
+                same_bytes = info[left]["sha256"] and info[left]["sha256"] == info[right]["sha256"]
+                if same_bytes or sig_close(info[left]["sig"], info[right]["sig"], SIG_MAX_DIFF):
+                    a, b = find(left), find(right)
+                    if a != b:
+                        parent[max(a, b)] = min(a, b)
+        out: dict[str, list[str]] = defaultdict(list)
+        for member in members:
+            out[find(member)].append(member)
+        return list(out.values())
+
     groups = []
     for root, members in buckets.items():
         if len(members) < 2:
             continue
-        members.sort(key=keeper_key)
-        keeper = members[0]
-        groups.append(
-            {
-                "keeper": keeper,
-                "members": members,
-                "reason": "+".join(sorted(bucket_reasons[root])) or "l1",
-                "taken_at": info[keeper]["taken_at"] or "",
-            }
-        )
+        for part in split_by_sig(members):
+            if len(part) < 2:
+                continue
+            part.sort(key=keeper_key)
+            keeper = part[0]
+            groups.append(
+                {
+                    "keeper": keeper,
+                    "members": part,
+                    "reason": "+".join(sorted(bucket_reasons[root])) or "l1",
+                    "taken_at": info[keeper]["taken_at"] or "",
+                }
+            )
     groups.sort(key=lambda item: (item["taken_at"], item["keeper"]))
 
     created = _now_iso()

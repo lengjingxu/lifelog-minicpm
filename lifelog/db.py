@@ -92,7 +92,8 @@ CREATE TABLE IF NOT EXISTS asset_hash (
     h INTEGER,
     computed_at TEXT,
     status TEXT DEFAULT 'ok',
-    sharp REAL
+    sharp REAL,
+    sig BLOB
 );
 
 CREATE INDEX IF NOT EXISTS idx_hash_dhash ON asset_hash(dhash);

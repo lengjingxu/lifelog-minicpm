@@ -45,11 +45,13 @@ def insert_asset(con, asset_id, path, size, taken_at=None, day=None, kind="image
     )
 
 
-def insert_hash(con, asset_id, dhash, dhash2, w, h, sharp=10.0, sha256=None):
+def insert_hash(con, asset_id, dhash, dhash2, w, h, sharp=10.0, sha256=None, sig=None):
+    # 默认给一张中性签名：分组还要过 8x8 灰度复核，测试里不关心像素时用同一个值
     con.execute(
-        "INSERT INTO asset_hash (asset_id, sha256, dhash, dhash2, w, h, computed_at, status, sharp) "
-        "VALUES (?,?,?,?,?,?,?,?,?)",
-        (asset_id, sha256, dhash, dhash2, w, h, "2026-01-01T00:00:00", "ok", sharp),
+        "INSERT INTO asset_hash (asset_id, sha256, dhash, dhash2, w, h, computed_at, status, sharp, sig) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (asset_id, sha256, dhash, dhash2, w, h, "2026-01-01T00:00:00", "ok", sharp,
+         sig if sig is not None else b"\x80" * 64),
     )
 
 
@@ -200,6 +202,28 @@ class GroupingTests(DedupBase):
         self.assertEqual(members, ["b0", "b1", "b2", "b3"])
         self.assertIn("burst", grouped[1]["reason"])
 
+
+    def test_same_dhash_but_different_pixels_not_grouped(self):
+        """低纹理图 dHash 会撞车：同哈希但像素差很远的两张，不能合并。"""
+        with db.session() as con:
+            for asset_id, sig in (("white", b"\xff" * 64), ("black", b"\x00" * 64)):
+                insert_asset(con, asset_id, self.photos / f"{asset_id}.png", 10,
+                             taken_at="2026-01-01T09:00:00", day="2026-01-01")
+                insert_hash(con, asset_id, "00000000425a0000", "0" * 60 + "f", 1600, 1200, sig=sig)
+            dedup.group(con)
+        self.assertEqual(self.groups(), {}, "像素完全不同却因为 dHash 相同被合并了")
+
+    def test_same_dhash_and_close_pixels_grouped(self):
+        with db.session() as con:
+            for asset_id, value in (("a", 128), ("b", 130)):
+                insert_asset(con, asset_id, self.photos / f"{asset_id}.png", 10,
+                             taken_at="2026-01-01T09:00:00", day="2026-01-01")
+                insert_hash(con, asset_id, "00000000425a0000", "0" * 60 + "f", 1600, 1200,
+                            sig=bytes([value]) * 64)
+            dedup.group(con)
+        groups = self.groups()
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(sorted(groups[1]["members"]), ["a", "b"])
     def test_keeper_prefers_resolution_then_sharpness_then_time(self):
         with db.session() as con:
             # 分辨率最大优先
@@ -295,7 +319,8 @@ class IncrementalTests(DedupBase):
             insert_asset(con, "two", second, 4)
             stats = dedup.build(con)
             rows = con.execute("SELECT asset_id, sha256 FROM asset_hash ORDER BY asset_id").fetchall()
-        self.assertEqual(stats["sha256_backfilled"], 1)
+        # 错误行现在会重跑，sha256 可能在主循环里就算掉了，两种路径都算通过
+        self.assertGreaterEqual(stats["sha256"] + stats["sha256_backfilled"], 1)
         self.assertEqual(len(rows), 2)
         self.assertTrue(all(row["sha256"] for row in rows))
         self.assertEqual(len({row["sha256"] for row in rows}), 2, "不同字节不该被判成同图")
