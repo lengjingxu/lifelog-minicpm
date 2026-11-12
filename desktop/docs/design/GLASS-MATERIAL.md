@@ -56,3 +56,107 @@ background:
 - 帧率：`python3 scripts/measure_fps.py --scenario both --seconds 4`，两套主题 fps ≥ 58、`>20ms` 帧数为 0；整理三态用 `measure_state_transitions.py`
 - `prefers-reduced-transparency: reduce` 时全部退化为实心，不得出现透明穿透
 
+
+## 三层表面系统（2026-11-12 补）
+
+主人看完截图说「还有很多组件没有对齐最新的玻璃 ui 的设计风格」。原因是之前只把 `.glass-surface` 用在了压在照片上的面（分类卡、整理分组、检查器、toast、徽标、批量条、识别弹窗），其余卡片/控件还是旧的「半透明实心 + 1px 描边」。统一成三层：
+
+| 层 | 用在哪 | 特征 |
+| --- | --- | --- |
+| `.glass-surface`（已有） | 压在照片/复杂背景上：分类卡前板、整理分组前板、检查器、toast、缩略图徽标、批量条、识别弹窗 | 有 blur，alpha 按亮/暗与是否压照片区分 |
+| `.glass-panel`（新增） | 压在应用底色上的卡片容器：设置卡、统计块、导入行、导入占位、分组栏、整理完成面板、登录行、OCR 块、空状态操作卡 | 轻 blur + 上高光 + 外投影 |
+| `.glass-control`（新增） | 输入与控件：搜索框、侧栏搜索、分段切换、图标按钮、关闭按钮、ghost 按钮、数字输入、chip、状态胶囊、分组落点、标签按钮、检查器操作按钮 | 不 blur，只有 tint + 上高光 + 描边 |
+
+```css
+/* 面板层 */
+.settings-card, .stat-box, .import-row, .import-placeholder, .group-rail,
+.organize-complete, .login-line, .ocr, .empty-actions > * {
+  background: linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.028));
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), inset 0 0 0 1px rgba(255,255,255,0.08), 0 8px 24px rgba(0,0,0,0.18);
+}
+[data-theme="light"] .settings-card, [data-theme="light"] .stat-box, [data-theme="light"] .import-row,
+[data-theme="light"] .import-placeholder, [data-theme="light"] .group-rail,
+[data-theme="light"] .organize-complete, [data-theme="light"] .login-line,
+[data-theme="light"] .ocr, [data-theme="light"] .empty-actions > * {
+  background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,255,255,0.74));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.95), inset 0 0 0 1px rgba(23,23,26,0.08), 0 8px 22px rgba(30,30,40,0.10);
+}
+
+/* 控件层 */
+.search, .sidebar-search, .view-switch, .density-switch, .icon-button,
+.close-btn, .ghost-button, .mark-controls input, .mark-controls select,
+.chip, .status-pill, .group-target, .tag-cloud button, .inspector-actions button {
+  background: rgba(255,255,255,0.045);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.09), inset 0 0 0 1px rgba(255,255,255,0.09);
+}
+[data-theme="light"] .search, [data-theme="light"] .sidebar-search, [data-theme="light"] .view-switch,
+[data-theme="light"] .density-switch, [data-theme="light"] .icon-button, [data-theme="light"] .close-btn,
+[data-theme="light"] .ghost-button, [data-theme="light"] .mark-controls input, [data-theme="light"] .mark-controls select,
+[data-theme="light"] .chip, [data-theme="light"] .status-pill, [data-theme="light"] .group-target,
+[data-theme="light"] .tag-cloud button, [data-theme="light"] .inspector-actions button {
+  background: rgba(23,23,26,0.035);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), inset 0 0 0 1px rgba(23,23,26,0.10);
+}
+/* 分段控件的外壳比内部按钮再淡一档 */
+.view-switch, .density-switch { background: rgba(255,255,255,0.03); }
+[data-theme="light"] .view-switch, [data-theme="light"] .density-switch { background: rgba(23,23,26,0.03); }
+```
+
+**不要动**：`.toolbar` / `.sidebar` / `.condition-bar`（底下是纯色，保持半透明实心）；`.cell`（网格性能敏感，只保留徽标玻璃）。
+
+## 一层玻璃（硬规则）
+
+主人原话：「现在页面有大量的一层层的卡片玻璃的重复，一层玻璃套一层。只可以有一层。」
+
+当前实测：详情页 `.overlay-root`（blur 26px）里套了 `.inspector.glass-surface`；识别弹窗里套了统计块/导入行；设置卡里套了登录行；分组栏里套了分组卡——都是两层。
+
+**规则**
+1. 一个视觉堆叠里只允许一个元素带 `backdrop-filter`。
+2. 容器里如果装着玻璃子元素，容器自己不做玻璃（`.group-rail`、`.organize-complete`、`.overlay-root`）。
+3. 玻璃里面的块一律平铺：`background: transparent` + `backdrop-filter: none` + 只留 `inset 0 0 0 1px rgba(255,255,255,.10)` 描边。需要区分层次就靠间距和描边，不要再叠一层底色。
+
+**自检命令**（DevTools Console，返回 `nested: 0` 才算过）
+```js
+(() => {
+  const g = [...document.querySelectorAll('*')].filter(el => {
+    const cs = getComputedStyle(el), b = cs.backdropFilter || cs.webkitBackdropFilter;
+    return b && b !== 'none';
+  });
+  const pairs = [];
+  for (const x of g) {
+    const inner = g.filter(o => o !== x && x.contains(o));
+    if (inner.length) pairs.push(x.className + ' > ' + inner.map(o => o.className).join(','));
+  }
+  return { glass: g.length, nested: pairs.length, pairs };
+})()
+```
+
+## 详情页：满幅照片 + 悬浮玻璃板
+
+参考图的做法是玻璃压满幅大图，不是把信息栏切成独立一列。
+
+```css
+.overlay-root { display: block; padding: 0; backdrop-filter: none; }
+.stage { position: absolute; inset: 0; padding: 0; }
+.stage-image { height: 100%; }
+.inspector {
+  position: absolute; right: 24px; top: 24px; bottom: 24px; width: 380px;
+  border-radius: 20px; padding: 28px 26px; overflow-y: auto;
+  background: linear-gradient(180deg, rgba(14,14,17,0.62), rgba(14,14,17,0.72));
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(24px) saturate(1.4);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 0 0 0 1px rgba(255,255,255,0.10), 0 24px 60px rgba(0,0,0,0.45);
+}
+[data-theme="light"] .inspector {
+  background: linear-gradient(180deg, rgba(255,255,255,0.82), rgba(255,255,255,0.70));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.95), inset 0 0 0 1px rgba(255,255,255,0.6), 0 24px 60px rgba(20,20,30,0.28);
+}
+```
+
+## 字阶与强调色
+
+- 分类页标题 20 → **30px**，张数数字 **40px / 300 字重**，眉标字距 0.13 → **0.16em**；中间层（11–13px 正文）不动
+- 设置标题 23 → **28px**，整理完成标题 22 → **30px**，顶栏标题 15 → **16px**
+- 强调色只保留给「选中 / 实时」：`.chip`、`.tag-cloud button`、`.status-pill` 改中性（`rgba(255,255,255,.05)` + `var(--line)` 描边），主按钮和选中态继续用红
