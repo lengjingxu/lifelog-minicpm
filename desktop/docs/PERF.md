@@ -88,3 +88,12 @@ python3 scripts/measure_state_transitions.py --url http://localhost:5176
 
 结论：三态切换没有引入掉帧，和网格基线（60.05fps / 16.8ms / 0）一致。
 
+## 验收脚本的用法（整理视图跨态共享元素）
+
+```bash
+npm run dev -- --port 5177
+python3 scripts/verify_organize_shared.py --url http://localhost:5177 --out marketing/shots --only main --timeout 120
+python3 scripts/verify_organize_shared.py --url http://localhost:5177 --out marketing/shots --only reduced
+```
+
+要求 Python >= 3.9（只用标准库）。脚本默认 150s 看门狗：卡住会打印 `[timeout] stuck at stage: <阶段>` 并以退出码 2 结束。rAF 采样带 `setTimeout` 兜底，页面被遮挡时会返回 `ended: "timeout"` 并把 fps 记成 0，不会挂死。
