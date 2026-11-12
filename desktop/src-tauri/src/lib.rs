@@ -196,6 +196,19 @@ fn library_stats(db: State<'_, Db>) -> Result<Stats, String> {
     })
 }
 
+fn has_column(conn: &rusqlite::Connection, table: &str, column: &str) -> bool {
+    // table_info 不返回 VIRTUAL 生成列，这里必须用 table_xinfo
+    conn.prepare(&format!("PRAGMA table_xinfo({table})"))
+        .and_then(|mut stmt| {
+            let names: Vec<String> = stmt
+                .query_map([], |row| row.get::<_, String>(1))?
+                .flatten()
+                .collect();
+            Ok(names.iter().any(|n| n == column))
+        })
+        .unwrap_or(false)
+}
+
 fn has_table(conn: &rusqlite::Connection, name: &str) -> bool {
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1",
@@ -276,17 +289,20 @@ fn apply_cursor(
     where_sql: &mut String,
     args: &mut Vec<rusqlite::types::Value>,
     cursor: Option<&str>,
+    key_col: &str,
 ) -> bool {
     let Some(raw) = cursor.map(str::trim).filter(|c| !c.is_empty()) else {
         return false;
     };
     let parts: Vec<&str> = raw.splitn(2, '|').collect();
-    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+    if parts.len() != 2 || parts[1].is_empty() {
         return false;
     }
+    // key_col 是 taken_sort（COALESCE 生成列）：taken_at 为 NULL 的行归一成 ''，
+    // 否则行值比较整体变 NULL，那些行会被静默跳过。
     let n = args.len();
     where_sql.push_str(&format!(
-        " AND (a.taken_at, a.id) < (?{}, ?{})",
+        " AND ({key_col}, a.id) < (?{}, ?{})",
         n + 1,
         n + 2
     ));
@@ -300,7 +316,12 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     let guard = db.open()?;
     let conn = guard.as_ref().unwrap();
     let (mut where_sql, mut args) = filter_where(&filter, has_table(conn, "asset_tags"));
-    let keyset = apply_cursor(&mut where_sql, &mut args, filter.cursor.as_deref());
+    let has_sort = has_column(conn, "assets", "taken_sort");
+    if filter.cursor.as_deref().map(str::trim).is_some_and(|c| !c.is_empty()) && !has_sort {
+        return Err("数据库缺少 taken_sort 列，请先运行一次 lifelog CLI 升级索引".to_string());
+    }
+    let key_col = if has_sort { "a.taken_sort" } else { "a.taken_at" };
+    let keyset = apply_cursor(&mut where_sql, &mut args, filter.cursor.as_deref(), key_col);
     let mut sql = format!(
         "SELECT a.id, a.path, a.day, a.taken_at, a.kind, \
                 c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text \
@@ -312,8 +333,8 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     );
 
 
-    // 游标是 (taken_at, id) 二元组：同一天/同一秒的多条靠 id 分先后，翻页才是严格全序。
-    sql.push_str(" ORDER BY a.taken_at DESC, a.id DESC LIMIT ?");
+    // 游标是 (taken_sort, id) 二元组：同一秒的多条靠 id 分先后，翻页才是严格全序。
+    sql.push_str(&format!(" ORDER BY {key_col} DESC, a.id DESC LIMIT ?"));
     args.push(rusqlite::types::Value::Integer(filter.limit.unwrap_or(500)));
     sql.push_str(" OFFSET ?");
     args.push(rusqlite::types::Value::Integer(if keyset {
@@ -1117,7 +1138,7 @@ mod filter_tests {
             let mut f = filter();
             f.limit = Some(page);
             let (mut where_sql, mut args) = filter_where(&f, true);
-            let keyset = apply_cursor(&mut where_sql, &mut args, cursor.as_deref());
+            let keyset = apply_cursor(&mut where_sql, &mut args, cursor.as_deref(), "a.taken_at");
             assert!(keyset || pages == 0, "第一页之后必须走游标");
             let sql = format!(
                 "SELECT a.id, a.taken_at, a.day FROM assets a {}                  ORDER BY a.taken_at DESC, a.day DESC, a.id DESC LIMIT ?",
@@ -1168,9 +1189,9 @@ mod filter_tests {
             let mut f = filter();
             f.limit = Some(page);
             let (mut where_sql, mut args) = filter_where(&f, true);
-            apply_cursor(&mut where_sql, &mut args, cursor.as_deref());
+            apply_cursor(&mut where_sql, &mut args, cursor.as_deref(), "a.taken_at");
             let sql = format!(
-                "SELECT a.id, a.taken_at FROM assets a {}                  ORDER BY a.taken_at DESC, a.id DESC LIMIT ?",
+                "SELECT a.id, a.taken_at FROM assets a {}                  ORDER BY COALESCE(a.taken_at, '') DESC, a.id DESC LIMIT ?",
                 where_sql
             );
             args.push(rusqlite::types::Value::Integer(page));
@@ -1193,5 +1214,72 @@ mod filter_tests {
         }
 
         assert_eq!(seen.len() as i64, total, "同一秒数据翻页覆盖不全");
+    }
+
+    #[test]
+    fn cursor_paging_never_silently_drops_null_timestamps() {
+        // taken_at / day 为 NULL 的行：行值比较遇到 NULL 会整体变 NULL，
+        // 不做 COALESCE 就会「没报错但少行」。这里要求翻完必须覆盖全部行。
+        let conn = seed();
+        conn.execute_batch(
+            "ALTER TABLE assets ADD COLUMN taken_sort TEXT GENERATED ALWAYS AS (COALESCE(taken_at, '')) VIRTUAL;
+             CREATE INDEX idx_assets_cursor_test ON assets(taken_sort DESC, id DESC);")
+            .unwrap();
+        conn.execute_batch(
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20)
+             INSERT INTO assets SELECT printf('n%03d', i), '/p/n'||i||'.jpg',
+                printf('2024-03-%02d', (i%28)+1),
+                printf('2024-03-%02dT08:00:00', (i%28)+1), 'image' FROM n;
+             INSERT INTO assets (id, path, day, taken_at, kind) VALUES
+                ('z001','/p/z1.jpg', NULL, NULL, 'image'),
+                ('z002','/p/z2.jpg', '2024-04-01', NULL, 'video'),
+                ('z003','/p/z3.jpg', NULL, '2024-04-02T00:00:00', 'image');",
+        )
+        .unwrap();
+
+        // seed() 自带 3 行，这里再加 20 + 3
+        let total: i64 = conn.query_row("SELECT count(*) FROM assets", [], |r| r.get(0)).unwrap();
+        assert_eq!(total, 26);
+
+        let page = 5i64;
+        let mut cursor: Option<String> = None;
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut pages = 0;
+
+        loop {
+            let mut f = filter();
+            f.limit = Some(page);
+            let (mut where_sql, mut args) = filter_where(&f, true);
+            apply_cursor(&mut where_sql, &mut args, cursor.as_deref(), "a.taken_sort");
+            let sql = format!(
+                "SELECT a.id, a.taken_sort FROM assets a {}                  ORDER BY a.taken_sort DESC, a.id DESC LIMIT ?",
+                where_sql
+            );
+            args.push(rusqlite::types::Value::Integer(page));
+            let mut stmt = conn.prepare(&sql).unwrap();
+            let rows: Vec<(String, String)> = stmt
+                .query_map(params_from_iter(args.iter()), |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .flatten()
+                .collect();
+            for (id, _taken) in &rows {
+                assert!(seen.insert(id.clone()), "翻页出现重复行: {id}");
+            }
+            pages += 1;
+            if (rows.len() as i64) < page {
+                break;
+            }
+            let last = rows.last().unwrap();
+            cursor = Some(format!("{}|{}", last.1, last.0));
+            assert!(pages < 100, "含 NULL 的翻页没有收敛");
+        }
+
+        assert_eq!(
+            seen.len() as i64,
+            total,
+            "含 NULL taken_at 的库翻页后少了 {} 行（静默丢行）",
+            total - seen.len() as i64
+        );
+        assert!(seen.contains("z001") && seen.contains("z002") && seen.contains("z003"));
     }
 }

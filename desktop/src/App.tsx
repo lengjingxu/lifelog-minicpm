@@ -775,7 +775,9 @@ const route = useMemo(readRoute, []);
     if (loadingMore || !hasMore || view !== "library") return;
     const last = assets[assets.length - 1];
     // 有 taken_at 就走 keyset 游标（深翻页不随页数变慢）；缺失时退回 offset。
-    const cursor = last?.taken_at ? [last.taken_at, last.id].join("|") : undefined;
+    // taken_at 为空也照样给游标（空串），由服务端 COALESCE 处理；
+    // 退回 offset 会让 NULL 行在深翻页时被重复或跳过。
+    const cursor = last ? [last.taken_at ?? "", last.id].join("|") : undefined;
     setLoadingMore(true);
     queryAssets({
       query: query || undefined,

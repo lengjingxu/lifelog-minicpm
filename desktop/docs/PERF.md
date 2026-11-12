@@ -126,51 +126,49 @@ python3 scripts/verify_organize_shared.py --url http://localhost:5177 --out mark
 
 要求 Python >= 3.9（只用标准库）。脚本默认 150s 看门狗：卡住会打印 `[timeout] stuck at stage: <阶段>` 并以退出码 2 结束。rAF 采样带 `setTimeout` 兜底，页面被遮挡时会返回 `ended: "timeout"` 并把 fps 记成 0，不会挂死。
 
-## 10 万级第二轮：补索引 + keyset 翻页
+## 10 万级第二轮：生成列 + 索引 + keyset 翻页
 
-第一轮的数字是在「已经有 `idx_assets_taken`」的基准库上量的，真实库其实没有这条索引。补测后差距很大，这里更正并补上结论。
+第一轮的数字是在「已经有 taken_at 索引」的基准库上量的，真实库没有；补测后差距很大，这里更正。
 
-### 真实库（32,583 条，原本只有 idx_assets_day）
+### 真实库（32,583 条）—— 这一行是真实库，不是 bench
 
-| 场景 | 无索引 | 有索引 |
+| 场景 | 改前 | 改后 |
 | --- | ---: | ---: |
-| 首屏 500 条 | 74.8ms（最大 304.1ms） | **0.7ms** |
-| OFFSET 20000 | 86.6ms | 27.0ms |
-| keyset 20000 | — | **1.2ms** |
+| 首屏 500 条 | 74.8ms（最大 304.1ms） | **0.3ms** |
+| OFFSET 20000 | 86.6ms | **0.4ms** |
+| keyset 20000 | — | **0.3ms** |
 
-建索引耗时 10.7ms（32.6k 条）。所以即使只有 3 万张，首屏也从 75ms 降到 1ms 以内。
+lifelog init 给 32.6k 的库补列+建索引耗时 **11.2ms**，第二次运行 0.2ms（幂等）。
 
-### 10 万条基准库
+### bench 100k（100,000 条）
 
-| 场景 | 中位 |
-| --- | ---: |
-| 首屏 500 条 | 1.1ms |
-| OFFSET 50000 | 252.3ms |
-| OFFSET 95000 | 265.0ms |
-| keyset 50000 | **0.9ms** |
-| keyset 95000 | **0.8ms** |
+| 场景 | 中位 | 最大 |
+| --- | ---: | ---: |
+| 首屏 500 条 | 0.7ms | 0.7ms |
+| OFFSET 50000 | 39.8ms | 39.8ms |
+| OFFSET 95000 | 40.5ms | 40.5ms |
+| keyset 50000 | **0.7ms** | 0.7ms |
+| keyset 95000 | **0.7ms** | 0.7ms |
+| 搜索 LIKE | 19.4ms | 20.9ms |
+| 搜索 count | 70.5ms | 71.0ms |
+| person / scene 筛选 | 1.5 / 1.7ms | 1.6 / 1.7ms |
+| facets 全量扫描 | 78.0ms | 81.2ms |
 
-### 改动
+### NULL 会静默丢行，所以游标不能直接比较 taken_at
 
-- `lifelog/db.py`：schema 增加 `idx_assets_taken ON assets(taken_at DESC, day DESC, id DESC)`，`init_db()` 会在下次 CLI 运行时为已有库补建
-- `query_assets`：新增可选 `cursor`（`taken_at|day|id`），命中时走 `(a.taken_at, a.day, a.id) < (?, ?, ?)` 并忽略 offset；排序补上 `a.id DESC` 保证严格全序
-- 前端 `loadMore` 传上一页最后一条的游标，`taken_at` 缺失时退回 offset
-- Rust 单测 `cursor_paging_covers_all_rows_without_duplicates`：1,203 行分 13 页翻完，断言无重复、覆盖全部行
+(a.taken_at, a.id) < (?, ?) 是行值比较：任一分量为 NULL 时整体为 NULL，那些行永远不返回；DESC 排序又把 NULL 排在最后，于是翻到末尾会**毫无报错地停住**。
 
-### FTS5 门槛：5k / 50k / 100k 三档
+试过两种修法：
+1. **表达式索引** CREATE INDEX (COALESCE(taken_at,'') DESC, id DESC) + ORDER BY COALESCE(...)：正确，但带 LEFT JOIN 的查询用不上它，首屏退化到 **128ms**（全排序）。放弃。
+2. **虚拟生成列**（采用）：ALTER TABLE assets ADD COLUMN taken_sort TEXT GENERATED ALWAYS AS (COALESCE(taken_at,'')) VIRTUAL，再建索引 idx_assets_cursor ON assets(taken_sort DESC, id DESC)。ORDER BY a.taken_sort DESC, a.id DESC 能直接吃到索引，首屏 0.7ms，NULL 行也能被翻到。
 
-同一套 SQL（最新一条 caption 的子查询 + LIKE 六字段），都有 idx_assets_taken：
+坑：PRAGMA table_info **不返回** VIRTUAL 生成列，必须用 PRAGMA table_xinfo；否则每次 init 都会重复 ALTER 报 duplicate column。
 
-| 条数 | 首屏 500 | 搜索 LIKE | 搜索 count | 低频标签 | facets |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 5,000 | 0.9ms | 3.1ms | 3.0ms | 3.1ms | 3.3ms |
-| 50,000 | 0.8ms | 30.6ms | 28.9ms | 33.9ms | 36.8ms |
-| 100,000 | 0.9ms | 73.1ms | 71.4ms | 82.1ms | 74.9ms |
+测试覆盖：cursor_paging_never_silently_drops_null_timestamps —— 库里 3 行 taken_at/day 为 NULL，翻完必须覆盖全部行。真实库加 3 行 NULL 后 32,586 行分 11 页全部覆盖。
 
-（搜索/标签这两列是冷页缓存下的首轮数字，热缓存约 20ms。）
+### 客户端兜底
 
-结论：LIKE 的劣化是线性的，到 10 万条仍在 100ms 以内；FTS5 还要额外付中文分词与索引维护的代价，不引入。原先「>5000 条就上 FTS5」的预估作废。
-
+如果库还没跑过新版 CLI（缺 taken_sort），带游标的请求会直接返回错误「数据库缺少 taken_sort 列，请先运行一次 lifelog CLI 升级索引」，不会静默少行；不带游标的首屏仍可正常打开。
 ### 口径说明（重要）
 
 上面所有 SQL 数字都是**按 src-tauri/src/lib.rs 里的 SQL 抄出来的副本**、用 Python sqlite3 直接跑的，**不是调用 Rust 的查询构造函数**。
