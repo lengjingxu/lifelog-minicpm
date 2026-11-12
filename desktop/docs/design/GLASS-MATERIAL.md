@@ -160,3 +160,45 @@ background:
 - 分类页标题 20 → **30px**，张数数字 **40px / 300 字重**，眉标字距 0.13 → **0.16em**；中间层（11–13px 正文）不动
 - 设置标题 23 → **28px**，整理完成标题 22 → **30px**，顶栏标题 15 → **16px**
 - 强调色只保留给「选中 / 实时」：`.chip`、`.tag-cloud button`、`.status-pill` 改中性（`rgba(255,255,255,.05)` + `var(--line)` 描边），主按钮和选中态继续用红
+
+## 去分割线：靠留白和底色分层
+
+主人原话：「有很多灰色的划分区域的线条，是不是可以优化去掉，做到整体非常简洁。」
+
+页面现在有 6 条结构性灰线：侧栏右边线、工具栏下边线、侧栏底栏上边线、工具栏竖分隔、详情左栏左边线、检查器操作区上边线。全部去掉，区域靠**底色差 + 留白**区分。
+
+```css
+.sidebar { border-right: 0; background: color-mix(in srgb, var(--bg) 55%, transparent); }
+.toolbar { border-bottom: 0; }
+.sidebar-foot { border-top: 0; padding-top: 16px; }
+.toolbar-divider { display: none; }
+.inspector { border-left: 0; }
+.inspector-actions { border-top: 0; padding-top: 20px; }
+.shortcut-row { border-top: 0; }
+```
+
+控件与面板也不再画整圈描边：
+
+```css
+/* 控件：只靠底色 */
+.search, .sidebar-search, .view-switch, .density-switch, .icon-button,
+.close-btn, .ghost-button, .mark-controls input, .mark-controls select,
+.chip, .status-pill, .group-target, .tag-cloud button, .inspector-actions button { box-shadow: none; }
+
+/* 面板：只留顶部高光 + 外投影 */
+.settings-card, .stat-box, .import-row, .import-placeholder,
+.organize-complete, .login-line, .ocr, .empty-actions > * {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 24px rgba(0,0,0,0.16);
+}
+
+/* 玻璃面：只留顶部高光 + 投影，不要整圈 1px */
+.glass-surface {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 18px 44px rgba(0,0,0,0.32);
+}
+```
+
+**保留的线**（不是分割线，是物件本身）：`kbd` 键帽描边、`:focus-visible` 焦点环、选中态的 2px 强调环、玻璃面的顶部高光。
+
+**验证**（实测，去线后）
+- 页面里带 border 的元素从 3 个降到 2 个（剩下的是 ⌘K 键帽）
+- 设置卡与页面底色的亮度差：亮色 250.6 vs 239.4，暗色 20.5 vs 11.1 —— 不靠线也能看出卡片边界
