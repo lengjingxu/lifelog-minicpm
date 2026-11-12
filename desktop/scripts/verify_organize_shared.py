@@ -15,16 +15,19 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import base64
 import faulthandler
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
 import threading
 import time
 import urllib.request
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from measure_fps import CHROME, Cdp, free_port  # noqa: E402
@@ -32,10 +35,12 @@ from measure_fps import CHROME, Cdp, free_port  # noqa: E402
 LOCK_PATH = "/tmp/sg-verify.lock"
 STAGE = {"name": "init", "since": time.time()}
 LOG = {"fh": None}
+RUN_ID = uuid.uuid4().hex[:8]
+STARTED = time.time()
 
 
 def log(message: str) -> None:
-    line = "[%d] [%s] %s" % (os.getpid(), time.strftime("%H:%M:%S"), message)
+    line = "[%d] [%s] [%s] %s" % (os.getpid(), time.strftime("%H:%M:%S"), RUN_ID, message)
     print(line, flush=True)
     if LOG["fh"]:
         LOG["fh"].write(line + chr(10))
@@ -62,6 +67,34 @@ def start_watchdog(seconds: float) -> None:
 
     thread = threading.Thread(target=loop, name="watchdog", daemon=True)
     thread.start()
+    log("[watchdog] armed deadline=+%.0fs (thread=%s)" % (seconds, thread.is_alive()))
+    return thread
+
+
+def start_heartbeat(interval: float = 5.0) -> None:
+    """每 5s 打一行，用来判断进程是活着还是被外部杀掉了。"""
+
+    def loop() -> None:
+        while True:
+            time.sleep(interval)
+            log("[heartbeat] stage=%s elapsed=%.0fs" % (STAGE["name"], time.time() - STARTED))
+
+    threading.Thread(target=loop, name="heartbeat", daemon=True).start()
+    log("[heartbeat] armed interval=%.0fs" % interval)
+
+
+def install_signal_handlers() -> None:
+    """被 supervisor kill 时留下证据：SIGKILL 抓不到，但 SIGTERM/SIGINT/SIGHUP 能。"""
+
+    def handler(signum, _frame):
+        log("[signal] received %s at stage=%s，即将退出" % (signal.Signals(signum).name, STAGE["name"]))
+        os._exit(2)
+
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        try:
+            signal.signal(sig, handler)
+        except (ValueError, OSError):
+            pass
 
 
 def acquire_lock() -> None:
@@ -363,6 +396,9 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     log("[start] only=%s timeout=%.0fs out=%s" % (args.only, args.timeout, args.out))
     start_watchdog(args.timeout)
+    start_heartbeat()
+    install_signal_handlers()
+    atexit.register(lambda: log("[exit] normal return, elapsed=%.0fs" % (time.time() - STARTED)))
 
     try:
         if args.only == "reduced":
