@@ -80,6 +80,40 @@ CREATE TABLE IF NOT EXISTS runs (
     stats TEXT
 );
 
+-- 去重（docs/AI-ROADMAP.md §1）。asset_hash 在文档列之外多了 status / sharp：
+-- status 记录解码失败（避免每次重建都重试坏文件），sharp 是拉普拉斯方差，
+-- 用来在连拍组里挑保留哪张，不必为了分组再解一遍图。
+CREATE TABLE IF NOT EXISTS asset_hash (
+    asset_id TEXT PRIMARY KEY,
+    sha256 TEXT,
+    dhash TEXT,
+    dhash2 TEXT,
+    w INTEGER,
+    h INTEGER,
+    computed_at TEXT,
+    status TEXT DEFAULT 'ok',
+    sharp REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_hash_dhash ON asset_hash(dhash);
+CREATE INDEX IF NOT EXISTS idx_hash_sha ON asset_hash(sha256);
+
+CREATE TABLE IF NOT EXISTS dup_groups (
+    id INTEGER PRIMARY KEY,
+    keeper_id TEXT,
+    reason TEXT,
+    created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS dup_members (
+    group_id INTEGER,
+    asset_id TEXT,
+    distance INTEGER,
+    PRIMARY KEY (group_id, asset_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dup_members_asset ON dup_members(asset_id);
+
 CREATE INDEX IF NOT EXISTS idx_assets_day ON assets(day);
 -- 列表按 (taken_at, day, id) 倒序翻页：没有这条索引，10 万级首屏要扫全表（实测 74.8ms -> 0.7ms）。
 DROP INDEX IF EXISTS idx_assets_taken;

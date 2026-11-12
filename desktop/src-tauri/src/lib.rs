@@ -279,6 +279,65 @@ struct Stats {
     db_size: u64,
 }
 
+#[derive(Serialize)]
+struct DupMember {
+    asset_id: String,
+    distance: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct DupGroup {
+    id: i64,
+    keeper_id: String,
+    reason: String,
+    count: i64,
+    members: Vec<DupMember>,
+}
+
+/// 只读：把去重分组整组读出来。老库没有去重表时返回空数组，不报错。
+fn read_dup_groups(conn: &Connection) -> Result<Vec<DupGroup>, String> {
+    if !has_table(conn, "dup_groups") || !has_table(conn, "dup_members") {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn
+        .prepare(
+            "SELECT g.id, g.keeper_id, g.reason, m.asset_id, m.distance \
+             FROM dup_groups g JOIN dup_members m ON m.group_id = g.id \
+             ORDER BY g.id, m.distance IS NULL, m.distance, m.asset_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut out: Vec<DupGroup> = Vec::new();
+    for row in rows {
+        let (id, keeper_id, reason, asset_id, distance) = row.map_err(|e| e.to_string())?;
+        if out.last().map(|group| group.id) != Some(id) {
+            out.push(DupGroup { id, keeper_id, reason, count: 0, members: Vec::new() });
+        }
+        let group = out.last_mut().unwrap();
+        group.members.push(DupMember { asset_id, distance });
+        group.count += 1;
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+fn dup_groups(db: State<'_, Db>) -> Result<Vec<DupGroup>, String> {
+    let guard = db.open()?;
+    let conn = guard.as_ref().unwrap();
+    read_dup_groups(conn)
+}
+
 #[derive(Serialize, Default)]
 struct Facets {
     tags: Vec<(String, i64)>,
@@ -1095,6 +1154,7 @@ pub fn run() {
             album_create,
             album_add,
             album_list,
+            dup_groups,
             live::live_health,
             live::live_start,
             live::live_state,
@@ -1491,3 +1551,52 @@ mod filter_tests {
         assert!(seen.contains("z001") && seen.contains("z002") && seen.contains("z003"));
     }
 }
+
+#[cfg(test)]
+mod dup_tests {
+    use super::*;
+
+    fn seed() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE dup_groups (id INTEGER PRIMARY KEY, keeper_id TEXT, reason TEXT, created_at TEXT);
+             CREATE TABLE dup_members (group_id INTEGER, asset_id TEXT, distance INTEGER,
+                                       PRIMARY KEY (group_id, asset_id));
+             INSERT INTO dup_groups VALUES (1,'a2','l0+l1','2026-01-01');
+             INSERT INTO dup_groups VALUES (2,'b1','burst','2026-01-01');
+             INSERT INTO dup_members VALUES (1,'a2',0);
+             INSERT INTO dup_members VALUES (1,'a1',3);
+             INSERT INTO dup_members VALUES (1,'a3',NULL);
+             INSERT INTO dup_members VALUES (2,'b1',0);
+             INSERT INTO dup_members VALUES (2,'b2',1);",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn missing_tables_return_empty() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE assets (id TEXT)").unwrap();
+        assert!(read_dup_groups(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn groups_are_read_back_in_full() {
+        let conn = seed();
+        let groups = read_dup_groups(&conn).unwrap();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].id, 1);
+        assert_eq!(groups[0].keeper_id, "a2");
+        assert_eq!(groups[0].reason, "l0+l1");
+        assert_eq!(groups[0].count, 3);
+        assert_eq!(groups[0].members.len(), 3);
+        assert_eq!(groups[0].members[0].asset_id, "a2");
+        assert_eq!(groups[0].members[1].distance, Some(3));
+        assert_eq!(groups[0].members[2].distance, None);
+        assert!(groups
+            .iter()
+            .all(|group| group.members.iter().any(|member| member.asset_id == group.keeper_id)));
+    }
+}
+

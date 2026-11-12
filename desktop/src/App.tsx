@@ -11,6 +11,7 @@ import {
   countAssets,
   timelineMonths,
   categoryGroups,
+  dupGroups,
   type MonthSummary,
   type GroupSummary,
   type Asset,
@@ -53,6 +54,8 @@ import {
 } from "./utils";
 
 type Density = "comfort" | "compact";
+
+type DupInfo = { groupId: number; keeperId: string; count: number };
 
 const EXPORT_LIMIT = 100000;
 const PAGE_SIZE = 200;
@@ -107,6 +110,8 @@ const route = useMemo(readRoute, []);
   const [facets, setFacets] = useState<Facets | null>(null);
   const [healthInfo, setHealthInfo] = useState<Health | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
+  // 去重索引：asset_id -> 所在组。只影响网格怎么显示，不改分页/游标。
+  const [dupIndex, setDupIndex] = useState<Map<string, DupInfo>>(new Map());
   // 只给整理视图用，上限 500，不再把整库读进内存
   const [allAssets, setAllAssets] = useState<Asset[] | null>(null);
   const [months, setMonths] = useState<MonthSummary[] | null>(null);
@@ -500,6 +505,29 @@ const route = useMemo(readRoute, []);
   }, []);
 
   useEffect(() => {
+    let alive = true;
+    dupGroups()
+      .then((groups) => {
+        if (!alive) return;
+        const index = new Map<string, DupInfo>();
+        for (const group of groups) {
+          for (const member of group.members) {
+            index.set(member.asset_id, {
+              groupId: group.id,
+              keeperId: group.keeper_id,
+              count: group.count,
+            });
+          }
+        }
+        setDupIndex(index);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [dataVersion]);
+
+  useEffect(() => {
     if (view !== "library") return;
     let cancelled = false;
     setLoading(true);
@@ -606,6 +634,27 @@ const route = useMemo(readRoute, []);
     );
   }, [assets, tags, scene, person, place, query]);
 
+  // 网格折叠重复项：保留 keeper；如果 keeper 被当前筛选排除，就让组里第一张可见的顶上，
+  // 否则筛选结果会凭空少一截。折叠只发生在已加载的这一页，不动分页/游标。
+  const displayAssets = useMemo(() => {
+    if (dupIndex.size === 0) return filteredAssets;
+    const visible = new Set(filteredAssets.map((asset) => asset.id));
+    return filteredAssets.filter((asset) => {
+      const dup = dupIndex.get(asset.id);
+      if (!dup || dup.keeperId === asset.id) return true;
+      return !visible.has(dup.keeperId);
+    });
+  }, [filteredAssets, dupIndex]);
+
+  const dupCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const asset of displayAssets) {
+      const dup = dupIndex.get(asset.id);
+      if (dup) counts.set(asset.id, dup.count);
+    }
+    return counts;
+  }, [displayAssets, dupIndex]);
+
   useEffect(() => {
     if (view !== "timeline" || months) return;
     let cancelled = false;
@@ -628,9 +677,9 @@ const route = useMemo(readRoute, []);
   const groups = groupsByKind[catKind] ?? null;
 
   const currentList = useMemo(() => {
-    if (view === "library") return filteredAssets;
+    if (view === "library") return displayAssets;
     return [];
-  }, [view, filteredAssets]);
+  }, [view, displayAssets]);
 
   const detailAsset = useMemo(() => {
     if (!detailId) return null;
@@ -1103,7 +1152,8 @@ const route = useMemo(readRoute, []);
         {loading && <div className="content-loading-bar" />}
         <VirtualGrid
           key={`library-${query}-${tagKey}-${scene}-${person}-${place}`}
-          assets={filteredAssets}
+          assets={displayAssets}
+          dupCounts={dupCounts}
           columns={columns}
           selection={new Set(selection)}
           multi={selection.length > 1}
@@ -1213,6 +1263,7 @@ const route = useMemo(readRoute, []);
       {detailAsset && (
         <Detail
           asset={detailAsset}
+          dup={dupIndex.get(detailAsset.id)}
           index={Math.max(0, detailIndex)}
           total={view === "library" ? (monthTotal ?? Math.max(detailTotal, stats?.assets ?? 0)) : detailTotal}
           origin={detailOrigin}

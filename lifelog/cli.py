@@ -72,6 +72,39 @@ def cmd_stats(args) -> int:
     return 0
 
 
+def cmd_dedup(args) -> int:
+    from . import dedup
+
+    if not (args.build or args.stats or args.export):
+        args.stats = True
+
+    with db.session() as con:
+        if args.build:
+            def progress(stats):
+                print(json.dumps(stats, ensure_ascii=False), file=sys.stderr, flush=True)
+
+            result = dedup.build(con, limit=args.limit, progress=progress)
+            print(json.dumps(result, ensure_ascii=False))
+        if args.stats:
+            print(json.dumps(dedup.stats(con), ensure_ascii=False))
+        if args.export:
+            payload = dedup.export(con)
+            destination = Path(args.export).expanduser()
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+            print(
+                json.dumps(
+                    {
+                        "export": str(destination),
+                        "groups": len(payload["groups"]),
+                        "members": sum(len(group["members"]) for group in payload["groups"]),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+    return 0
+
+
 def cmd_sync(args) -> int:
     from . import sync_xiaomi
     dest = Path(args.dest).expanduser() if args.dest else config.DATA_DIR / "photos"
@@ -335,6 +368,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("stats", help="查看统计底稿")
     p.set_defaults(func=cmd_stats)
+
+    p = sub.add_parser("dedup", help="库内去重：L0 字节 + L1 dHash + 连拍")
+    p.add_argument("--build", action="store_true", help="增量算哈希并重建分组（可中断续跑）")
+    p.add_argument("--stats", action="store_true", help="查看去重统计（默认动作）")
+    p.add_argument("--export", metavar="OUT.json", help="全量导出去重分组")
+    p.add_argument("--limit", type=int, help="本次最多处理 N 张（调试用）")
+    p.set_defaults(func=cmd_dedup)
 
     p = sub.add_parser("sync", help="从小米云盘同步相册到本地")
     p.add_argument("--dry-run", action="store_true", help="只出计划：列新增/已存在，不下载、不写 state")
