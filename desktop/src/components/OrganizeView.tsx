@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { assetSrc, type Asset } from "../api";
+import { EASE, reducedMotion } from "../motion";
 import type { LiveController } from "../live";
 
 type Phase = "idle" | "running" | "done";
@@ -26,6 +27,8 @@ type Card = {
   status: CardStatus;
   group: string | null;
   groupSeq: number;
+  /** 落位后的最终 transform（相对堆里原始位置的位移+缩放）。 */
+  landedTransform?: string;
   failed: boolean;
   position: Position;
 };
@@ -44,7 +47,7 @@ type Flight = {
   launched: boolean;
 };
 
-type Group = { name: string; count: number; cards: Card[]; order: number };
+type Group = { name: string; count: number; cards: Card[] };
 
 type Props = {
   live: LiveController;
@@ -110,6 +113,9 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
   const groupSeqRef = useRef(0);
   const cardsRef = useRef<Card[]>([]);
   const flightsRef = useRef<Flight[]>([]);
+  const flyingRef = useRef(0);
+  const groupOrderRef = useRef<Record<string, number>>({});
+  const groupOrderSizeRef = useRef(0);
   const startingFlightsRef = useRef<Set<string>>(new Set());
   const pausedRef = useRef(false);
   const beginFlightRef = useRef<(card: Card) => void>(() => undefined);
@@ -151,6 +157,10 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
     processedRef.current.clear();
     eventIndexRef.current = 0;
     groupSeqRef.current = 0;
+    flyingRef.current = 0;
+    flightsRef.current = [];
+    groupOrderRef.current = {};
+    groupOrderSizeRef.current = 0;
     startingFlightsRef.current.clear();
     for (const timer of timersRef.current) window.clearTimeout(timer);
     timersRef.current.clear();
@@ -257,54 +267,112 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
     const canvas = canvasRef.current;
     if (!canvas) return;
     const canvasRect = canvas.getBoundingClientRect();
-    const pileEl = canvas.querySelector<HTMLElement>(`[data-pile-card="${card.id}"]`);
-    const pileRect = pileEl?.getBoundingClientRect();
-    const width = pileRect?.width ?? 104;
-    const height = pileRect?.height ?? 132;
-    const fromX = pileRect ? pileRect.left + pileRect.width / 2 - canvasRect.left : canvasRect.width * 0.28;
-    const fromY = pileRect ? pileRect.top + pileRect.height / 2 - canvasRect.top : canvasRect.height * 0.55;
+    // 关键：飞的就是堆里那张卡本身（同一节点），不另建克隆。
+    const pileEl = canvas.querySelector<HTMLElement>(`[data-card-id="${card.id}"]`);
+    if (!pileEl) return;
+    const pileRect = pileEl.getBoundingClientRect();
+    const width = pileRect.width || 104;
+    const fromX = pileRect.left + pileRect.width / 2 - canvasRect.left;
+    const fromY = pileRect.top + pileRect.height / 2 - canvasRect.top;
+    const baseTransform = `translate(-50%, -50%) rotate(${card.position.rotate}deg)`;
 
     startingFlightsRef.current.add(card.id);
-    const flight: Flight = {
-      cardId: card.id,
-      asset: card.asset,
-      group: card.group,
-      fromX,
-      fromY,
-      toX: fromX,
-      toY: fromY,
-      width,
-      height,
-      rotate: card.position.rotate,
-      launched: false,
-    };
-    flightsRef.current = [...flightsRef.current, flight];
-    setFlights(flightsRef.current);
-    setCards((previous) => previous.map((item) => (item.id === card.id ? { ...item, status: "flying" } : item)));
+    setCards((previous) =>
+      previous.map((item) => (item.id === card.id ? { ...item, status: "flying" } : item)),
+    );
 
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const target = canvas.querySelector<HTMLElement>(`[data-target-card="${card.id}"]`);
-        const targetRect = target?.getBoundingClientRect();
-        const toX = targetRect ? targetRect.left + targetRect.width / 2 - canvasRect.left : canvasRect.width * 0.76;
-        const toY = targetRect ? targetRect.top + targetRect.height / 2 - canvasRect.top : canvasRect.height * 0.42;
-        flightsRef.current = flightsRef.current.map((item) =>
-          item.cardId === card.id ? { ...item, toX, toY, launched: true } : item,
-        );
-        setFlights(flightsRef.current);
-      });
-    });
+    // 落点：分组面板里那张卡的槽位
+    const target = canvas.querySelector<HTMLElement>(`[data-target-card="${card.id}"]`);
+    const targetRect = target?.getBoundingClientRect();
+    const toX = targetRect ? targetRect.left + targetRect.width / 2 - canvasRect.left : fromX;
+    const toY = targetRect ? targetRect.top + targetRect.height / 2 - canvasRect.top : fromY;
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    const scale = targetRect && width ? targetRect.width / width : 0.82;
+    const finalTransform = `translate(-50%, -50%) translate(${dx}px, ${dy}px) rotate(0deg) scale(${scale})`;
+    flyingRef.current += 1;
 
-    const timer = window.setTimeout(() => {
-      timersRef.current.delete(timer);
-      startingFlightsRef.current.delete(card.id);
+    let settled = false;
+    const release = () => {
       flightsRef.current = flightsRef.current.filter((item) => item.cardId !== card.id);
       setFlights(flightsRef.current);
+      flyingRef.current = Math.max(0, flyingRef.current - 1);
+    };
+
+    const finish = () => {
+      release();
+      const timer = window.setTimeout(() => {
+        timersRef.current.delete(timer);
+        startingFlightsRef.current.delete(card.id);
+        setCards((previous) =>
+          previous.map((item) =>
+            item.id === card.id ? { ...item, status: "placed", landedTransform: item.landedTransform } : item,
+          ),
+        );
+      }, 40);
+      timersRef.current.add(timer);
+    };
+
+    const onDone = () => {
+      if (settled) return;
+      settled = true;
       setCards((previous) =>
-        previous.map((item) => (item.id === card.id ? { ...item, status: "placed" } : item)),
+        previous.map((item) =>
+          item.id === card.id ? { ...item, landedTransform: finalTransform } : item,
+        ),
       );
-    }, FLIGHT_MS);
-    timersRef.current.add(timer);
+      finish();
+    };
+
+    const reduced = reducedMotion();
+    if (reduced) {
+      // 减少动态效果：只淡出 → 不可见时换位 → 原地淡入，全程没有位移/缩放动画。
+      const fadeOut = pileEl.animate(
+        [{ opacity: 1 }, { opacity: 0 }],
+        { duration: 140, easing: "linear", fill: "forwards" },
+      );
+      fadeOut.addEventListener(
+        "finish",
+        () => {
+          pileEl.style.transform = finalTransform;
+          const fadeIn = pileEl.animate(
+            [{ opacity: 0 }, { opacity: 1 }],
+            { duration: 160, easing: "linear", fill: "forwards" },
+          );
+          fadeIn.addEventListener("finish", () => onDone(), { once: true });
+        },
+        { once: true },
+      );
+      return;
+    }
+
+    flightsRef.current = [
+      ...flightsRef.current,
+      {
+        cardId: card.id,
+        asset: card.asset,
+        group: card.group,
+        fromX,
+        fromY,
+        toX,
+        toY,
+        width,
+        height: pileRect.height,
+        rotate: card.position.rotate,
+        launched: true,
+      },
+    ];
+    setFlights(flightsRef.current);
+
+    const animation = pileEl.animate(
+      [
+        { transform: baseTransform, opacity: 1 },
+        { transform: finalTransform, opacity: 1 },
+      ],
+      { duration: FLIGHT_MS, easing: EASE.out, fill: "forwards" },
+    );
+    animation.addEventListener("finish", onDone, { once: true });
+    animation.addEventListener("cancel", onDone, { once: true });
   }, []);
 
   beginFlightRef.current = beginFlight;
@@ -313,7 +381,7 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
     if (phase !== "running") return;
     const interval = window.setInterval(() => {
       if (pausedRef.current) return;
-      const room = MAX_FLIGHTS - flightsRef.current.length;
+      const room = MAX_FLIGHTS - flyingRef.current;
       if (room <= 0) return;
       const queued = cardsRef.current
         .filter((card) => card.status === "queued" && !startingFlightsRef.current.has(card.id))
@@ -331,18 +399,21 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
     const map = new Map<string, Group>();
     for (const card of cards) {
       if (!card.group) continue;
-      const group = map.get(card.group) ?? {
-        name: card.group,
-        count: 0,
-        cards: [],
-        order: card.groupSeq,
-      };
+      const group = map.get(card.group) ?? { name: card.group, count: 0, cards: [] };
       group.count += 1;
       group.cards.push(card);
-      group.order = Math.min(group.order, card.groupSeq);
       map.set(card.group, group);
     }
-    return [...map.values()].sort((a, b) => b.count - a.count || a.order - b.order);
+    // 面板位置在分组第一次出现时固定，之后只追加，绝不重排。
+    const order = groupOrderRef.current;
+    for (const name of map.keys()) {
+      if (!(name in order)) order[name] = groupOrderSizeRef.current++;
+    }
+    // 槽位按「入组先后」排列：新卡只会追加到末尾，已有的落位槽不移动。
+    for (const group of map.values()) {
+      group.cards.sort((a, b) => a.groupSeq - b.groupSeq);
+    }
+    return [...map.values()].sort((a, b) => order[a.name] - order[b.name]);
   }, [cards]);
 
   const terminal = live.events.some(
@@ -462,11 +533,17 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
           </div>
           <div className="hud-tags">
             {paused ? (
-              <span>会话已 stop · 继续会重开剩余 {Math.max(0, safeTotal - safeDone)} 张</span>
+              <span className="hud-tags-note">
+                会话已 stop · 继续会重开剩余 {Math.max(0, safeTotal - safeDone)} 张
+              </span>
             ) : currentTags.length ? (
-              currentTags.map((tag) => <span key={tag}>{tag}</span>)
+              [0, 1, 2].map((slot) => (
+                <span className={clsx("hud-chip", !currentTags[slot] && "hud-chip-empty")} key={slot}>
+                  {currentTags[slot] ?? ""}
+                </span>
+              ))
             ) : (
-              <span>读取画面…</span>
+              <span className="hud-tags-note">读取画面…</span>
             )}
           </div>
           <button
@@ -547,16 +624,28 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
         <div className={clsx("organize-stage", phase === "idle" && "idle")} ref={canvasRef}>
           <div className={clsx("pile-area", phase === "running" && "running")}>
             {cards.map((card) =>
-              card.status === "pile" || card.status === "queued" ? (
+              card.status === "pile" ||
+              card.status === "queued" ||
+              card.status === "flying" ||
+              card.status === "placed" ? (
                 <div
                   key={card.id}
                   data-pile-card={card.id}
-                  className={clsx("pile-card", card.status === "queued" && "queued")}
+                  data-card-id={card.id}
+                  className={clsx(
+                    "pile-card",
+                    card.status === "queued" && "queued",
+                    card.status === "flying" && "flying",
+                    card.status === "placed" && "placed",
+                  )}
                   style={{
                     left: `${card.position.left}%`,
                     top: `${card.position.top}%`,
-                    zIndex: card.position.z,
-                    transform: `translate(-50%, -50%) rotate(${card.position.rotate}deg)`,
+                    zIndex: card.status === "flying" ? 999 : card.position.z,
+                    transform:
+                      card.status === "placed" && card.landedTransform
+                        ? card.landedTransform
+                        : `translate(-50%, -50%) rotate(${card.position.rotate}deg)`,
                   }}
                 >
                   {card.asset ? (
@@ -590,7 +679,7 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
                       <strong>{group.count}</strong>
                     </header>
                     <div className="group-target-grid">
-                      {group.cards.map((card) => (
+                      {group.cards.map((card, slot) => (
                         <div
                           className={clsx(
                             "group-target",
@@ -600,9 +689,13 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
                           )}
                           key={card.id}
                           data-target-card={card.id}
+                          style={{
+                            gridRow: (Math.floor(slot / 4) % 2) + 1,
+                            gridColumn: (slot % 4) + 1,
+                          }}
                         >
-                          {card.status === "placed" && card.asset ? (
-                            <img src={assetSrc(card.asset.thumb)} alt="" loading="lazy" />
+                          {card.status === "placed" ? (
+                            <span className="group-target-covered" aria-hidden="true" />
                           ) : null}
                         </div>
                       ))}
@@ -626,31 +719,13 @@ export function OrganizeView({ live, assets, onViewAlbum, onOpenRecognition, onT
               const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
               const distance = Math.hypot(dx, dy);
               return (
-                <div key={`${flight.cardId}-trail`}>
-                  <div
-                    className="flight-trail"
-                    style={{
-                      left: flight.fromX,
-                      top: flight.fromY,
-                      width: Math.max(36, distance),
-                      transform: `translateY(-50%) rotate(${angle}deg)`,
-                    }}
-                  />
-                  <div
-                    className={clsx("flight-card", flight.launched && "launched")}
-                    style={{
-                      left: flight.fromX,
-                      top: flight.fromY,
-                      width: flight.width,
-                      height: flight.height,
-                      transform: flight.launched
-                        ? `translate(-50%, -50%) translate(${dx}px, ${dy}px) rotate(0deg) scale(0.82)`
-                        : `translate(-50%, -50%) rotate(${flight.rotate}deg)`,
-                    }}
-                  >
-                    {flight.asset ? <img src={assetSrc(flight.asset.thumb)} alt="" draggable={false} /> : null}
-                  </div>
-                </div>
+                <div
+                  key={`${flight.cardId}-trail`}
+                  className="flight-trail"
+                  style={{
+                    transform: `translate(${flight.fromX}px, ${flight.fromY}px) translateY(-50%) rotate(${angle}deg) scaleX(${Math.max(0.36, distance / 100)})`,
+                  }}
+                />
               );
             })}
           </div>
