@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Glass Folders</title>
+<style>
+  :root{
+    --bg:#ececee;
+    --dot:rgba(17,17,20,.10);
+    --ink:#141416;
+    --ink-soft:rgba(20,20,22,.55);
+    --u:1;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background-color:var(--bg);
+    background-image:radial-gradient(var(--dot) 1.1px, transparent 1.1px);
+    background-size:22px 22px;
+    background-position:-6px -6px;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC",Inter,sans-serif;
+    color:var(--ink);
+    display:grid;
+    place-items:center;
+    overflow:hidden;
+  }
+
+  .stage{
+    position:relative;
+    width:min(1180px, 96vw);
+    aspect-ratio:1/1;
+    max-height:96vh;
+  }
+
+  /* ---------- folder base ---------- */
+  .folder{
+    position:absolute;
+    width:calc(330px * var(--u));
+    height:calc(232px * var(--u));
+    left:var(--x);
+    top:var(--y);
+    transform:rotate(var(--r,0deg));
+    transition:transform .45s cubic-bezier(.22,1,.36,1), filter .45s ease;
+    filter:drop-shadow(0 26px 34px rgba(16,16,20,.16)) drop-shadow(0 4px 10px rgba(16,16,20,.08));
+  }
+  .folder:hover{ transform:rotate(var(--r,0deg)) translateY(calc(-6px * var(--u))) scale(1.015); }
+
+  .tab{
+    position:absolute; left:0; top:0;
+    width:27%; height:calc(22px * var(--u));
+    border-radius:calc(14px * var(--u)) calc(14px * var(--u)) 0 0;
+    background:var(--tab-bg);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.55), inset 0 -1px 0 rgba(16,16,20,.06);
+  }
+  .body{
+    position:absolute; inset:calc(20px * var(--u)) 0 0 0;
+    border-radius:calc(18px * var(--u));
+    background:var(--body-bg);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.5);
+  }
+
+  /* sheets that stick out of the folder */
+  .sheets{ position:absolute; inset:0; }
+  .sheets i{
+    position:absolute; display:block;
+    border-radius:calc(8px * var(--u));
+    box-shadow:0 6px 14px rgba(16,16,20,.12);
+  }
+
+  /* glass front panel */
+  .body::after{
+    content:""; position:absolute; left:0; right:0; top:0; height:calc(10px * var(--u));
+    border-radius:calc(18px * var(--u)) calc(18px * var(--u)) 0 0;
+    box-shadow:inset 0 6px 10px -6px rgba(16,16,20,.35);
+    pointer-events:none;
+  }
+  .front{
+    position:absolute; left:0; right:0; bottom:0;
+    height:72%;
+    border-radius:calc(20px * var(--u));
+    background:var(--front-bg);
+    -webkit-backdrop-filter:blur(18px) saturate(1.35);
+    backdrop-filter:blur(18px) saturate(1.35);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.55),
+      inset 0 0 0 1px var(--front-line),
+      0 10px 24px rgba(16,16,20,.10);
+    overflow:hidden;
+  }
+  .front::after{ /* soft top sheen */
+    content:""; position:absolute; inset:0 0 auto 0; height:46%;
+    background:linear-gradient(180deg, rgba(255,255,255,.42), rgba(255,255,255,0));
+    pointer-events:none;
+  }
+
+  .name{
+    position:absolute; font-weight:600; letter-spacing:-.01em;
+    font-size:calc(19px * var(--u));
+    color:var(--name-ink);
+  }
+  .date{
+    position:absolute; font-size:calc(11.5px * var(--u));
+    color:var(--date-ink); letter-spacing:.01em;
+  }
+
+  .fab{
+    position:absolute; right:calc(14px * var(--u)); bottom:calc(14px * var(--u));
+    width:calc(38px * var(--u)); height:calc(38px * var(--u));
+    border-radius:calc(12px * var(--u));
+    display:grid; place-items:center;
+    background:var(--fab-bg); color:var(--fab-ink);
+    box-shadow:0 6px 16px rgba(16,16,20,.22), inset 0 1px 0 rgba(255,255,255,.18);
+    font-size:calc(20px * var(--u)); line-height:1; font-weight:400;
+    user-select:none; cursor:pointer;
+    transition:transform .25s cubic-bezier(.22,1,.36,1), background .25s ease;
+  }
+  .fab:hover{ transform:translateY(-1px) scale(1.04); }
+  .fab:active{ transform:scale(.96); }
+  .fab svg{ width:calc(16px * var(--u)); height:calc(16px * var(--u)); }
+
+  /* ---------- 1. light folder ---------- */
+  .f-light{
+    --x:4%; --y:6%; --r:-3.5deg;
+    --tab-bg:#f7f7f8;
+    --body-bg:linear-gradient(180deg,#fbfbfc,#efeff1);
+    --front-bg:rgba(255,255,255,.62);
+    --front-line:rgba(255,255,255,.85);
+    --name-ink:#17171a;
+    --date-ink:rgba(23,23,26,.5);
+    --fab-bg:#111114; --fab-ink:#fff;
+  }
+  .f-light .paper{
+    position:absolute; left:50%; top:calc(26px * var(--u));
+    width:calc(150px * var(--u)); height:calc(140px * var(--u));
+    transform:translateX(-50%) rotate(-1.2deg);
+    background:#fff; border-radius:calc(8px * var(--u));
+    box-shadow:0 8px 18px rgba(16,16,20,.10);
+  }
+  .f-light .name{ left:calc(18px * var(--u)); bottom:calc(16px * var(--u)); }
+
+  /* ---------- 2. archives folder ---------- */
+  .f-arch{
+    --x:52%; --y:34%; --r:2.5deg;
+    --tab-bg:#e9e9ec;
+    --body-bg:linear-gradient(180deg,#f2f2f4,#e3e3e7);
+    --front-bg:rgba(246,246,248,.80);
+    --front-line:rgba(255,255,255,.8);
+    --name-ink:#1b1b1f;
+    --date-ink:rgba(27,27,31,.45);
+    --fab-bg:rgba(255,255,255,.72); --fab-ink:#1b1b1f;
+  }
+  .f-arch .name{ left:calc(18px * var(--u)); top:calc(14px * var(--u)); }
+  .f-arch .sheets i{ width:calc(40px * var(--u)); height:calc(28px * var(--u)); left:calc(52px * var(--u)); border-radius:calc(2px * var(--u)); }
+  .f-arch .sheets i:nth-child(1){ top:calc(42px * var(--u)); background:linear-gradient(160deg,#ff8a3d,#ff3d6e); transform:rotate(-7deg); }
+  .f-arch .sheets i:nth-child(2){ top:calc(38px * var(--u)); left:calc(100px * var(--u)); background:linear-gradient(160deg,#3dd6ff,#3d6bff); transform:rotate(3deg); }
+  .f-arch .sheets i:nth-child(3){ top:calc(44px * var(--u)); left:calc(150px * var(--u)); background:linear-gradient(160deg,#ffd23d,#ff7a3d); transform:rotate(6deg); }
+  .f-arch .paper{
+    position:absolute; left:50%; top:calc(18px * var(--u));
+    width:calc(92px * var(--u)); height:calc(150px * var(--u));
+    transform:translateX(-50%);
+    background:#fff; border-radius:calc(6px * var(--u)) calc(6px * var(--u)) 0 0;
+    box-shadow:0 10px 22px rgba(16,16,20,.14);
+  }
+
+  /* ---------- 3. dark folder ---------- */
+  .f-dark{
+    --x:10%; --y:56%; --r:-1.5deg;
+    --tab-bg:#1c1c20;
+    --body-bg:
+      radial-gradient(110% 95% at 16% 30%, #19f5d8 0%, rgba(25,245,216,0) 52%),
+      radial-gradient(95% 85% at 82% 26%, #ff2a4d 0%, rgba(255,42,77,0) 58%),
+      radial-gradient(120% 100% at 60% 92%, #0b0b0d 0%, rgba(11,11,13,0) 60%),
+      linear-gradient(150deg,#071a1a,#120207 62%,#050506);
+    --front-bg:rgba(14,14,17,.26);
+    --front-line:rgba(255,255,255,.14);
+    --name-ink:#f4f4f6;
+    --date-ink:rgba(244,244,246,.5);
+    --fab-bg:rgba(255,255,255,.14); --fab-ink:#fff;
+  }
+  .f-dark .name{ right:calc(18px * var(--u)); top:calc(16px * var(--u)); text-align:right; }
+  .f-dark .date{ right:calc(18px * var(--u)); top:calc(42px * var(--u)); text-align:right; }
+  .f-dark .front{ -webkit-backdrop-filter:blur(10px) saturate(1.6); backdrop-filter:blur(10px) saturate(1.6); }
+  .f-dark .front::after{ background:linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,0)); }
+  @media (max-width:760px){
+    .stage{ width:96vw; }
+    .folder{ width:calc(250px * var(--u)); height:calc(180px * var(--u)); }
+    .f-arch{ --x:40%; --y:40%; }
+    .f-dark{ --x:2%; --y:62%; }
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- 1. light -->
+  <div class="folder f-light">
+    <div class="tab"></div>
+    <div class="body"></div>
+    <div class="paper"></div>
+    <div class="front">
+      <span class="name">My Files</span>
+      <span class="fab" aria-label="New">＋</span>
+    </div>
+  </div>
+
+  <!-- 2. archives -->
+  <div class="folder f-arch">
+    <div class="tab"></div>
+    <div class="body"></div>
+    <div class="sheets"><i></i><i></i><i></i></div>
+    <div class="paper"></div>
+    <div class="front">
+      <span class="name">Archives</span>
+      <span class="fab" aria-label="Layout">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/>
+          <rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/>
+          <rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/>
+        </svg>
+      </span>
+    </div>
+  </div>
+
+  <!-- 3. dark -->
+  <div class="folder f-dark">
+    <div class="tab"></div>
+    <div class="body"></div>
+    <div class="front">
+      <span class="name">My Files</span>
+      <span class="date">Wed 19 Aug</span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
