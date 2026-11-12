@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import aggregate, caption, config, db, ingest, models, ocr, profile, query
+from . import aesthetic, aggregate, caption, config, db, ingest, models, ocr, profile, query
 
 
 def cmd_fetch_model(args) -> int:
@@ -280,6 +280,21 @@ def cmd_album_list(args) -> int:
     return 0
 
 
+def cmd_aesthetic(args) -> int:
+    if args.stats:
+        print(json.dumps(aesthetic.stats(), ensure_ascii=False))
+        return 0
+    if args.stars:
+        print(json.dumps({"stars": aesthetic.recompute_stars()}, ensure_ascii=False))
+        return 0
+    def progress(done, total):
+        print(f"[aesthetic] {done}/{total}", flush=True)
+    result = aesthetic.build(limit=args.limit, batch=args.batch, progress=progress)
+    result.update(aesthetic.stats())
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lifelog", description="本地相册 → MiniCPM → 生活档案")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -293,6 +308,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hash", action="store_true", help="按内容哈希去重（慢）")
     p.add_argument("--limit", type=int)
     p.set_defaults(func=cmd_ingest)
+
+    p = sub.add_parser("aesthetic", help="本地美学评分（CLIP ViT-L/14 + LAION 头）")
+    p.add_argument("--build", action="store_true", help="给未打分的照片补分")
+    p.add_argument("--limit", type=int)
+    p.add_argument("--batch", type=int, default=16)
+    p.add_argument("--stats", action="store_true", help="查看分数分布")
+    p.add_argument("--stars", action="store_true", help="按库内分位数重算 1-5 星")
+    p.set_defaults(func=cmd_aesthetic)
 
     p = sub.add_parser("caption", help="用 MiniCPM 逐张识别")
     p.add_argument("--model", default="minicpm-v-4.7-1b")

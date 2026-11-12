@@ -5,6 +5,10 @@ description = "本地相册 → MiniCPM 识别 → 生活档案 → AI 可查"
 requires-python = ">=3.11"
 dependencies = ["pillow>=10", "pillow-heif>=0.16"]
 
+[project.optional-dependencies]
+# 本地美学评分（CLIP ViT-L/14 + LAION 头）；不装不影响其他命令
+aesthetic = ["torch>=2.2", "transformers>=4.40"]
+
 [project.scripts]
 lifelog = "lifelog.cli:main"
 
