@@ -156,3 +156,17 @@ python3 scripts/verify_organize_shared.py --url http://localhost:5177 --out mark
 - `query_assets`：新增可选 `cursor`（`taken_at|day|id`），命中时走 `(a.taken_at, a.day, a.id) < (?, ?, ?)` 并忽略 offset；排序补上 `a.id DESC` 保证严格全序
 - 前端 `loadMore` 传上一页最后一条的游标，`taken_at` 缺失时退回 offset
 - Rust 单测 `cursor_paging_covers_all_rows_without_duplicates`：1,203 行分 13 页翻完，断言无重复、覆盖全部行
+
+### FTS5 门槛：5k / 50k / 100k 三档
+
+同一套 SQL（最新一条 caption 的子查询 + LIKE 六字段），都有 idx_assets_taken：
+
+| 条数 | 首屏 500 | 搜索 LIKE | 搜索 count | 低频标签 | facets |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 5,000 | 0.9ms | 3.1ms | 3.0ms | 3.1ms | 3.3ms |
+| 50,000 | 0.8ms | 30.6ms | 28.9ms | 33.9ms | 36.8ms |
+| 100,000 | 0.9ms | 73.1ms | 71.4ms | 82.1ms | 74.9ms |
+
+（搜索/标签这两列是冷页缓存下的首轮数字，热缓存约 20ms。）
+
+结论：LIKE 的劣化是线性的，到 10 万条仍在 100ms 以内；FTS5 还要额外付中文分词与索引维护的代价，不引入。原先「>5000 条就上 FTS5」的预估作废。
