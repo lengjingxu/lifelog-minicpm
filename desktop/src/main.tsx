@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import "./theme.css";
 import "./styles.css";
 
 if (import.meta.env.DEV || import.meta.env.VITE_BENCH_BUILD === "1") {
