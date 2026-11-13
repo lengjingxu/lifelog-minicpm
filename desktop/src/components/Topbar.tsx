@@ -49,7 +49,7 @@ export function Topbar({
 
       {!minimal && (
         <>
-      <div className="search">
+      <div className="search glass-control">
         <Search size={14} strokeWidth={1.8} />
         <input
           ref={searchRef}

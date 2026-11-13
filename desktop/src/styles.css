@@ -70,7 +70,7 @@ button:focus-visible, input:focus-visible {
   border-radius: var(--radius-6); padding: var(--space-2) var(--space-4); line-height: 1.45;
 }
 
-.sidebar-scroll { overflow-y: auto; scrollbar-gutter: stable; min-height: 0; flex: 1; padding: var(--space-2) var(--space-2) var(--space-172); }
+.sidebar-scroll { overflow-y: auto; scrollbar-gutter: stable; min-height: 0; flex: 1; padding: var(--space-2) var(--space-2) var(--space-sidebar-bottom); }
 .nav-group-label {
   font-size: var(--font-10); letter-spacing: 0.1em; text-transform: uppercase;
   color: var(--text-faint); padding: var(--space-16) var(--space-10) var(--space-6);
@@ -1169,7 +1169,7 @@ button:focus-visible, input:focus-visible {
 .sidebar { padding: 0 var(--space-18) var(--space-20); }
 .brand { padding: var(--space-6) var(--space-12) var(--space-22); gap: var(--space-12); }
 .sidebar-search { height: 38px; padding: 0 var(--space-14); margin: 0 var(--space-2) var(--space-10); }
-.sidebar-scroll { padding: var(--space-6) var(--space-2) var(--space-196); }
+.sidebar-scroll { padding: var(--space-6) var(--space-2) var(--space-sidebar-bottom); }
 .nav-group-label { padding: var(--space-24) var(--space-12) var(--space-10); }
 .nav-item { padding: var(--space-12) var(--space-26) var(--space-12) var(--space-14); gap: var(--space-12); font-size: var(--font-13-5); }
 .tag-pill { padding: var(--space-10) var(--space-12); }
@@ -1254,19 +1254,21 @@ button:focus-visible, input:focus-visible {
 }
 
 /* 控件层：不 blur，只有 tint + 上高光 + 描边 */
+.glass-control,
 .search, .sidebar-search, .view-switch, .density-switch, .icon-button,
 .close-btn, .ghost-button, .mark-controls input, .mark-controls select,
 .chip, .status-pill, .group-target, .tag-cloud button, .inspector-actions button {
   background: rgba(255, 255, 255, var(--alpha-0-045));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, var(--alpha-0-09)), inset 0 0 0 1px rgba(255, 255, 255, var(--alpha-0-09));
 }
-[data-theme="light"] .search, [data-theme="light"] .sidebar-search, [data-theme="light"] .view-switch,
+[data-theme="light"] .glass-control, [data-theme="light"] .search, [data-theme="light"] .sidebar-search, [data-theme="light"] .view-switch,
 [data-theme="light"] .density-switch, [data-theme="light"] .icon-button, [data-theme="light"] .close-btn,
 [data-theme="light"] .ghost-button, [data-theme="light"] .mark-controls input, [data-theme="light"] .mark-controls select,
 [data-theme="light"] .chip, [data-theme="light"] .status-pill, [data-theme="light"] .group-target,
 [data-theme="light"] .tag-cloud button, [data-theme="light"] .inspector-actions button {
   background: rgba(23, 23, 26, var(--alpha-0-035));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, var(--alpha-0-9)), inset 0 0 0 1px rgba(23, 23, 26, var(--alpha-0-1));
+  /* 去分割线后控件不描边；这里原来带整圈描边，且特异性高于后面的 box-shadow: none 规则 */
+  box-shadow: none;
 }
 .view-switch, .density-switch { background: rgba(255, 255, 255, var(--alpha-0-03)); }
 [data-theme="light"] .view-switch, [data-theme="light"] .density-switch { background: rgba(23, 23, 26, var(--alpha-0-03)); }
@@ -1352,11 +1354,12 @@ button:focus-visible, input:focus-visible {
 [data-theme="light"] .view-switch button.active, [data-theme="light"] .density-switch button.active { background: rgba(255, 255, 255, var(--alpha-0-95)); }
 
 /* 面板只留上高光 + 外投影，不要整圈描边 */
+.glass-panel,
 .settings-card, .stat-box, .import-row, .import-placeholder,
 .organize-complete, .login-line, .ocr, .empty-actions > * {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, var(--alpha-0-1)), 0 8px 24px rgba(0, 0, 0, var(--alpha-0-16));
 }
-[data-theme="light"] .settings-card, [data-theme="light"] .stat-box, [data-theme="light"] .import-row,
+[data-theme="light"] .glass-panel, [data-theme="light"] .settings-card, [data-theme="light"] .stat-box, [data-theme="light"] .import-row,
 [data-theme="light"] .import-placeholder, [data-theme="light"] .organize-complete,
 [data-theme="light"] .login-line, [data-theme="light"] .ocr, [data-theme="light"] .empty-actions > * {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, var(--alpha-0-95)), 0 8px 22px rgba(30, 30, 40, var(--alpha-0-09));

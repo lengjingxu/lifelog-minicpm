@@ -184,8 +184,7 @@
   --space-56: 56px;
   --space-60: 60px;
   --space-64: 64px;
-  --space-172: 172px;
-  --space-196: 196px;
+  --space-sidebar-bottom: 196px;  /* 侧栏底部给固定信息块留的高度 */
 
   /* 圆角标尺：2 / 6 / 10 / 14 / 20 / 999 */
   --radius-2: 2px;

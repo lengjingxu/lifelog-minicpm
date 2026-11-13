@@ -124,7 +124,7 @@ export function Sidebar({
         </div>
       </div>
 
-      <button type="button" className="sidebar-search" onClick={onSearch}>
+      <button type="button" className="sidebar-search glass-control" onClick={onSearch}>
         <Search size={13} strokeWidth={1.8} />
         <span>搜索照片</span>
         <kbd>⌘K</kbd>

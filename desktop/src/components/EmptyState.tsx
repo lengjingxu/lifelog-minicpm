@@ -32,14 +32,14 @@ export function EmptyState({ mode = "library", onChoose, onReset }: Props) {
       <h2>相册还是空的</h2>
       <p>先把照片带进来。拾光只读本地库，导入与识别会在 P2 接通。</p>
       <div className="empty-actions">
-        <button type="button" className="empty-card" onClick={() => onChoose("导入小米相册")}>
+        <button type="button" className="empty-card glass-panel" onClick={() => onChoose("导入小米相册")}>
           <Sparkles size={18} strokeWidth={1.6} />
           <span>
             <b>导入小米相册</b>
             <small>同步云端相册，保留拍摄时间与原始画质。</small>
           </span>
         </button>
-        <button type="button" className="empty-card" onClick={() => onChoose("扫描本地文件夹")}>
+        <button type="button" className="empty-card glass-panel" onClick={() => onChoose("扫描本地文件夹")}>
           <FolderSearch size={18} strokeWidth={1.6} />
           <span>
             <b>扫描本地文件夹</b>
