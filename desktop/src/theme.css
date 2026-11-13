@@ -10,6 +10,7 @@
   --text: #F5F3F2;
   --text-dim: rgba(245,243,242,0.62);
   --text-faint: rgba(245,243,242,0.38);
+  --text-meta: rgba(245, 243, 242, 0.52);
   --accent: #FF4A4A;
   --accent-soft: rgba(255,74,74,0.14);
   --accent-line: rgba(255,74,74,0.30);
@@ -204,6 +205,7 @@
   --text: #17171A;
   --text-dim: rgba(23,23,26,0.66);
   --text-faint: rgba(23,23,26,0.42);
+  --text-meta: rgba(23, 23, 26, 0.66);
   --accent: #D9382F;
   --accent-soft: rgba(217,56,47,0.10);
   --accent-line: rgba(217,56,47,0.24);

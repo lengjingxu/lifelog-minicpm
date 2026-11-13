@@ -776,13 +776,6 @@ button:focus-visible, input:focus-visible {
 .group-rail-empty { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: var(--space-8); padding: var(--space-30) var(--space-12); color: var(--text-faint); font-size: var(--font-10-5); }
 
 .flight-layer { position: absolute; inset: 0; pointer-events: none; z-index: 22; overflow: hidden; }
-.flight-card {
-  position: absolute; border-radius: var(--radius-10); overflow: hidden; background: #17171a;
-  box-shadow: 0 0 0 1px rgba(255,255,255,var(--alpha-0-14)), 0 18px 36px rgba(0,0,0,var(--alpha-0-45)), 0 0 26px rgba(255,74,74,var(--alpha-0-12));
-  transform-origin: center; will-change: transform;
-  transition: transform 620ms var(--ease-in-out);
-}
-.flight-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .flight-trail {
   position: absolute; left: 0; top: 0; width: 100px; height: 2px;
   transform-origin: 0 50%; border-radius: var(--radius-2); pointer-events: none;
@@ -1475,3 +1468,14 @@ button:focus-visible, input:focus-visible {
 
 /* 详情：右侧给悬浮信息板留位，照片不再被面板压住 */
 .stage { position: absolute; inset: 0; padding: 0 404px 0 0; }
+
+/* ================= Review 修复：元信息小字对比度 + 死代码 ================= */
+/* --text-faint 只有 3.3:1（暗）/ 2.6:1（亮），用小字读起来发虚；
+   这里给「计数、库信息、HUD 标签、检查器小标题」这类元信息单独一档 4.5:1 的灰 */
+.nav-item .count, .lib-line, .lib-sub, .hud-metric span,
+.section-label, .file-name, .inspector-kicker, .tag-pill .count {
+  color: var(--text-meta);
+}
+/* .flight-card 是共享节点改造前用过的克隆节点，组件里已删除 */
+/* 分组容器与前板圆角对齐（之前 10 / 14） */
+.group-rail .group-panel { border-radius: var(--radius-14); }
