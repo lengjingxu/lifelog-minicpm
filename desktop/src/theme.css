@@ -10,6 +10,7 @@
   --text: #F5F3F2;
   --text-dim: rgba(245,243,242,0.62);
   --text-faint: rgba(245,243,242,0.38);
+  --text-meta: rgba(245, 243, 242, 0.52);
   --accent: #FF4A4A;
   --accent-soft: rgba(255,74,74,0.14);
   --accent-line: rgba(255,74,74,0.30);
@@ -183,8 +184,7 @@
   --space-56: 56px;
   --space-60: 60px;
   --space-64: 64px;
-  --space-172: 172px;
-  --space-196: 196px;
+  --space-sidebar-bottom: 196px;  /* 侧栏底部给固定信息块留的高度 */
 
   /* 圆角标尺：2 / 6 / 10 / 14 / 20 / 999 */
   --radius-2: 2px;
@@ -204,6 +204,7 @@
   --text: #17171A;
   --text-dim: rgba(23,23,26,0.66);
   --text-faint: rgba(23,23,26,0.42);
+  --text-meta: rgba(23, 23, 26, 0.66);
   --accent: #D9382F;
   --accent-soft: rgba(217,56,47,0.10);
   --accent-line: rgba(217,56,47,0.24);

@@ -135,7 +135,7 @@ export function SettingsView({ onToast }: { onToast: (message: string) => void }
       </div>
 
       <div className="settings-grid">
-        <section className="settings-card wide">
+        <section className="settings-card wide glass-panel">
           <div className="settings-card-head">
             <Database size={16} />
             <h3>资料库</h3>
@@ -161,7 +161,7 @@ export function SettingsView({ onToast }: { onToast: (message: string) => void }
           </dl>
         </section>
 
-        <section className="settings-card">
+        <section className="settings-card glass-panel">
           <div className="settings-card-head">
             <HardDrive size={16} />
             <h3>当前模型</h3>
@@ -176,7 +176,7 @@ export function SettingsView({ onToast }: { onToast: (message: string) => void }
           <p className="settings-hint">模型选择由后端配置决定，本页只读展示。</p>
         </section>
 
-        <section className="settings-card">
+        <section className="settings-card glass-panel">
           <div className="settings-card-head">
             <FolderOpen size={16} />
             <h3>缩略图缓存</h3>
@@ -210,7 +210,7 @@ export function SettingsView({ onToast }: { onToast: (message: string) => void }
           {rebuildOutput && <pre className="rebuild-output">{rebuildOutput}</pre>}
         </section>
 
-        <section className="settings-card">
+        <section className="settings-card glass-panel">
           <div className="settings-card-head">
             <UserRound size={16} />
             <h3>小米账号</h3>
