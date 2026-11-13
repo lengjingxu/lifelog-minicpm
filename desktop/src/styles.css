@@ -1372,7 +1372,11 @@ button:focus-visible, input:focus-visible {
 /* 详情页：满幅照片 + 悬浮玻璃板（外壳不再做玻璃） */
 .overlay-root { display: block; padding: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .dialog-backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; }
-.stage { position: absolute; inset: 0; padding: 0; }
+.stage {
+  position: absolute; inset: 0;
+  /* 右侧留出悬浮玻璃板的宽度（380 + 24 内缩），照片不会被面板压住 */
+  padding: 0 404px 0 0;
+}
 .stage-image { height: 100%; }
 .inspector {
   position: absolute; right: 24px; top: 24px; bottom: 24px; width: 380px;
@@ -1510,3 +1514,45 @@ button:focus-visible, input:focus-visible {
 .lib-line { margin-top: 12px; padding: 0 10px; font-size: 10.5px; }
 .lib-sub { padding: 0 10px; margin-top: 6px; font-size: 9.5px; letter-spacing: 0.02em; }
 .sidebar-live { left: 4px; right: 4px; border-radius: 12px; padding: 10px 11px; }
+
+/* ================= UI 审计修补：把漏网的旧「实心 + 整圈描边」并进三层 ================= */
+/* 控件：只靠底色 */
+.hud-chip, .hud-pause, .category-tabs, .group-cap,
+.selection-bar .selection-remove, .selection-bar .selection-delete,
+.hud-tags span {
+  box-shadow: none;
+}
+/* 装饰块/图片框：不再画线，靠底色与图片本身分界 */
+.category-icon, .empty-icon, .month-cover, .inflight-card img, .inflight-empty {
+  box-shadow: none;
+}
+/* 空状态卡：面板层 */
+.empty-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028));
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+[data-theme="light"] .empty-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.74));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 8px 22px rgba(30, 30, 40, 0.09);
+}
+.empty-card:hover { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 10px 28px rgba(0, 0, 0, 0.2); }
+/* 画布：不画边，靠自身渐变底色 */
+.pile-area { box-shadow: none; }
+
+/* 整理视图右下角那颗「识别进度」：之前自己写了一套 blur + 深色底（亮色下是个黑丸），
+   并入玻璃面，不再单独一套 */
+.organize-recognition-link {
+  background: rgba(255, 255, 255, 0.045);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: none;
+  color: var(--text-dim);
+}
+[data-theme="light"] .organize-recognition-link { background: rgba(255, 255, 255, 0.72); color: var(--text-dim); }
+
+/* 审计补漏：这三处还留着 1px 边框（不是分割线，是旧规则残留） */
+.tag-cloud button { border: 0; }
+.ocr { border: 0; }
+.selection-input { border: 0; }
