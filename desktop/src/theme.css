@@ -52,66 +52,8 @@
   --radius: 14px;
 
   /* ---------- 间距（token 名 = px 值） ---------- */
-  --space-1: 1px;
-  --space-2: 2px;
-  --space-3: 3px;
-  --space-4: 4px;
-  --space-5: 5px;
-  --space-6: 6px;
-  --space-7: 7px;
-  --space-8: 8px;
-  --space-9: 9px;
-  --space-10: 10px;
-  --space-11: 11px;
-  --space-12: 12px;
-  --space-13: 13px;
-  --space-14: 14px;
-  --space-15: 15px;
-  --space-16: 16px;
-  --space-17: 17px;
-  --space-18: 18px;
-  --space-19: 19px;
-  --space-20: 20px;
-  --space-21: 21px;
-  --space-22: 22px;
-  --space-23: 23px;
-  --space-24: 24px;
-  --space-25: 25px;
-  --space-26: 26px;
-  --space-28: 28px;
-  --space-30: 30px;
-  --space-32: 32px;
-  --space-34: 34px;
-  --space-36: 36px;
-  --space-38: 38px;
-  --space-40: 40px;
-  --space-42: 42px;
-  --space-44: 44px;
-  --space-48: 48px;
-  --space-49: 49px;
-  --space-56: 56px;
-  --space-60: 60px;
-  --space-64: 64px;
-  --space-172: 172px;
-  --space-196: 196px;
 
   /* ---------- 圆角 ---------- */
-  --radius-1: 1px;
-  --radius-2: 2px;
-  --radius-4: 4px;
-  --radius-5: 5px;
-  --radius-6: 6px;
-  --radius-7: 7px;
-  --radius-8: 8px;
-  --radius-9: 9px;
-  --radius-10: 10px;
-  --radius-11: 11px;
-  --radius-12: 12px;
-  --radius-13: 13px;
-  --radius-14: 14px;
-  --radius-16: 16px;
-  --radius-20: 20px;
-  --radius-999: 999px;
 
   /* ---------- 字号 ---------- */
   --font-8-5: 8.5px;
@@ -212,6 +154,45 @@
     "Helvetica Neue", Arial, sans-serif;
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
+
+  /* 间距标尺：2px 网格（奇数已归到偶数） */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-14: 14px;
+  --space-16: 16px;
+  --space-18: 18px;
+  --space-20: 20px;
+  --space-22: 22px;
+  --space-24: 24px;
+  --space-26: 26px;
+  --space-28: 28px;
+  --space-30: 30px;
+  --space-32: 32px;
+  --space-34: 34px;
+  --space-36: 36px;
+  --space-38: 38px;
+  --space-40: 40px;
+  --space-42: 42px;
+  --space-44: 44px;
+  --space-48: 48px;
+  --space-50: 50px;
+  --space-56: 56px;
+  --space-60: 60px;
+  --space-64: 64px;
+  --space-172: 172px;
+  --space-196: 196px;
+
+  /* 圆角标尺：2 / 6 / 10 / 14 / 20 / 999 */
+  --radius-2: 2px;
+  --radius-6: 6px;
+  --radius-10: 10px;
+  --radius-14: 14px;
+  --radius-20: 20px;
+  --radius-999: 999px;
 }
 
 [data-theme="light"] {

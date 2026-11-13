@@ -41,8 +41,15 @@ export function Thumb({ asset, dupCount, selected, multi, onSelect, onOpen }: Pr
       data-asset-id={asset.id}
       aria-label={`${kindLabel(asset)} · ${asset.caption || asset.path}`}
       aria-pressed={selected}
-      onClick={(event) => onSelect(asset, event)}
-      onDoubleClick={(event) => onOpen(asset, event.currentTarget.getBoundingClientRect())}
+      // 单击直接看大图；按住 ⌘/⌃/⇧ 才是多选（批量操作用）
+      onClick={(event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey) {
+          onSelect(asset, event);
+          return;
+        }
+        onOpen(asset, event.currentTarget.getBoundingClientRect());
+      }}
+      onDoubleClick={(event) => event.preventDefault()}
     >
       <span className="thumb-frame">
         {!loaded && !failed && <span className="skeleton" aria-hidden="true" />}
