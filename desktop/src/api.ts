@@ -265,9 +265,22 @@ export async function queryAssets(filter: Filter): Promise<Asset[]> {
 }
 
 export type MonthSummary = { month: string; count: number; cover_id: string; cover_thumb: string };
+export type AlbumSummary = {
+  name: string;
+  count: number;
+  cover_id: string;
+  cover_thumb: string;
+  preview_thumb: string[];
+};
 export type GroupSummary = { name: string; count: number; cover_id: string; cover_thumb: string };
 
 const SPLIT_RE = /[、，,;；/]/;
+
+export async function albumGroups(): Promise<AlbumSummary[]> {
+  // 相册是本地库里的 album_assets，浏览器 fixture 没有这层，直接返回空。
+  if (!isTauri) return [];
+  return invoke<AlbumSummary[]>("album_groups");
+}
 
 export async function timelineMonths(): Promise<MonthSummary[]> {
   if (!isTauri) {

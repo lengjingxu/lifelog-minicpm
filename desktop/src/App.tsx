@@ -10,9 +10,11 @@ import {
   queryAssets,
   countAssets,
   timelineMonths,
+  albumGroups,
   categoryGroups,
   dupGroups,
   type MonthSummary,
+  type AlbumSummary,
   type GroupSummary,
   type Asset,
   type Facets,
@@ -33,6 +35,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { VirtualGrid } from "./components/VirtualGrid";
 import { Timeline } from "./components/Timeline";
+import { Albums } from "./components/Albums";
 import { Categories } from "./components/Categories";
 import { Detail } from "./components/Detail";
 import { SelectionBar } from "./components/SelectionBar";
@@ -115,6 +118,7 @@ const route = useMemo(readRoute, []);
   // 只给整理视图用，上限 500，不再把整库读进内存
   const [allAssets, setAllAssets] = useState<Asset[] | null>(null);
   const [months, setMonths] = useState<MonthSummary[] | null>(null);
+  const [albums, setAlbums] = useState<AlbumSummary[] | null>(null);
   // 按 kind 缓存，避免在标签/全部照片之间来回切时反复重算聚合（一次扫描 100k 约 370ms）
   const [groupsByKind, setGroupsByKind] = useState<Record<string, GroupSummary[]>>({});
   const [catKind, setCatKind] = useState<CategoryKind>("tags");
@@ -656,6 +660,15 @@ const route = useMemo(readRoute, []);
   }, [displayAssets, dupIndex]);
 
   useEffect(() => {
+    if (view !== "albums" || albums) return;
+    let cancelled = false;
+    albumGroups()
+      .then((list) => { if (!cancelled) setAlbums(list); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [view, albums]);
+
+  useEffect(() => {
     if (view !== "timeline" || months) return;
     let cancelled = false;
     timelineMonths()
@@ -1059,6 +1072,7 @@ const route = useMemo(readRoute, []);
     if (album) return `相册 · ${album}`;
     if (query) return `搜索 “${query}”`;
     if (view === "timeline") return "时间线";
+    if (view === "albums") return "相册";
     if (view === "tags") return "标签";
     if (view === "people") return "人物";
     if (view === "places") return "地点";
@@ -1127,6 +1141,20 @@ const route = useMemo(readRoute, []);
 
     if (view === "settings") {
       return <SettingsView onToast={showToast} />;
+    }
+
+    if (view === "albums") {
+      return (
+        <Albums
+          albums={albums ?? []}
+          loading={albums === null}
+          onPick={(name) => {
+            clearAll();
+            setAlbum(name);
+            setView("library");
+          }}
+        />
+      );
     }
 
     if (view === "tags" || view === "people" || view === "places") {

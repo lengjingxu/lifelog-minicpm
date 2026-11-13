@@ -1517,3 +1517,14 @@ button:focus-visible, input:focus-visible {
 .lib-line { margin-top: 12px; padding: 0 10px; font-size: 10.5px; }
 .lib-sub { padding: 0 10px; margin-top: 6px; font-size: 9.5px; letter-spacing: 0.02em; }
 .sidebar-live { left: 4px; right: 4px; border-radius: 12px; padding: 10px 11px; }
+
+/* ---------------- 相册卡片 ---------------- */
+.album-previews {
+  position: absolute; top: 10px; right: 10px; z-index: 2;
+  display: flex; gap: 4px;
+}
+.album-preview {
+  width: 34px; height: 34px; border-radius: 8px; object-fit: cover; display: block;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+.album-preview.album-fallback { background: rgba(255, 255, 255, 0.08); }

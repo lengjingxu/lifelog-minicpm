@@ -1,6 +1,7 @@
 import {
   Clock,
   Database,
+  Folder,
   Images,
   MapPin,
   Search,
@@ -38,6 +39,7 @@ type Props = {
 const NAV = [
   { id: "library" as const, label: "全部照片", icon: Images },
   { id: "timeline" as const, label: "时间线", icon: Clock },
+  { id: "albums" as const, label: "相册", icon: Folder },
   { id: "tags" as const, label: "标签", icon: Tags },
   { id: "people" as const, label: "人物", icon: Users },
   { id: "places" as const, label: "地点", icon: MapPin },

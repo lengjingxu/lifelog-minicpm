@@ -628,6 +628,94 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     Ok(out)
 }
 
+#[derive(Serialize)]
+struct AlbumRow {
+    name: String,
+    count: i64,
+    cover_id: String,
+    cover_thumb: String,
+    preview_thumb: Vec<String>,
+}
+
+/// 相册卡片：封面取相册里美学分最高的一张，后面跟最多 3 张预览。
+/// 按相册名累加：保留前 4 个 asset（1 张封面 + 3 张预览），count 统计全部。
+fn fold_albums(rows: Vec<(String, String)>) -> Vec<(String, i64, Vec<String>)> {
+    let mut order: Vec<String> = Vec::new();
+    let mut acc: std::collections::HashMap<String, (i64, Vec<String>)> =
+        std::collections::HashMap::new();
+    for (name, asset_id) in rows {
+        match acc.get_mut(&name) {
+            Some(entry) => {
+                entry.0 += 1;
+                if entry.1.len() < 4 {
+                    entry.1.push(asset_id);
+                }
+            }
+            None => {
+                order.push(name.clone());
+                acc.insert(name, (1, vec![asset_id]));
+            }
+        }
+    }
+    order
+        .into_iter()
+        .map(|name| {
+            let (count, ids) = acc.remove(&name).unwrap_or((0, Vec::new()));
+            (name, count, ids)
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn album_groups(db: State<'_, Db>) -> Result<Vec<AlbumRow>, String> {
+    let guard = db.open()?;
+    let conn = guard.as_ref().unwrap();
+    let order = if has_table(conn, "asset_quality") {
+        "COALESCE(q.score,-1) DESC, a.taken_at DESC, a.id DESC"
+    } else {
+        "a.taken_at DESC, a.id DESC"
+    };
+    let join = if has_table(conn, "asset_quality") {
+        " LEFT JOIN asset_quality q ON q.asset_id = a.id"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "SELECT al.name, aa.asset_id FROM albums al \
+         JOIN album_assets aa ON aa.album_id = al.id \
+         JOIN assets a ON a.id = aa.asset_id{} \
+         ORDER BY al.name, {}",
+        join, order
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?;
+
+    let collected: Vec<(String, String)> = rows.flatten().collect();
+    let grouped = fold_albums(collected);
+
+    let mut out: Vec<AlbumRow> = Vec::new();
+    for (name, count, ids) in grouped {
+        let cover_id = ids.first().cloned().unwrap_or_default();
+        let cover_thumb = db.thumb_path(&cover_id);
+        let preview_thumb = ids
+            .iter()
+            .skip(1)
+            .take(3)
+            .map(|id| db.thumb_path(id))
+            .collect();
+        out.push(AlbumRow {
+            name,
+            count,
+            cover_id,
+            cover_thumb,
+            preview_thumb,
+        });
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 fn facets(db: State<'_, Db>) -> Result<Facets, String> {
     let guard = db.open()?;
@@ -1207,6 +1295,7 @@ pub fn run() {
             reveal_in_finder,
             facets,
             timeline_months,
+            album_groups,
             category_groups,
             health,
             app_settings,
@@ -1437,6 +1526,25 @@ mod filter_tests {
 
         assert_eq!(seen.len() as i64, total, "翻页覆盖的行数与总数不一致");
         assert!(pages >= 200, "应该翻满 200 页，实际 {pages}");
+    }
+
+    #[test]
+    fn album_fold_keeps_cover_and_three_previews() {
+        let rows = vec![
+            ("旅行".to_string(), "a1".to_string()),
+            ("旅行".to_string(), "a2".to_string()),
+            ("旅行".to_string(), "a3".to_string()),
+            ("旅行".to_string(), "a4".to_string()),
+            ("旅行".to_string(), "a5".to_string()),
+            ("家人".to_string(), "b1".to_string()),
+        ];
+        let out = fold_albums(rows);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].0, "旅行");
+        assert_eq!(out[0].1, 5, "count 要统计全部成员");
+        assert_eq!(out[0].2, vec!["a1", "a2", "a3", "a4"], "封面 + 3 张预览");
+        assert_eq!(out[1].0, "家人");
+        assert_eq!(out[1].2.len(), 1);
     }
 
     #[test]
