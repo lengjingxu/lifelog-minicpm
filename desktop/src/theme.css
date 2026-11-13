@@ -1,0 +1,244 @@
+/* 主题令牌：颜色、透明度、圆角、间距、字号、材质全部在这里。
+   改这里就能整体换肤；组件样式（styles.css）只引用 var()。 */
+/* ---------- tokens ---------- */
+:root, [data-theme="dark"] {
+  --bg: #08080A;
+  --bg-elevated: rgba(255,255,255,0.045);
+  --bg-hover: rgba(255,255,255,0.075);
+  --line: rgba(255,255,255,0.08);
+  --line-strong: rgba(255,255,255,0.14);
+  --text: #F5F3F2;
+  --text-dim: rgba(245,243,242,0.62);
+  --text-faint: rgba(245,243,242,0.38);
+  --accent: #FF4A4A;
+  --accent-soft: rgba(255,74,74,0.14);
+  --accent-line: rgba(255,74,74,0.30);
+  --glow-a: rgba(255,74,74,0.085);
+  --glow-b: rgba(90,105,160,0.045);
+  --outline: rgba(255,255,255,0.45);
+  --scroll-thumb: rgba(255,255,255,0.08);
+  --scroll-thumb-hover: rgba(255,255,255,0.14);
+
+  /* 玻璃材质（对齐 docs/design/GLASS-MATERIAL.md） */
+  --glass-bg: rgba(14, 14, 17, 0.26);
+  --glass-bg-oncolor: rgba(14, 14, 17, 0.62);
+  --glass-blur: blur(10px) saturate(1.6);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  --glass-border: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.10), transparent);
+  --glass-shadow: 0 10px 24px rgba(16, 16, 20, 0.28);
+
+  /* 动效 */
+  /* 曲线：进入 / 小件落位 / 离开 / 位移 / 回弹 / 弹簧 */
+  --ease-out: cubic-bezier(0, 0, .58, 1);
+  --ease-out-strong: cubic-bezier(.22, 1, .36, 1);
+  --ease-in: cubic-bezier(.42, 0, 1, 1);
+  --ease-in-out: cubic-bezier(.42, 0, .58, 1);
+  --ease-overshoot: cubic-bezier(.34, 1.56, .64, 1);
+  --ease-spring: var(--ease-out-strong);
+  --ease-spring: linear(0, .32, .78, 1.04, 1.09, 1.06, 1.02, 1, .99, .99, 1);
+
+  /* 时长 */
+  --duration-sm: 180ms;
+  --duration-md: 300ms;
+  --duration-lg: 420ms;
+
+  --dur-fast: 140ms;
+  --dur-base: var(--duration-md);
+  --dur-slow: var(--duration-md);
+  --dur-page: var(--duration-lg);
+  --ease-soft: var(--ease-out);
+
+  --radius: 14px;
+
+  /* ---------- 间距（token 名 = px 值） ---------- */
+  --space-1: 1px;
+  --space-2: 2px;
+  --space-3: 3px;
+  --space-4: 4px;
+  --space-5: 5px;
+  --space-6: 6px;
+  --space-7: 7px;
+  --space-8: 8px;
+  --space-9: 9px;
+  --space-10: 10px;
+  --space-11: 11px;
+  --space-12: 12px;
+  --space-13: 13px;
+  --space-14: 14px;
+  --space-15: 15px;
+  --space-16: 16px;
+  --space-17: 17px;
+  --space-18: 18px;
+  --space-19: 19px;
+  --space-20: 20px;
+  --space-21: 21px;
+  --space-22: 22px;
+  --space-23: 23px;
+  --space-24: 24px;
+  --space-25: 25px;
+  --space-26: 26px;
+  --space-28: 28px;
+  --space-30: 30px;
+  --space-32: 32px;
+  --space-34: 34px;
+  --space-36: 36px;
+  --space-38: 38px;
+  --space-40: 40px;
+  --space-42: 42px;
+  --space-44: 44px;
+  --space-48: 48px;
+  --space-49: 49px;
+  --space-56: 56px;
+  --space-60: 60px;
+  --space-64: 64px;
+  --space-172: 172px;
+  --space-196: 196px;
+
+  /* ---------- 圆角 ---------- */
+  --radius-1: 1px;
+  --radius-2: 2px;
+  --radius-4: 4px;
+  --radius-5: 5px;
+  --radius-6: 6px;
+  --radius-7: 7px;
+  --radius-8: 8px;
+  --radius-9: 9px;
+  --radius-10: 10px;
+  --radius-11: 11px;
+  --radius-12: 12px;
+  --radius-13: 13px;
+  --radius-14: 14px;
+  --radius-16: 16px;
+  --radius-20: 20px;
+  --radius-999: 999px;
+
+  /* ---------- 字号 ---------- */
+  --font-8-5: 8.5px;
+  --font-9: 9px;
+  --font-9-5: 9.5px;
+  --font-10: 10px;
+  --font-10-5: 10.5px;
+  --font-11: 11px;
+  --font-11-5: 11.5px;
+  --font-12: 12px;
+  --font-12-5: 12.5px;
+  --font-13: 13px;
+  --font-13-5: 13.5px;
+  --font-14: 14px;
+  --font-15: 15px;
+  --font-16: 16px;
+  --font-17: 17px;
+  --font-18: 18px;
+  --font-19: 19px;
+  --font-20: 20px;
+  --font-22: 22px;
+  --font-23: 23px;
+  --font-28: 28px;
+  --font-30: 30px;
+  --font-40: 40px;
+
+  /* ---------- 透明度 ---------- */
+  --alpha-0: 0;
+  --alpha-0-008: 0.008;
+  --alpha-0-012: 0.012;
+  --alpha-0-015: 0.015;
+  --alpha-0-016: 0.016;
+  --alpha-0-018: 0.018;
+  --alpha-0-022: 0.022;
+  --alpha-0-024: 0.024;
+  --alpha-0-025: 0.025;
+  --alpha-0-026: 0.026;
+  --alpha-0-027: 0.027;
+  --alpha-0-028: 0.028;
+  --alpha-0-03: 0.03;
+  --alpha-0-035: 0.035;
+  --alpha-0-04: 0.04;
+  --alpha-0-045: 0.045;
+  --alpha-0-05: 0.05;
+  --alpha-0-055: 0.055;
+  --alpha-0-06: 0.06;
+  --alpha-0-07: 0.07;
+  --alpha-0-075: 0.075;
+  --alpha-0-08: 0.08;
+  --alpha-0-085: 0.085;
+  --alpha-0-09: 0.09;
+  --alpha-0-1: 0.1;
+  --alpha-0-11: 0.11;
+  --alpha-0-12: 0.12;
+  --alpha-0-14: 0.14;
+  --alpha-0-15: 0.15;
+  --alpha-0-16: 0.16;
+  --alpha-0-18: 0.18;
+  --alpha-0-2: 0.2;
+  --alpha-0-21: 0.21;
+  --alpha-0-22: 0.22;
+  --alpha-0-24: 0.24;
+  --alpha-0-25: 0.25;
+  --alpha-0-26: 0.26;
+  --alpha-0-28: 0.28;
+  --alpha-0-3: 0.3;
+  --alpha-0-32: 0.32;
+  --alpha-0-34: 0.34;
+  --alpha-0-35: 0.35;
+  --alpha-0-38: 0.38;
+  --alpha-0-42: 0.42;
+  --alpha-0-45: 0.45;
+  --alpha-0-5: 0.5;
+  --alpha-0-54: 0.54;
+  --alpha-0-55: 0.55;
+  --alpha-0-6: 0.6;
+  --alpha-0-62: 0.62;
+  --alpha-0-7: 0.7;
+  --alpha-0-72: 0.72;
+  --alpha-0-74: 0.74;
+  --alpha-0-8: 0.8;
+  --alpha-0-82: 0.82;
+  --alpha-0-84: 0.84;
+  --alpha-0-86: 0.86;
+  --alpha-0-9: 0.9;
+  --alpha-0-92: 0.92;
+  --alpha-0-95: 0.95;
+
+  /* ---------- 模糊 ---------- */
+  --blur-12: 12px;
+  --blur-14: 14px;
+  --blur-18: 18px;
+  --blur-20: 20px;
+  --blur-24: 24px;
+  --blur-26: 26px;
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Helvetica Neue", Arial, sans-serif;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+[data-theme="light"] {
+  --bg: #F2F1EE;
+  --bg-elevated: rgba(255,255,255,0.72);
+  --bg-hover: rgba(255,255,255,0.92);
+  --line: rgba(22,22,26,0.10);
+  --line-strong: rgba(22,22,26,0.20);
+  --text: #17171A;
+  --text-dim: rgba(23,23,26,0.66);
+  --text-faint: rgba(23,23,26,0.42);
+  --accent: #D9382F;
+  --accent-soft: rgba(217,56,47,0.10);
+  --accent-line: rgba(217,56,47,0.24);
+  --glow-a: rgba(217,56,47,0.06);
+  --glow-b: rgba(90,105,160,0.05);
+  --outline: rgba(23,23,26,0.45);
+  --scroll-thumb: rgba(23,23,26,0.14);
+  --scroll-thumb-hover: rgba(23,23,26,0.24);
+
+  --glass-bg: rgba(255, 255, 255, 0.62);
+  --glass-bg-oncolor: rgba(255, 255, 255, 0.80);
+  --glass-blur: blur(18px) saturate(1.35);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  --glass-border: inset 0 0 0 1px rgba(255, 255, 255, 0.85);
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.42), transparent);
+  --glass-shadow: 0 10px 24px rgba(16, 16, 20, 0.10);
+
+  color-scheme: light;
+}
