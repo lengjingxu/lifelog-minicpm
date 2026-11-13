@@ -103,7 +103,7 @@ export function Topbar({
       </div>
 
       {onExport && (
-        <button type="button" className="tool-btn" onClick={onExport} title="导出当前范围（选中优先）">
+        <button type="button" className="icon-button" onClick={onExport} title="导出当前范围（选中优先）">
           <Download size={15} strokeWidth={1.8} />
         </button>
       )}

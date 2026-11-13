@@ -37,7 +37,7 @@ button:focus-visible, input:focus-visible {
 .sidebar-search:hover { background: var(--bg-hover); color: var(--text-dim); }
 .sidebar-search span { flex: 1; }
 .sidebar-search kbd {
-  font-size: var(--font-10); color: var(--text-faint); border: 1px solid var(--line);
+  font-size: var(--font-10); color: var(--text-meta); border: 1px solid var(--line);
   border-radius: var(--radius-6); padding: var(--space-2) var(--space-4); line-height: 1.45;
 }
 
@@ -50,7 +50,7 @@ button:focus-visible, input:focus-visible {
 
 .tag-dot.person { background: rgba(255,255,255,var(--alpha-0-38)); }
 .tag-dot.place { border-radius: var(--radius-2); background: rgba(255,255,255,var(--alpha-0-3)); }
-.sidebar-empty { padding: var(--space-4) var(--space-10) var(--space-8); font-size: var(--font-11-5); color: var(--text-faint); }
+.sidebar-empty { padding: var(--space-4) var(--space-10) var(--space-8); font-size: var(--font-11-5); color: var(--text-meta); }
 
 .lib-line .lib-size { margin-left: auto; font-variant-numeric: tabular-nums; }
 
@@ -65,10 +65,10 @@ button:focus-visible, input:focus-visible {
 
 .search:focus-within { background: rgba(255,255,255,var(--alpha-0-06)); box-shadow: 0 0 0 1px var(--line-strong) inset; }
 .search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; font-size: var(--font-12-5); padding: 0; }
-.search input::placeholder { color: var(--text-faint); }
+.search input::placeholder { color: var(--text-meta); }
 .search .kbd {
   display: inline-flex; align-items: center; gap: var(--space-2);
-  font-size: var(--font-10); color: var(--text-faint); border: 1px solid var(--line);
+  font-size: var(--font-10); color: var(--text-meta); border: 1px solid var(--line);
   border-radius: var(--radius-6); padding: var(--space-2) var(--space-6); line-height: 1.5; white-space: nowrap;
 }
 .search-clear { display: grid; place-items: center; width: 18px; height: 18px; border-radius: var(--radius-6); color: var(--text-faint); }
@@ -186,13 +186,7 @@ button:focus-visible, input:focus-visible {
 .month-meta .month-title { font-size: var(--font-13); color: var(--text); }
 .month-meta .month-count { font-size: var(--font-10-5); color: var(--text-faint); font-variant-numeric: tabular-nums; }
 
-.month-group { padding-top: var(--space-2); }
-
 .month-count { font-size: var(--font-11); color: var(--text-faint); font-variant-numeric: tabular-nums; }
-.month-hint { margin-left: auto; font-size: var(--font-10); color: var(--text-faint); letter-spacing: 0.08em; }
-
-.timeline-cell { aspect-ratio: 1 / 1; min-width: 0; }
-.timeline-cell .cell { height: 100%; }
 
 /* ---------------- categories ---------------- */
 
@@ -390,7 +384,7 @@ button:focus-visible, input:focus-visible {
 .hud-metric svg { align-self: center; color: var(--text-faint); }
 .hud-metric strong { font-size: var(--font-17); line-height: 1; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; display: inline-block; min-width: 56px; text-align: left; }
 .hud-metric em { font-style: normal; display: inline-block; min-width: 3.4ch; font-size: var(--font-9-5); color: var(--text-faint); }
-.hud-tags { display: flex; align-items: center; gap: var(--space-6); overflow: hidden; flex: none; width: 330px; min-width: 330px; }
+.hud-tags { display: flex; align-items: center; gap: var(--space-6); overflow: hidden; flex: 0 1 330px; width: 330px; min-width: 0; }
 .hud-tags span {
   font-size: var(--font-9-5); color: var(--text-dim); padding: var(--space-4) var(--space-8); border-radius: var(--radius-999);
   background: rgba(255,255,255,var(--alpha-0-035)); box-shadow: 0 0 0 1px var(--line) inset;
@@ -400,6 +394,19 @@ button:focus-visible, input:focus-visible {
 .hud-chip-empty { visibility: hidden; }
 .hud-chip { flex: 0 0 100px; width: 100px; height: 19px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; }
 .hud-tags-note { background: none; box-shadow: none; padding: 0; max-width: 330px; }
+/* 窄窗口：标签条收缩后右缘淡出，不做硬切 */
+@media (max-width: 1280px) {
+  .hud-tags {
+    -webkit-mask-image: linear-gradient(to right, #000 84%, transparent);
+    mask-image: linear-gradient(to right, #000 84%, transparent);
+  }
+}
+
+/* 再窄时标签条只剩一条缝，直接收起，把空间让给指标和暂停 */
+@media (max-width: 1080px) {
+  .hud-tags { display: none; }
+}
+
 .hud-pause {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--space-6); height: 30px; padding: 0 var(--space-12);
   min-width: 72px; border-radius: var(--radius-10); background: rgba(255,255,255,var(--alpha-0-05)); color: var(--text-dim);
@@ -806,7 +813,6 @@ button:focus-visible, input:focus-visible {
   .view-shell, .stage-full, .toast, .dialog, .group-panel { animation-duration: 1ms !important; }
   .nav-indicator { transition-duration: 1ms !important; }
   .cell, .category-card, .nav-item, .tag-pill { transition-duration: 1ms !important; }
-  html.flip-animating * { animation: none !important; }
 }
 
 .view-shell {
@@ -986,23 +992,6 @@ button:focus-visible, input:focus-visible {
   width: 88px;
   height: 88px;
 }
-.month-header {
-  position: sticky;
-  top: 0;
-  z-index: 4;
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-6);
-  background: linear-gradient(to bottom, var(--bg) 66%, rgba(8,8,10,var(--alpha-0-82)) 84%, transparent);
-  padding: var(--space-22) var(--space-2) var(--space-14);
-}
-.timeline-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--cell-min, 160px), 1fr));
-  padding-bottom: var(--space-26);
-  gap: var(--space-18);
-}
-
 .category-scroll {
   flex: 1;
   min-height: 0;
@@ -1568,7 +1557,7 @@ button:focus-visible, input:focus-visible {
   letter-spacing: 0.01em;
 }
 .brand-sub {
-  color: var(--text-faint);
+  color: var(--text-meta);
   text-transform: uppercase;
   font-size: var(--font-9);
   letter-spacing: 0.14em;
@@ -1579,7 +1568,7 @@ button:focus-visible, input:focus-visible {
   align-items: center;
   gap: var(--space-8);
   background: var(--bg-elevated);
-  color: var(--text-faint);
+  color: var(--text-meta);
   font-size: var(--font-12);
   text-align: left;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
@@ -1595,7 +1584,7 @@ button:focus-visible, input:focus-visible {
   letter-spacing: 0.14em;
   font-weight: 600;
   padding: var(--space-26) var(--space-12) var(--space-10);
-  color: var(--text-faint);
+  color: var(--text-meta);
 }
 .nav-item {
   position: relative;
