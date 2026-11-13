@@ -86,7 +86,7 @@ button:focus-visible, input:focus-visible {
 .nav-item:hover { background: var(--bg-hover); color: var(--text); }
 .nav-item.active { background: var(--bg-elevated); color: var(--text); box-shadow: 0 0 0 1px var(--line) inset; }
 .nav-item .count { margin-left: auto; min-width: 3.6ch; text-align: right; font-size: var(--font-10-5); color: var(--text-faint); font-variant-numeric: tabular-nums; }
-.nav-item .dot { position: absolute; right: 10px; top: 50%; margin-top: -var(--space-2); width: 4px; height: 4px; border-radius: 50%; background: var(--accent); opacity: 0; }
+.nav-item .dot { position: absolute; right: 10px; top: 50%; margin-top: calc(-1 * var(--space-2)); width: 4px; height: 4px; border-radius: 50%; background: var(--accent); opacity: 0; }
 .nav-item.active .dot { opacity: 1; }
 
 .tag-pill {
@@ -431,7 +431,7 @@ button:focus-visible, input:focus-visible {
 .inspector-kicker { font-size: var(--font-9-5); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); margin-bottom: var(--space-6); }
 .inspector h2 { font-size: var(--font-15); font-weight: 600; letter-spacing: -0.01em; margin: 0 0 var(--space-4); }
 .file-name { margin: 0 0 var(--space-20); font-size: var(--font-10-5); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dup-note { margin: -var(--space-12) 0 var(--space-18); font-size: var(--font-10-5); color: var(--accent); }
+.dup-note { margin: calc(-1 * var(--space-12)) 0 var(--space-18); font-size: var(--font-10-5); color: var(--accent); }
 .caption { font-size: var(--font-12-5); line-height: 1.68; color: rgba(245,243,242,var(--alpha-0-84)); margin: 0 0 var(--space-20); }
 .section-label { font-size: var(--font-9-5); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); margin: 0 0 var(--space-8); }
 .meta-grid { display: grid; grid-template-columns: 66px 1fr; gap: var(--space-7) var(--space-10); font-size: var(--font-11-5); margin: 0 0 var(--space-20); }
