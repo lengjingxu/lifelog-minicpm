@@ -871,7 +871,9 @@ async fn generate_thumbs(
 
 /// 导入本地文件夹：先跑 Python 的 ingest，再补齐缩略图，两步都流式回报。
 fn run_python_cli(home: &Path, args: &[String]) -> Result<serde_json::Value, String> {
-    let root = desktop_root();
+    // lifelog 包在仓库根目录，不在 desktop/ 下；这里必须用 repo_root，
+    // 否则 from lifelog.cli import main 会 ModuleNotFoundError（相册/标签/删除都会报错）
+    let root = repo_root();
     let output = std::process::Command::new("python3")
         .arg("-c")
         .arg("from lifelog.cli import main; main()")
@@ -959,7 +961,7 @@ async fn import_folder(
 ) -> Result<serde_json::Value, String> {
     let home = db.data_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let root = desktop_root();
+        let root = repo_root();
         let _ = app.emit("import-progress", serde_json::json!({"stage": "ingest", "message": "正在扫描文件夹"}));
         let output = std::process::Command::new("python3")
             .arg("-c")
