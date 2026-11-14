@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import clsx from "clsx";
 import { Hash, Layers, MapPin, Tags, Users } from "lucide-react";
 import { assetSrc, type GroupSummary } from "../api";
@@ -47,6 +48,27 @@ export function Categories({ kind, groups, loading, onPick, onKindChange }: Prop
   useEffect(() => setActiveKind(kind), [kind]);
   const copy = COPY[activeKind];
   const Icon = copy.icon;
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const panelId = `category-panel-${activeKind}`;
+
+  const pick = (next: CategoryKind) => {
+    setActiveKind(next);
+    onKindChange(next);
+  };
+
+  // tabs 约定：←/→ 循环切换，Home/End 到首尾；Tab 只停一次，其余用 roving tabindex。
+  const onTabKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    const index = TABS.findIndex((tab) => tab.kind === activeKind);
+    let next: number | null = null;
+    if (event.key === "ArrowRight") next = (index + 1) % TABS.length;
+    else if (event.key === "ArrowLeft") next = (index - 1 + TABS.length) % TABS.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = TABS.length - 1;
+    if (next === null) return;
+    event.preventDefault();
+    pick(TABS[next].kind);
+    tabRefs.current[next]?.focus();
+  };
 
   return (
     <div className="category-scroll">
@@ -65,51 +87,58 @@ export function Categories({ kind, groups, loading, onPick, onKindChange }: Prop
         </div>
       </div>
 
-      <div className="category-tabs" role="tablist">
-        {TABS.map((tab) => (
+      <div className="category-tabs" role="tablist" aria-label="分类类型">
+        {TABS.map((tab, index) => (
           <button
             key={tab.kind}
+            ref={(element) => { tabRefs.current[index] = element; }}
             type="button"
             role="tab"
+            id={`category-tab-${tab.kind}`}
             aria-selected={activeKind === tab.kind}
+            aria-controls={panelId}
+            tabIndex={activeKind === tab.kind ? 0 : -1}
             className={clsx("category-tab", activeKind === tab.kind && "active")}
-            onClick={() => { setActiveKind(tab.kind); onKindChange(tab.kind); }}
+            onClick={() => pick(tab.kind)}
+            onKeyDown={onTabKeyDown}
           >
             {tab.label}
           </button>
         ))}
       </div>
 
-      {loading ? (
-        <div className="category-loading">正在整理分类…</div>
-      ) : groups.length === 0 ? (
-        <div className="category-loading">还没有可用的分类数据。</div>
-      ) : (
-        <div className="category-grid">
-          {groups.map((group, index) => (
-            <button
-              type="button"
-              className="category-card"
-              key={group.name}
-              onClick={() => onPick(activeKind, group.name)}
-              style={{ animationDelay: Math.min(index, 10) * 24 + "ms" }}
-            >
-              <span className="category-cover">
-                <Cover thumb={group.cover_thumb} />
-              </span>
-              <span className="category-front glass-surface on-color">
-                <span className="category-meta">
-                  <span className="category-name">
-                    <Hash size={12} strokeWidth={1.8} />
-                    {group.name}
-                  </span>
-                  <span className="category-count">{group.count} 张</span>
+      <div role="tabpanel" id={panelId} aria-labelledby={`category-tab-${activeKind}`}>
+        {loading ? (
+          <div className="category-loading">正在整理分类…</div>
+        ) : groups.length === 0 ? (
+          <div className="category-loading">还没有可用的分类数据。</div>
+        ) : (
+          <div className="category-grid">
+            {groups.map((group, index) => (
+              <button
+                type="button"
+                className="category-card"
+                key={group.name}
+                onClick={() => onPick(activeKind, group.name)}
+                style={{ animationDelay: Math.min(index, 10) * 24 + "ms" }}
+              >
+                <span className="category-cover">
+                  <Cover thumb={group.cover_thumb} />
                 </span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+                <span className="category-front glass-surface on-color">
+                  <span className="category-meta">
+                    <span className="category-name">
+                      <Hash size={12} strokeWidth={1.8} />
+                      {group.name}
+                    </span>
+                    <span className="category-count">{group.count} 张</span>
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

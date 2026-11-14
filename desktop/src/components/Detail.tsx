@@ -22,6 +22,8 @@ type Props = {
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
+  /** 已经加载到的列表里还有没有下一张；没传时按 total 推算。 */
+  canNext?: boolean;
   onTag: (tag: string) => void;
   onAction: (label: string) => void;
   origin?: { x: number; y: number; w: number; h: number } | null;
@@ -37,7 +39,7 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
   );
 }
 
-export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTag, onAction, origin, closing = false }: Props) {
+export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTag, onAction, origin, closing = false, canNext }: Props) {
   const [fullLoaded, setFullLoaded] = useState(false);
   const [fullFailed, setFullFailed] = useState(false);
   const fullRef = useRef<HTMLImageElement | null>(null);
@@ -144,7 +146,7 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
           type="button"
           className="nav-btn next"
           onClick={onNext}
-          disabled={index >= total - 1}
+          disabled={canNext === undefined ? index >= total - 1 : !canNext}
           aria-label="下一张"
         >
           <ChevronRight size={18} strokeWidth={1.8} />

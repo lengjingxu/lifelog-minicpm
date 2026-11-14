@@ -41,12 +41,9 @@ export function ImportDialog({
   onConfirm,
   onRetryAuth,
 }: Props) {
-  const canClose = !busy || authError;
-  const dialogRef = useDialogFocus<HTMLDivElement>(() => {
-    if (canClose) onCancel();
-  });
+  const dialogRef = useDialogFocus<HTMLDivElement>(onCancel);
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={busy ? undefined : onCancel}>
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onCancel}>
       <div
         ref={dialogRef}
         className="dialog"
@@ -92,8 +89,8 @@ export function ImportDialog({
         </div>
 
         <div className="dialog-actions">
-          <button type="button" className="ghost-button" onClick={onCancel} disabled={busy && !authError}>
-            取消
+          <button type="button" className="ghost-button" onClick={onCancel}>
+            {busy ? "后台继续" : "取消"}
           </button>
           {authError ? (
             <button type="button" className="primary-btn" onClick={onRetryAuth} disabled={busy}>

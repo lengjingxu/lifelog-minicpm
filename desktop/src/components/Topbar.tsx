@@ -83,11 +83,13 @@ export function Topbar({
       )}
       <div className="toolbar-divider" />
 
-      <div className="view-switch" aria-label="视图切换">
+      <div className="view-switch" role="group" aria-label="视图切换">
         <button
           type="button"
           className={clsx(view === "library" && "active")}
           onClick={() => onView("library")}
+          aria-label="网格视图"
+          aria-pressed={view === "library"}
           title="网格 ⌘1"
         >
           <LayoutGrid size={14} strokeWidth={1.8} />
@@ -96,6 +98,8 @@ export function Topbar({
           type="button"
           className={clsx(view === "timeline" && "active")}
           onClick={() => onView("timeline")}
+          aria-label="时间线视图"
+          aria-pressed={view === "timeline"}
           title="时间线 ⌘2"
         >
           <Clock size={14} strokeWidth={1.8} />
@@ -103,15 +107,23 @@ export function Topbar({
       </div>
 
       {onExport && (
-        <button type="button" className="icon-button" onClick={onExport} title="导出当前范围（选中优先）">
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onExport}
+          aria-label="导出当前范围"
+          title="导出当前范围（选中优先）"
+        >
           <Download size={15} strokeWidth={1.8} />
         </button>
       )}
-      <div className="density-switch" aria-label="网格密度">
+      <div className="density-switch" role="group" aria-label="网格密度">
         <button
           type="button"
           className={clsx(density === "comfort" && "active")}
           onClick={() => onDensity("comfort")}
+          aria-label="舒适 6 列"
+          aria-pressed={density === "comfort"}
           title="舒适 · 6 列（⌘+）"
         >
           6
@@ -120,6 +132,8 @@ export function Topbar({
           type="button"
           className={clsx(density === "compact" && "active")}
           onClick={() => onDensity("compact")}
+          aria-label="紧凑 8 列"
+          aria-pressed={density === "compact"}
           title="紧凑 · 8 列（⌘-）"
         >
           8

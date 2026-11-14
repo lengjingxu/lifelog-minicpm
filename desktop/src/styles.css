@@ -71,7 +71,9 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   font-size: var(--font-10); color: var(--text-meta); border: 1px solid var(--line);
   border-radius: var(--radius-6); padding: var(--space-2) var(--space-6); line-height: 1.5; white-space: nowrap;
 }
-.search-clear { display: grid; place-items: center; width: 18px; height: 18px; border-radius: var(--radius-6); color: var(--text-faint); }
+.search-clear { display: grid; place-items: center; width: 18px; height: 18px; border-radius: var(--radius-6); color: var(--text-faint); position: relative; }
+/* 视觉不变，命中区扩大到 26px */
+.search-clear::after { content: ""; position: absolute; inset: -4px; }
 .search-clear:hover { background: var(--bg-hover); color: var(--text); }
 
 .view-switch button, .density-switch button {
@@ -88,7 +90,8 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 }
 .chip-row { display: flex; align-items: center; gap: var(--space-6); flex-wrap: wrap; }
 
-.chip button { display: inline-flex; color: var(--text-dim); padding: var(--space-2); }
+.chip button { display: inline-flex; color: var(--text-dim); padding: var(--space-2); position: relative; }
+.chip button::after { content: ""; position: absolute; inset: -5px; }
 .chip button:hover { color: var(--text); }
 .clear-all { font-size: var(--font-10-5); color: var(--text-faint); padding: var(--space-4) var(--space-6); }
 .clear-all:hover { color: var(--text-dim); }
@@ -816,9 +819,15 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 
 /* 减少动态 */
 @media (prefers-reduced-motion: reduce) {
-  .view-shell, .stage-full, .toast, .dialog, .group-panel { animation-duration: 1ms !important; }
+  .view-shell, .stage-full, .toast, .dialog, .group-panel,
+  .category-card, .organize-phase, .stage-image, .trail { animation-duration: 1ms !important; }
   .nav-indicator { transition-duration: 1ms !important; }
   .cell, .category-card, .nav-item, .tag-pill { transition-duration: 1ms !important; }
+  /* 无限循环的"活着"感在减少动态下不留 */
+  .skeleton, .live-dot, .content-loading-bar, .select-mark, .spin { animation: none !important; }
+  /* hover 的抬升/缩放一并停掉，只留颜色与阴影变化 */
+  .cell:hover, .category-card:hover { transform: none !important; }
+  .cell .overlay { transform: none !important; }
 }
 
 .view-shell {
@@ -888,6 +897,8 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   align-items: center;
   gap: var(--space-10);
 }
+/* 选中条在上时把 toast 抬起来，否则会盖住"删除记录"这类按钮 */
+.toast.raised { bottom: 82px; }
 .toast-action {
   border: 0; background: transparent; color: var(--accent);
   font-size: var(--font-11-5); font-weight: 600; padding: var(--space-2) var(--space-4); border-radius: var(--radius-6);
