@@ -1,4 +1,3 @@
-import type { RefObject } from "react";
 import { Clock, Command, Download, LayoutGrid, Moon, Search, Sun, X } from "lucide-react";
 import clsx from "clsx";
 import type { View } from "../utils";
@@ -9,9 +8,8 @@ type Props = {
   title: string;
   subtitle: string;
   searchValue: string;
-  onSearchChange: (value: string) => void;
+  onSearchOpen: () => void;
   onSearchClear: () => void;
-  searchRef: RefObject<HTMLInputElement | null>;
   density: Density;
   onDensity: (density: Density) => void;
   view: View;
@@ -26,9 +24,8 @@ export function Topbar({
   title,
   subtitle,
   searchValue,
-  onSearchChange,
+  onSearchOpen,
   onSearchClear,
-  searchRef,
   density,
   onDensity,
   view,
@@ -51,14 +48,15 @@ export function Topbar({
         <>
       <div className="search glass-control">
         <Search size={14} strokeWidth={1.8} />
-        <input
-          ref={searchRef}
-          value={searchValue}
-          onChange={(event) => onSearchChange(event.currentTarget.value)}
-          placeholder="搜索描述、标签、地点或文字…"
-          aria-label="搜索照片"
-          spellCheck={false}
-        />
+        <button
+          type="button"
+          className={clsx("search-trigger", !searchValue && "empty")}
+          onClick={onSearchOpen}
+          aria-label="搜索照片（⌘K）"
+          title="搜索与跳转 ⌘K"
+        >
+          {searchValue || "搜索描述、标签、地点或文字…"}
+        </button>
         {searchValue ? (
           <button type="button" className="search-clear" onClick={onSearchClear} aria-label="清除搜索">
             <X size={12} strokeWidth={2} />

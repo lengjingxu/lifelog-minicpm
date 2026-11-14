@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { listen } from "@tauri-apps/api/event";
-import { AlertCircle, LoaderCircle, Search, X } from "lucide-react";
+import {
+  AlertCircle,
+  Clock,
+  Folder,
+  Images,
+  LoaderCircle,
+  MapPin,
+  Search,
+  Settings,
+  Sparkles,
+  Tags,
+  Users,
+  X,
+} from "lucide-react";
 import {
   getFacets,
   health,
@@ -37,6 +50,7 @@ import { VirtualGrid } from "./components/VirtualGrid";
 import { Timeline } from "./components/Timeline";
 import { Albums } from "./components/Albums";
 import { Categories } from "./components/Categories";
+import { CommandPalette, type PaletteItem, type PaletteSection } from "./components/CommandPalette";
 import { Detail } from "./components/Detail";
 import { SelectionBar } from "./components/SelectionBar";
 import { ImportDialog, type ImportPlan, type ImportProgress } from "./components/ImportDialog";
@@ -166,10 +180,10 @@ const route = useMemo(readRoute, []);
   }, [theme, forcedTheme]);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [recognitionOpen, setRecognitionOpen] = useState(route.modal === "recognize");
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const live = useLiveController();
   const demoStarted = useRef(false);
 
-  const searchRef = useRef<HTMLInputElement>(null);
   const detailCloseTimer = useRef<number | null>(null);
   const dialogCloseTimer = useRef<number | null>(null);
   const pendingDetailStep = useRef(0);
@@ -813,7 +827,6 @@ const route = useMemo(readRoute, []);
     pendingSearch.current = null;
     setQueryInput("");
     setQuery("");
-    searchRef.current?.focus();
   }, []);
 
   const clearAll = useCallback(() => {
@@ -977,18 +990,21 @@ const route = useMemo(readRoute, []);
       );
       const activationKey = event.key === "Enter" || event.key === " " || event.key === "Spacebar";
 
+      // ⌘K 自己负责开合，弹窗里不响应
+      if (meta && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        if (detailAsset || recognitionOpen || deleteOpen || importPlan) return;
+        setPaletteOpen((open) => !open);
+        return;
+      }
+      // 面板打开时，其余快捷键与网格操作都让路（Esc / ↑↓ / ⏎ / Tab 面板自己处理）
+      if (paletteOpen) return;
       // 弹窗自己处理 Esc / Tab（useDialogFocus 在捕获阶段拦截），这里不重复处理。
       if (recognitionOpen) return;
       if ((deleteOpen || importPlan) && event.key === "Escape") return;
 
       if (onInteractive && activationKey && !meta) return;
 
-      if (meta && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-        return;
-      }
       if (meta && event.key === "1") {
         event.preventDefault();
         navigate("library");
@@ -1002,7 +1018,7 @@ const route = useMemo(readRoute, []);
       if (meta && event.key === "3") {
         event.preventDefault();
         setView("library");
-        searchRef.current?.focus();
+        setPaletteOpen(true);
         return;
       }
       if (meta && (event.key === "+" || event.key === "=")) {
@@ -1109,6 +1125,7 @@ const route = useMemo(readRoute, []);
     recognitionOpen,
     deleteOpen,
     importPlan,
+    paletteOpen,
   ]);
 
   // 选中条被卸载时（取消选择、批量操作完成），焦点会掉到 body；交回原来那张缩略图。
@@ -1174,6 +1191,70 @@ const route = useMemo(readRoute, []);
   if (scene) conditions.push({ key: "scene", label: `场景 · ${scene}`, remove: () => setScene(null) });
   if (person) conditions.push({ key: "person", label: `人物 · ${person}`, remove: () => setPerson(null) });
   if (place) conditions.push({ key: "place", label: `地点 · ${place}`, remove: () => setPlace(null) });
+
+  // ⌘K 面板：跳转 + 从 facets 里取的热门筛选 + 直接搜索
+  const paletteSections = useMemo(() => {
+    const q = queryInput.trim().toLowerCase();
+    const hit = (text: string) => !q || text.toLowerCase().includes(q);
+    const sections: PaletteSection[] = [];
+
+    if (queryInput.trim()) {
+      const value = queryInput.trim();
+      sections.push({
+        label: "搜索",
+        items: [{
+          id: "search-query",
+          title: `搜索「${value}」`,
+          subtitle: "在全部照片中查找",
+          icon: Search,
+          keycap: "⏎",
+          run: () => {
+            setView("library");
+            setQuery(value);
+          },
+        }],
+      });
+    }
+
+    const jumps: PaletteItem[] = [
+      { id: "view-library", title: "全部照片", subtitle: `${stats?.assets ?? 0} 张`, icon: Images, keycap: "⌘1", run: () => navigate("library") },
+      { id: "view-timeline", title: "时间线", subtitle: "按月份回看", icon: Clock, keycap: "⌘2", run: () => navigate("timeline") },
+      { id: "view-tags", title: "分类浏览", subtitle: "标签 · 人物 · 地点", icon: Tags, run: () => navigate("tags") },
+      { id: "view-organize", title: "整理视图", subtitle: "AI 归位预演", icon: Sparkles, run: () => navigate("organize") },
+      { id: "view-settings", title: "设置", subtitle: "本地库 · 模型 · 缓存", icon: Settings, keycap: "⌘,", run: () => navigate("settings") },
+    ].filter((item) => hit(item.title)) as PaletteItem[];
+    if (jumps.length) sections.push({ label: "跳转", items: jumps });
+
+    const tags = (displayFacets?.tags ?? []).filter(([name]) => hit(name)).slice(0, 5)
+      .map<PaletteItem>(([name, count]) => ({
+        id: `tag-${name}`, title: name, subtitle: `标签 · ${count} 张`, icon: Tags,
+        run: () => { toggleTag(name); },
+      }));
+    if (tags.length) sections.push({ label: "标签", items: tags });
+
+    const people = (displayFacets?.people ?? []).filter(([name]) => hit(name)).slice(0, 4)
+      .map<PaletteItem>(([name, count]) => ({
+        id: `person-${name}`, title: name, subtitle: `人物 · ${count} 张`, icon: Users,
+        run: () => { setView("library"); setPerson(name); setDetailId(null); },
+      }));
+    if (people.length) sections.push({ label: "人物", items: people });
+
+    const places = (displayFacets?.places ?? []).filter(([name]) => hit(name)).slice(0, 4)
+      .map<PaletteItem>(([name, count]) => ({
+        id: `place-${name}`, title: name, subtitle: `地点 · ${count} 张`, icon: MapPin,
+        run: () => { setView("library"); setPlace(name); setDetailId(null); },
+      }));
+    if (places.length) sections.push({ label: "地点", items: places });
+
+    const albums = (displayFacets?.albums ?? []).filter(([name]) => hit(name)).slice(0, 4)
+      .map<PaletteItem>(([name, count]) => ({
+        id: `album-${name}`, title: name, subtitle: `相册 · ${count} 张`, icon: Folder,
+        run: () => { setView("library"); setAlbum(name); },
+      }));
+    if (albums.length) sections.push({ label: "相册", items: albums });
+
+    return sections;
+  }, [queryInput, displayFacets, stats, navigate, toggleTag]);
 
   const content = (() => {
     if (error && view !== "organize" && view !== "settings") {
@@ -1292,7 +1373,7 @@ const route = useMemo(readRoute, []);
           setPlace((current) => (current === name ? null : name));
           setDetailId(null);
         }}
-        onSearch={() => searchRef.current?.focus()}
+        onSearch={() => setPaletteOpen(true)}
         liveStatus={{
           status: live.view.status,
           done: Math.min(live.view.total, live.view.done),
@@ -1317,9 +1398,8 @@ const route = useMemo(readRoute, []);
           subtitle={subtitle}
           onExport={selection.length > 0 || active ? () => void handleExport() : undefined}
           searchValue={queryInput}
-          onSearchChange={handleSearchChange}
+          onSearchOpen={() => setPaletteOpen(true)}
           onSearchClear={clearSearch}
-          searchRef={searchRef}
           density={density}
           onDensity={setDensity}
           view={view}
@@ -1430,6 +1510,14 @@ const route = useMemo(readRoute, []);
           onRetryAuth={() => void runImportPlan()}
         />
       )}
+
+      <CommandPalette
+        open={paletteOpen}
+        query={queryInput}
+        onQueryChange={handleSearchChange}
+        sections={paletteSections}
+        onClose={() => setPaletteOpen(false)}
+      />
 
       {toast && (
         <div className={clsx("toast glass-surface", selection.length > 0 && "raised")} role="status">
