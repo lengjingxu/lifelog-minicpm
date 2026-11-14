@@ -41,7 +41,7 @@ export function DeleteDialog({ count, busy = false, onCancel, onConfirm }: Props
         </label>
 
         <div className="dialog-actions">
-          <button type="button" className="ghost-btn" onClick={onCancel} disabled={busy}>
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={busy}>
             取消
           </button>
           <button

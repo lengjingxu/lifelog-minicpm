@@ -86,7 +86,7 @@ export function ImportDialog({
         </div>
 
         <div className="dialog-actions">
-          <button type="button" className="ghost-btn" onClick={onCancel} disabled={busy && !authError}>
+          <button type="button" className="ghost-button" onClick={onCancel} disabled={busy && !authError}>
             取消
           </button>
           {authError ? (

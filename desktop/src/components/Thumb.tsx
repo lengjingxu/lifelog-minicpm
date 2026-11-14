@@ -71,9 +71,9 @@ export function Thumb({ asset, dupCount, selected, multi, onSelect, onOpen }: Pr
           />
         )}
       </span>
-      <span className="badge glass-surface">{kindLabel(asset)}</span>
+      <span className="badge glass-surface on-color">{kindLabel(asset)}</span>
       {dupCount && dupCount > 1 && (
-        <span className="dup-badge glass-surface" title={`同组 ${dupCount} 张，已折叠`}>
+        <span className="dup-badge glass-surface on-color" title={`同组 ${dupCount} 张，已折叠`}>
           ×{dupCount}
         </span>
       )}
