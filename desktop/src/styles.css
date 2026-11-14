@@ -15,8 +15,8 @@ body {
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
 button:disabled { cursor: default; }
 input { font: inherit; color: inherit; }
-button:focus-visible, input:focus-visible {
-  outline: 1px solid var(--outline);
+button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--outline);
   outline-offset: 2px;
 }
 
@@ -159,6 +159,12 @@ button:focus-visible, input:focus-visible {
   transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 .cell:hover .overlay { opacity: 1; transform: none; }
+/* 键盘聚焦时也要能看到描述：只有在没有鼠标时才走 focus，避免鼠标点选后残留渐变。 */
+.cell:focus-visible .overlay { opacity: 1; transform: none; }
+.cell:focus-visible {
+  outline: 2px solid var(--outline);
+  outline-offset: 3px;
+}
 .cell .overlay span {
   display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: var(--font-10-5); line-height: 1.4; color: rgba(255,255,255,var(--alpha-0-9));
