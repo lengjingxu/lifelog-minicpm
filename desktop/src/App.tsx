@@ -928,14 +928,17 @@ const route = useMemo(readRoute, []);
       const target = event.target as HTMLElement | null;
       const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
       const meta = event.metaKey || event.ctrlKey;
+      // 焦点落在交互元素上时，Enter/Space 属于它的激活键，不能被网格的快捷键吃掉。
+      const onInteractive = !!target?.closest?.(
+        'button, a[href], input, select, textarea, [contenteditable="true"], [role="button"], [role="tab"], [role="menuitem"], [role="switch"]',
+      );
+      const activationKey = event.key === "Enter" || event.key === " " || event.key === "Spacebar";
 
-      if (recognitionOpen) {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          setRecognitionOpen(false);
-        }
-        return;
-      }
+      // 弹窗自己处理 Esc / Tab（useDialogFocus 在捕获阶段拦截），这里不重复处理。
+      if (recognitionOpen) return;
+      if ((deleteOpen || importPlan) && event.key === "Escape") return;
+
+      if (onInteractive && activationKey && !meta) return;
 
       if (meta && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -976,7 +979,8 @@ const route = useMemo(readRoute, []);
       }
       if (meta && event.key.toLowerCase() === "a" && !typing && view === "library") {
         event.preventDefault();
-        setSelection(filteredAssets.map((asset) => asset.id));
+        // 用屏上实际渲染的那份列表：折叠掉的重复项不该被“全选”选中。
+        setSelection(currentList.map((asset) => asset.id));
         return;
       }
 
@@ -1013,28 +1017,28 @@ const route = useMemo(readRoute, []);
         return;
       }
 
-      if (view !== "library" || filteredAssets.length === 0) return;
+      if (view !== "library" || currentList.length === 0) return;
       if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Enter"].includes(event.key)) return;
       event.preventDefault();
 
       if (event.key === "Enter") {
-        const asset = filteredAssets.find((item) => item.id === anchorId) ?? filteredAssets[0];
+        const asset = currentList.find((item) => item.id === anchorId) ?? currentList[0];
         openDetail(asset);
         return;
       }
 
-      const currentIndex = Math.max(0, filteredAssets.findIndex((asset) => asset.id === anchorId));
+      const currentIndex = Math.max(0, currentList.findIndex((asset) => asset.id === anchorId));
       let nextIndex = currentIndex;
       if (event.key === "ArrowLeft") nextIndex = Math.max(0, currentIndex - 1);
-      if (event.key === "ArrowRight") nextIndex = Math.min(filteredAssets.length - 1, currentIndex + 1);
+      if (event.key === "ArrowRight") nextIndex = Math.min(currentList.length - 1, currentIndex + 1);
       if (event.key === "ArrowUp") nextIndex = Math.max(0, currentIndex - columns);
-      if (event.key === "ArrowDown") nextIndex = Math.min(filteredAssets.length - 1, currentIndex + columns);
-      const nextAsset = filteredAssets[nextIndex];
+      if (event.key === "ArrowDown") nextIndex = Math.min(currentList.length - 1, currentIndex + columns);
+      const nextAsset = currentList[nextIndex];
       if (!nextAsset) return;
       if (event.shiftKey) {
         const from = Math.min(currentIndex, nextIndex);
         const to = Math.max(currentIndex, nextIndex);
-        setSelection(filteredAssets.slice(from, to + 1).map((asset) => asset.id));
+        setSelection(currentList.slice(from, to + 1).map((asset) => asset.id));
       } else {
         setSelection([nextAsset.id]);
       }
@@ -1056,12 +1060,14 @@ const route = useMemo(readRoute, []);
     active,
     clearAll,
     view,
-    filteredAssets,
+    currentList,
     anchorId,
     columns,
     openDetail,
     navigate,
     recognitionOpen,
+    deleteOpen,
+    importPlan,
   ]);
 
   const range = yearRange(stats);
@@ -1318,7 +1324,7 @@ const route = useMemo(readRoute, []);
         closing={dialogClosing}
       />
 
-      {selection.length > 0 && (
+      {selection.length > 0 && !detailAsset && (
         <SelectionBar
           count={selection.length}
           busy={bulkBusy}

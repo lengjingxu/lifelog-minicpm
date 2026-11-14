@@ -11,6 +11,7 @@ import {
 import clsx from "clsx";
 import { assetSrc, type Asset } from "../api";
 import { DURATION, EASE, reducedMotion } from "../motion";
+import { useDialogFocus } from "../useDialogFocus";
 import { kindLabel, peopleList, splitList, timeLabel } from "../utils";
 
 type Props = {
@@ -40,6 +41,7 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
   const [fullLoaded, setFullLoaded] = useState(false);
   const [fullFailed, setFullFailed] = useState(false);
   const fullRef = useRef<HTMLImageElement | null>(null);
+  const dialogRef = useDialogFocus<HTMLDivElement>(onClose, { focusContainer: true });
 
   // 原图直接挂在可见的 img 上，但先不淡入：等 decode() 完成再显示。
   // 这样只有一次解码，且解码走异步路径，不会把 30-50ms 的活儿算进某一帧。
@@ -103,7 +105,14 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
   const place = splitList(asset.place).join("、");
 
   return (
-    <div className={clsx("overlay-root", closing && "closing")} role="dialog" aria-modal="true" aria-label="照片详情">
+    <div
+      ref={dialogRef}
+      className={clsx("overlay-root", closing && "closing")}
+      role="dialog"
+      aria-modal="true"
+      aria-label="照片详情"
+      tabIndex={-1}
+    >
       <div className="stage" onClick={(event) => event.target === event.currentTarget && onClose()}>
         <div ref={stageRef} className={clsx("stage-image", fullLoaded && "full-ready")}>
           <img className="stage-thumb" src={thumb} alt="" aria-hidden="true" />

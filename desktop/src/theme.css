@@ -16,7 +16,7 @@
   --accent-line: rgba(255,74,74,0.30);
   --glow-a: rgba(255,74,74,0.085);
   --glow-b: rgba(90,105,160,0.045);
-  --outline: rgba(255,255,255,0.45);
+  --outline: rgba(255,255,255,0.72);
   --scroll-thumb: rgba(255,255,255,0.08);
   --scroll-thumb-hover: rgba(255,255,255,0.14);
 
@@ -210,7 +210,7 @@
   --accent-line: rgba(217,56,47,0.24);
   --glow-a: rgba(217,56,47,0.06);
   --glow-b: rgba(90,105,160,0.05);
-  --outline: rgba(23,23,26,0.58);
+  --outline: rgba(23,23,26,0.78);
   --scroll-thumb: rgba(23,23,26,0.14);
   --scroll-thumb-hover: rgba(23,23,26,0.24);
 

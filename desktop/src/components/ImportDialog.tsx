@@ -1,4 +1,5 @@
 import { CloudDownload, RefreshCw } from "lucide-react";
+import { useDialogFocus } from "../useDialogFocus";
 
 export type ImportPlan = {
   listed: number;
@@ -40,9 +41,14 @@ export function ImportDialog({
   onConfirm,
   onRetryAuth,
 }: Props) {
+  const canClose = !busy || authError;
+  const dialogRef = useDialogFocus<HTMLDivElement>(() => {
+    if (canClose) onCancel();
+  });
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={busy ? undefined : onCancel}>
       <div
+        ref={dialogRef}
         className="dialog"
         role="dialog"
         aria-modal="true"

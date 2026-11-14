@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
+import { useDialogFocus } from "../useDialogFocus";
 
 type Props = {
   count: number;
@@ -10,9 +11,11 @@ type Props = {
 
 export function DeleteDialog({ count, busy = false, onCancel, onConfirm }: Props) {
   const [confirmed, setConfirmed] = useState(false);
+  const dialogRef = useDialogFocus<HTMLDivElement>(onCancel);
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onCancel}>
       <div
+        ref={dialogRef}
         className="dialog"
         role="dialog"
         aria-modal="true"

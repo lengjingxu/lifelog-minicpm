@@ -13,6 +13,7 @@ import {
 import type { Asset } from "../api";
 import type { LiveController } from "../live";
 import { assetSrc } from "../api";
+import { useDialogFocus } from "../useDialogFocus";
 
 type Props = {
   open: boolean;
@@ -45,6 +46,7 @@ export function RecognitionDialog({
   const [concurrency, setConcurrency] = useState(4);
   const [speed, setSpeed] = useState(2);
   const [submitting, setSubmitting] = useState(false);
+  const dialogRef = useDialogFocus<HTMLElement>(onClose, { enabled: open });
 
   const view = live.view;
   const total = Math.max(0, view.active ? view.total : count);
@@ -117,6 +119,7 @@ export function RecognitionDialog({
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <section
+        ref={dialogRef}
         className={clsx("recognition-dialog dialog glass-surface", closing && "closing")}
         style={{ ["--dialog-origin" as string]: origin }}
         role="dialog"
