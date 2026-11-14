@@ -170,6 +170,9 @@ const route = useMemo(readRoute, []);
   const demoStarted = useRef(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
+  const detailCloseTimer = useRef<number | null>(null);
+  const dialogCloseTimer = useRef<number | null>(null);
+  const pendingDetailStep = useRef(0);
   const searchTimer = useRef<number | null>(null);
   const toastTimer = useRef<number | null>(null);
   const [dataVersion, setDataVersion] = useState(0);
@@ -714,8 +717,10 @@ const route = useMemo(readRoute, []);
       setDetailId(null);
       return;
     }
+    if (detailCloseTimer.current) window.clearTimeout(detailCloseTimer.current);
     setDetailClosing(true);
-    window.setTimeout(() => {
+    detailCloseTimer.current = window.setTimeout(() => {
+      detailCloseTimer.current = null;
       setDetailClosing(false);
       setDetailId(null);
     }, 200);
@@ -726,14 +731,22 @@ const route = useMemo(readRoute, []);
       setRecognitionOpen(false);
       return;
     }
+    if (dialogCloseTimer.current) window.clearTimeout(dialogCloseTimer.current);
     setDialogClosing(true);
-    window.setTimeout(() => {
+    dialogCloseTimer.current = window.setTimeout(() => {
+      dialogCloseTimer.current = null;
       setDialogClosing(false);
       setRecognitionOpen(false);
     }, 180);
   }, []);
 
   const openDetail = useCallback((asset: Asset, rect?: DOMRect) => {
+    // 上一个关闭动画还在跑时又打开了新的，不能让它把新的那张关掉
+    if (detailCloseTimer.current) {
+      window.clearTimeout(detailCloseTimer.current);
+      detailCloseTimer.current = null;
+      setDetailClosing(false);
+    }
     if (rect) setDetailOrigin({ x: rect.left, y: rect.top, w: rect.width, h: rect.height });
     else setDetailOrigin(null);
     setDetailId(asset.id);
@@ -768,23 +781,19 @@ const route = useMemo(readRoute, []);
     [anchorId, currentList],
   );
 
-  const navigateDetail = useCallback(
-    (delta: number) => {
-      if (!detailAsset || !currentList.length) return;
-      const index = currentList.findIndex((asset) => asset.id === detailAsset.id);
-      const next = currentList[index + delta];
-      if (!next) return;
-      setDetailId(next.id);
-      setSelection([next.id]);
-      setAnchorId(next.id);
-    },
-    [currentList, detailAsset],
-  );
-
   const applyTag = useCallback((tag: string) => {
     setView("library");
     setTags((previous) => unique([...previous, tag]));
     setDetailId(null);
+  }, []);
+
+  // 侧栏的标签是“按一下筛、再按一下取消”，和相册保持一致。
+  const toggleTag = useCallback((tag: string) => {
+    setView("library");
+    setDetailId(null);
+    setTags((previous) =>
+      previous.includes(tag) ? previous.filter((item) => item !== tag) : unique([...previous, tag]),
+    );
   }, []);
 
   const handleSearchChange = useCallback((value: string) => {
@@ -900,6 +909,40 @@ const route = useMemo(readRoute, []);
       .finally(() => setLoadingMore(false));
   }, [loadingMore, hasMore, view, query, tagKey, tags, album, scene, person, place, dayFrom, dayTo, assets, fixtureUserTags]);
 
+  const navigateDetail = useCallback(
+    (delta: number) => {
+      if (!detailAsset || !currentList.length) return;
+      const index = currentList.findIndex((asset) => asset.id === detailAsset.id);
+      const next = currentList[index + delta];
+      if (!next) {
+        // 已加载的这一页到头了：先补一页，拿到新数据后在下面的 effect 里继续前进
+        if (delta > 0 && hasMore && !loadingMore) {
+          pendingDetailStep.current = delta;
+          loadMore();
+        }
+        return;
+      }
+      setDetailId(next.id);
+      setSelection([next.id]);
+      setAnchorId(next.id);
+    },
+    [currentList, detailAsset, hasMore, loadingMore, loadMore],
+  );
+
+  // 补完一页后把刚才按下的“下一张”补上
+  useEffect(() => {
+    const step = pendingDetailStep.current;
+    if (!step) return;
+    if (loadingMore) return;
+    const index = currentList.findIndex((asset) => asset.id === detailId);
+    const next = currentList[index + step];
+    pendingDetailStep.current = 0;
+    if (!next) return;
+    setDetailId(next.id);
+    setSelection([next.id]);
+    setAnchorId(next.id);
+  }, [currentList, detailId, loadingMore]);
+
   useEffect(() => {
     if (view !== "library" || loading || firstGridMarked.current) return;
     if (assets.length === 0 && stats === null) return;
@@ -998,10 +1041,8 @@ const route = useMemo(readRoute, []);
         return;
       }
 
-      if (view === "organize" || view === "settings") {
-        if (event.key === "Escape") setRecognitionOpen(false);
-        return;
-      }
+      // 整理/设置视图没有网格快捷键，但焦点所在元素上的 Enter/Space 已经在上方放行
+      if (view === "organize" || view === "settings") return;
 
       if (typing) {
         if (event.key === "Escape") {
@@ -1069,6 +1110,23 @@ const route = useMemo(readRoute, []);
     deleteOpen,
     importPlan,
   ]);
+
+  // 选中条被卸载时（取消选择、批量操作完成），焦点会掉到 body；交回原来那张缩略图。
+  const selectionWasFocused = useRef(false);
+  useEffect(() => {
+    if (selection.length > 0) {
+      selectionWasFocused.current = true;
+      return;
+    }
+    if (!selectionWasFocused.current) return;
+    selectionWasFocused.current = false;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    const target = anchorId
+      ? document.querySelector<HTMLElement>(`[data-asset-id="${anchorId}"]`)
+      : null;
+    target?.focus({ preventScroll: true });
+  }, [selection.length, anchorId]);
 
   const range = yearRange(stats);
   const categoryCount = view === "organize" ? (allAssets?.length ?? 0) : (stats?.assets ?? 0);
@@ -1219,19 +1277,19 @@ const route = useMemo(readRoute, []);
         activePlace={place}
         placeTotal={placeTotal ?? 0}
         onNavigate={navigate}
-        onTag={applyTag}
+        onTag={toggleTag}
         onAlbum={(name) => {
           setView("library");
           setAlbum((current) => (current === name ? null : name));
         }}
         onPerson={(name) => {
           setView("library");
-          setPerson(name);
+          setPerson((current) => (current === name ? null : name));
           setDetailId(null);
         }}
         onPlace={(name) => {
           setView("library");
-          setPlace(name);
+          setPlace((current) => (current === name ? null : name));
           setDetailId(null);
         }}
         onSearch={() => searchRef.current?.focus()}
@@ -1304,12 +1362,20 @@ const route = useMemo(readRoute, []);
           asset={detailAsset}
           dup={dupIndex.get(detailAsset.id)}
           index={Math.max(0, detailIndex)}
-          total={view === "library" ? (monthTotal ?? Math.max(detailTotal, stats?.assets ?? 0)) : detailTotal}
+          // 全部加载完时用实际列表长度，避免计数器和是否能翻页各说一套
+          total={
+            view === "library" && !hasMore
+              ? currentList.length
+              : view === "library"
+                ? (monthTotal ?? Math.max(detailTotal, stats?.assets ?? 0))
+                : detailTotal
+          }
           origin={detailOrigin}
           onClose={closeDetail}
           closing={detailClosing}
           onPrev={() => navigateDetail(-1)}
           onNext={() => navigateDetail(1)}
+          canNext={detailIndex < currentList.length - 1 || hasMore}
           onTag={applyTag}
           onAction={(label) => showToast(`${label}将在 P2 接入`)}
         />
@@ -1355,6 +1421,7 @@ const route = useMemo(readRoute, []);
           busy={importBusy}
           authError={importAuthError}
           onCancel={() => {
+            if (importBusy) showToast("导入继续在后台进行");
             setImportPlan(null);
             setImportProgress(null);
             setImportAuthError(false);
@@ -1365,7 +1432,7 @@ const route = useMemo(readRoute, []);
       )}
 
       {toast && (
-        <div className="toast glass-surface" role="status">
+        <div className={clsx("toast glass-surface", selection.length > 0 && "raised")} role="status">
           <span>{toast.text}</span>
           {toast.action && (
             <button

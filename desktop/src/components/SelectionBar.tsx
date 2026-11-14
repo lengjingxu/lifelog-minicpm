@@ -66,7 +66,11 @@ export function SelectionBar({
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && trimmed) run(onAlbum);
-          if (event.key === "Escape") onClear();
+          if (event.key === "Escape") {
+            // 不要让全局 Escape 顺手把搜索条件也清了
+            event.stopPropagation();
+            onClear();
+          }
         }}
         placeholder="输入标签或相册名"
         disabled={busy}
