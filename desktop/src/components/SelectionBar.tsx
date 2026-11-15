@@ -114,7 +114,7 @@ export function SelectionBar({
         onClick={(event) => onDelete(event.currentTarget.getBoundingClientRect())}
         disabled={busy}
       >
-        <Trash2 size={13} /> 删除记录
+        <Trash2 size={13} /> 删除
       </button>
       <button type="button" className="selection-close" onClick={onClear} aria-label="取消选择">
         <X size={14} />

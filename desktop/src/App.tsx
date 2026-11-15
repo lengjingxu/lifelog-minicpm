@@ -31,6 +31,7 @@ import {
   type GroupSummary,
   type Asset,
   type Facets,
+  type SortKey,
   type Health,
   type Stats,
   pickFolder,
@@ -76,6 +77,14 @@ type DupInfo = { groupId: number; keeperId: string; count: number };
 
 const EXPORT_LIMIT = 100000;
 const PAGE_SIZE = 200;
+
+/** 排序项：按钮上显示短标签，菜单里显示完整说法 */
+const SORT_LABELS: Record<SortKey, string> = {
+  taken_desc: "按拍摄时间 · 最新优先",
+  taken_asc: "按拍摄时间 · 最早优先",
+  size_desc: "按文件大小 · 从大到小",
+  size_asc: "按文件大小 · 从小到大",
+};
 const APP_START = performance.now();
 
 function readRoute() {
@@ -150,6 +159,10 @@ const route = useMemo(readRoute, []);
   const [person, setPerson] = useState<string | null>(route.person);
   const [place, setPlace] = useState<string | null>(route.place);
   const [density, setDensity] = useState<Density>(route.density);
+  const [sort, setSort] = useState<SortKey>(() => {
+    const value = new URLSearchParams(window.location.search).get("sort");
+    return value === "taken_asc" || value === "size_desc" || value === "size_asc" ? value : "taken_desc";
+  });
   const [selection, setSelection] = useState<string[]>(route.assetId ? [route.assetId] : []);
   const [anchorId, setAnchorId] = useState<string | null>(route.assetId);
   const [detailId, setDetailId] = useState<string | null>(route.assetId);
@@ -413,13 +426,12 @@ const route = useMemo(readRoute, []);
     if (deleting || !selection.length) return;
     setDeleting(true);
     try {
-      const result = await deleteRecords(selection);
+      const result = await deleteRecords(selection, true);
       setDeleteOpen(false);
       setSelection([]);
       refreshData();
-      showToast(
-        `已移除 ${result.removed.assets} 条记录（磁盘文件未动）`,
-      );
+      const failed = result.files?.failed?.length ?? 0;
+      showToast(`已删除 ${result.removed.assets} 张${failed ? `，${failed} 个失败` : ""}`);
     } catch (err) {
       showToast(`移除失败：${String(err)}`);
     } finally {
@@ -572,6 +584,7 @@ const route = useMemo(readRoute, []);
       day_to: dayTo ?? undefined,
       limit: PAGE_SIZE,
       offset: 0,
+      sort,
     };
     // 计数与分页都交给服务端，前端不再在「最多 N 条」里二次过滤。
     countAssets(filter)
@@ -606,7 +619,7 @@ const route = useMemo(readRoute, []);
     return () => {
       cancelled = true;
     };
-  }, [view, query, tagKey, tags.length, scene, person, place, album, dayFrom, dayTo, dataVersion, localRemoved, fixtureAlbums, fixtureUserTags]);
+  }, [view, query, tagKey, tags.length, scene, person, place, album, dayFrom, dayTo, sort, dataVersion, localRemoved, fixtureAlbums, fixtureUserTags]);
 
   const needsAll = view === "organize";
 
@@ -916,11 +929,12 @@ const route = useMemo(readRoute, []);
     // taken_at 为空也照样给游标（空串），由服务端 COALESCE 处理；
     // 退回 offset 会让 NULL 行在深翻页时被重复或跳过。
     // 按月看时服务端按美学分排序，游标要带分数：score|taken_at|id
-    const cursor = last
-      ? dayFrom && dayTo
-        ? [last.score ?? -1, last.taken_at ?? "", last.id].join("|")
-        : [last.taken_at ?? "", last.id].join("|")
-      : undefined;
+    const cursor =
+      last && sort === "taken_desc"
+        ? dayFrom && dayTo
+          ? [last.score ?? -1, last.taken_at ?? "", last.id].join("|")
+          : [last.taken_at ?? "", last.id].join("|")
+        : undefined;
     setLoadingMore(true);
     queryAssets({
       query: query || undefined,
@@ -934,6 +948,7 @@ const route = useMemo(readRoute, []);
       limit: PAGE_SIZE,
       cursor,
       offset: cursor ? 0 : assets.length,
+      sort,
     })
       .then((list) => {
         setAssets((previous) => [...previous, ...list]);
@@ -941,7 +956,7 @@ const route = useMemo(readRoute, []);
       })
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)))
       .finally(() => setLoadingMore(false));
-  }, [loadingMore, hasMore, view, query, tagKey, tags, album, scene, person, place, dayFrom, dayTo, assets, fixtureUserTags]);
+  }, [loadingMore, hasMore, view, query, tagKey, tags, album, scene, person, place, dayFrom, dayTo, assets, sort, fixtureUserTags]);
 
   const navigateDetail = useCallback(
     (delta: number) => {
@@ -1437,6 +1452,8 @@ const route = useMemo(readRoute, []);
           onSearchClear={clearSearch}
           density={density}
           onDensity={setDensity}
+          sort={sort}
+          onSort={setSort}
           view={view}
           onView={navigate}
           minimal={view === "organize" || view === "settings"}
@@ -1464,7 +1481,7 @@ const route = useMemo(readRoute, []);
                 <button type="button" className="clear-all" onClick={clearAll}>清除全部</button>
               )}
             </div>
-            <div className="sort-note">按拍摄时间 · 最新优先</div>
+            <div className="sort-note">{SORT_LABELS[sort]}</div>
           </div>
           </div>
         )}

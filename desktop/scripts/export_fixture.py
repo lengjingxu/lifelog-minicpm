@@ -68,7 +68,7 @@ def main() -> None:
     rows = conn.execute(
         """SELECT a.id, a.path, a.day, a.taken_at, a.kind,
                   c.caption, c.scene, c.people, c.place, c.activity, c.mood,
-                  c.tags, c.ocr_text
+                  c.tags, c.ocr_text, a.size
            FROM assets a
            LEFT JOIN captions c ON c.rowid = (
              SELECT rowid FROM captions c2
@@ -122,6 +122,7 @@ def main() -> None:
             "mood": row["mood"],
             "tags": tags,
             "ocr_text": row["ocr_text"],
+            "size": row["size"],
         }
         assets.append(asset)
 
