@@ -18,6 +18,8 @@ export type Asset = {
   ocr_text: string | null;
   /** 美学分（0-10），按月查看时用于排序；库里没有评分表时为 null */
   score?: number | null;
+  /** 文件字节数 */
+  size?: number | null;
 };
 
 export type Stats = {
@@ -60,7 +62,11 @@ export type Filter = {
   offset?: number;
   /** 深翻页游标：taken_at|id，取上一页最后一条；给了游标就忽略 offset。 */
   cursor?: string;
+  /** 排序；按大小排时服务端不用时间游标，走 offset。 */
+  sort?: SortKey;
 };
+
+export type SortKey = "taken_desc" | "taken_asc" | "size_desc" | "size_asc";
 
 export type LiveStatus = "running" | "done" | "stopped" | "idle";
 
@@ -234,14 +240,26 @@ async function fixtureQuery(filter: Filter): Promise<Asset[]> {
     if (filter.day_to && (!asset.day || asset.day > filter.day_to)) return false;
     return true;
   });
+  const sorted = (() => {
+    switch (filter.sort) {
+      case "size_desc":
+        return [...filtered].sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+      case "size_asc":
+        return [...filtered].sort((a, b) => (a.size ?? 0) - (b.size ?? 0));
+      case "taken_asc":
+        return [...filtered].sort((a, b) => (a.taken_at ?? "").localeCompare(b.taken_at ?? ""));
+      default:
+        return filtered;
+    }
+  })();
   const limit = Math.max(0, filter.limit ?? 500);
-  if (filter.cursor) {
+  if (filter.cursor && (!filter.sort || filter.sort === "taken_desc")) {
     const id = filter.cursor.split("|")[1];
     const index = filtered.findIndex((asset) => asset.id === id);
-    if (index >= 0) return filtered.slice(index + 1, index + 1 + limit);
+    if (index >= 0) return sorted.slice(index + 1, index + 1 + limit);
   }
   const offset = Math.max(0, filter.offset ?? 0);
-  return filtered.slice(offset, offset + limit);
+  return sorted.slice(offset, offset + limit);
 }
 
 export async function countAssets(filter: Filter): Promise<number> {
@@ -613,11 +631,13 @@ export type DeleteResult = {
   ok: boolean;
   requested: number;
   removed: { captions: number; asset_tags: number; album_assets: number; assets: number };
+  files?: { requested: number; removed: number; missing: number; failed: string[] };
   days_rebuilt?: number;
   events_rebuilt?: number;
 };
 
-export const deleteRecords = (ids: string[]) => invoke<DeleteResult>("delete_records", { ids });
+export const deleteRecords = (ids: string[], withFiles = false) =>
+  invoke<DeleteResult>("delete_records", { ids, withFiles });
 
 export type ImportPlan = {
   listed: number;

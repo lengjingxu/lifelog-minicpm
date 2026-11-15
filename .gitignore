@@ -10,3 +10,6 @@ node_modules/
 reports/demo/*.json
 # 生成的演示页内嵌真实照片，绝不入库
 reports/demo/qa-demo.html
+
+# SQLite 临时文件
+desktop/sample-data/*.sqlite-*

@@ -124,6 +124,8 @@ struct AssetRow {
     ocr_text: Option<String>,
     /// 美学分（0-10）。库里没有 asset_quality 表时为 None。
     score: Option<f64>,
+    /// 文件字节数
+    size: Option<i64>,
 }
 
 #[derive(Deserialize, Default)]
@@ -141,6 +143,9 @@ struct Filter {
     offset: Option<i64>,
     /// 深翻页游标：`taken_at|day|id`，取上一页最后一条。给了游标就忽略 offset。
     cursor: Option<String>,
+    /// 排序：taken_desc（默认）/ taken_asc / size_desc / size_asc。
+    /// 按大小排时不走时间游标，退回 offset 分页。
+    sort: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -556,7 +561,13 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     let score_mode = filter.day_from.is_some()
         && filter.day_to.is_some()
         && has_table(conn, "asset_quality");
-    let keyset = if score_mode {
+    // 排序：按大小排时不走时间游标（游标是时间序的），退回 offset。
+    let sort = filter.sort.as_deref().unwrap_or("taken_desc");
+    let by_size = matches!(sort, "size_desc" | "size_asc");
+    let time_keyset = sort == "taken_desc" && !by_size;
+    let keyset = if !time_keyset {
+        false
+    } else if score_mode {
         apply_score_cursor(&mut where_sql, &mut args, filter.cursor.as_deref())
     } else {
         apply_cursor(&mut where_sql, &mut args, filter.cursor.as_deref(), key_col)
@@ -569,7 +580,7 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     };
     let mut sql = format!(
         "SELECT a.id, a.path, a.day, a.taken_at, a.kind, \
-                c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text{} \
+                c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text{}, a.size \
          FROM assets a \
          LEFT JOIN captions c ON c.rowid = ( \
              SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1){} \
@@ -578,9 +589,15 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     );
 
 
-    // 游标是 (taken_sort, id) 二元组：同一秒的多条靠 id 分先后，翻页才是严格全序。
-    if score_mode {
+    if by_size {
+        let dir = if sort == "size_asc" { "ASC" } else { "DESC" };
+        sql.push_str(&format!(
+            " ORDER BY COALESCE(a.size,0) {dir}, a.id DESC LIMIT ?"
+        ));
+    } else if score_mode && sort == "taken_desc" {
         sql.push_str(" ORDER BY COALESCE(q.score,-1) DESC, COALESCE(a.taken_at,'') DESC, a.id DESC LIMIT ?");
+    } else if sort == "taken_asc" {
+        sql.push_str(&format!(" ORDER BY {key_col} ASC, a.id ASC LIMIT ?"));
     } else {
         sql.push_str(&format!(" ORDER BY {key_col} DESC, a.id DESC LIMIT ?"));
     }
@@ -614,6 +631,7 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
                 tags: parse_tags(row.get(11)?),
                 ocr_text: row.get(12)?,
                 score: row.get(13).ok(),
+                size: row.get(14).ok(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -882,14 +900,22 @@ fn reveal_in_finder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn delete_records(db: State<'_, Db>, ids: Vec<String>) -> Result<serde_json::Value, String> {
+async fn delete_records(
+    db: State<'_, Db>,
+    ids: Vec<String>,
+    with_files: Option<bool>,
+) -> Result<serde_json::Value, String> {
     let home = db.data_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let ids: Vec<String> = ids.into_iter().filter(|id| !id.trim().is_empty()).collect();
         if ids.is_empty() {
             return Err("没有选中要移除的记录".to_string());
         }
-        let result = run_python_cli(&home, &["record-delete".to_string(), "--ids".to_string(), ids.join(",")])?;
+        let mut args: Vec<String> = vec!["record-delete".to_string(), "--ids".to_string(), ids.join(",")];
+        if with_files.unwrap_or(false) {
+            args.push("--with-files".to_string());
+        }
+        let result = run_python_cli(&home, &args)?;
         // 记录没了，缩略图缓存就成了孤儿，顺手清掉（只动缓存，不动原图）。
         let _ = run_python_cli(
             &home,
@@ -1394,6 +1420,7 @@ mod filter_tests {
             limit: None,
             offset: None,
             cursor: None,
+            sort: None,
         }
     }
 

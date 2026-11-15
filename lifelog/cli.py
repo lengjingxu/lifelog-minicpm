@@ -299,7 +299,7 @@ def cmd_thumbs_prune(args) -> int:
 
 def cmd_record_delete(args) -> int:
     from . import aggregate, ops
-    result = ops.delete_records(_ids(args.ids))
+    result = ops.delete_records(_ids(args.ids), with_files=bool(getattr(args, "with_files", False)))
     # 记录被移除后，天与生活片段是物化数据，需要重算，避免留着旧数字。
     result["days_rebuilt"] = aggregate.build_days()
     result["events_rebuilt"] = aggregate.build_events()
@@ -469,8 +469,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="只统计不删除")
     p.set_defaults(func=cmd_thumbs_prune)
 
-    p = sub.add_parser("record-delete", help="从库中移除记录（不动磁盘文件）")
+    p = sub.add_parser("record-delete", help="从库中移除记录；--with-files 连原图一起删")
     p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
+    p.add_argument("--with-files", action="store_true", help="同时删除磁盘上的原文件（不可恢复）")
     p.set_defaults(func=cmd_record_delete)
 
     p = sub.add_parser("album-list", help="列出相册")
