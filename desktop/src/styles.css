@@ -811,7 +811,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   to { opacity: 1; transform: none; }
 }
 /* 弹窗的进出由 JS 从触发控件补间，这里只留位置基准 */
-.dialog { transform-origin: var(--dialog-origin, 50% 100%); }
+.dialog { transform-origin: 50% 50%; }
 
 /* 侧栏指示条：一个块在选中项之间滑动 */
 .nav-list { position: relative; }
@@ -897,6 +897,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 
 /* 多选操作条 */
 .selection-bar {
+  transform-origin: 50% 50%;
   position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
   z-index: 60; display: flex; align-items: center; gap: var(--space-8);
   padding: var(--space-8) var(--space-10); border-radius: var(--radius-14); max-width: min(720px, calc(100vw - 40px));
@@ -1315,8 +1316,13 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 }
 
 /* 容器里有玻璃，自己就不做玻璃 */
-.group-rail, .organize-complete, .overlay-root {
+/* 这三个不是玻璃面板：不要模糊，但详情仍需要它的暗底（否则照片的留白处会透出背后的网格） */
+.group-rail, .organize-complete {
   background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.overlay-root {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
@@ -1941,7 +1947,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   border-radius: 26px;
   overflow: hidden;
   box-shadow: 0 48px 96px rgba(0, 0, 0, var(--alpha-0-5)), inset 0 1px 0 rgba(255, 255, 255, var(--alpha-0-1));
-  transform-origin: 50% 0;
+  transform-origin: 50% 50%;
 }
 [data-theme="light"] .palette {
   box-shadow: 0 40px 90px rgba(20, 20, 30, var(--alpha-0-16)), inset 0 1px 0 rgba(255, 255, 255, var(--alpha-0-92));

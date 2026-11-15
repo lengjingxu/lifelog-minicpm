@@ -38,15 +38,17 @@ export function SelectionBar({
     const el = barRef.current;
     if (!el || !origin) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    el.getAnimations().forEach((animation) => animation.cancel());
     const box = el.getBoundingClientRect();
     if (!box.width || !box.height) return;
     const sx = Math.min(1, Math.max(0.25, origin.width / box.width));
     const dx = origin.x + origin.width / 2 - (box.left + box.width / 2);
     const dy = origin.y + origin.height / 2 - (box.top + box.height / 2);
+    // 条本身靠 translateX(-50%) 居中，补间里要把它一起带上，否则中途会横向跳一下
     el.animate(
       [
-        { transform: `translate(${dx}px, ${dy}px) scale(${sx}, 0.55)`, opacity: 0, borderRadius: "10px" },
-        { transform: "none", opacity: 1, borderRadius: "16px" },
+        { transform: `translate(calc(-50% + ${dx}px), ${dy}px) scale(${sx}, 0.55)`, opacity: 0, borderRadius: "10px" },
+        { transform: "translateX(-50%)", opacity: 1, borderRadius: "16px" },
       ],
       { duration: 280, easing: "cubic-bezier(.22, 1, .36, 1)" },
     );
