@@ -24,6 +24,9 @@
   --glass-bg: rgba(14, 14, 17, 0.26);
   --glass-bg-oncolor: rgba(14, 14, 17, 0.62);
   --glass-blur: blur(10px) saturate(1.6);
+  /* 命令面板要压得住背后的照片，比普通玻璃更厚 */
+  --palette-bg: rgba(24, 24, 28, 0.92);
+  --palette-blur: blur(28px) saturate(1.5);
   --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.10);
   --glass-border: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
   --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.10), transparent);
@@ -214,6 +217,7 @@
   --scroll-thumb: rgba(23,23,26,0.14);
   --scroll-thumb-hover: rgba(23,23,26,0.24);
 
+  --palette-bg: rgba(251, 251, 250, 0.94);
   --glass-bg: rgba(255, 255, 255, 0.62);
   --glass-bg-oncolor: rgba(255, 255, 255, 0.80);
   --glass-blur: blur(18px) saturate(1.35);

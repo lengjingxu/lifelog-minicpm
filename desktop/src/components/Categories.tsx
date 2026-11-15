@@ -9,7 +9,7 @@ type Props = {
   kind: CategoryKind;
   groups: GroupSummary[];
   loading: boolean;
-  onPick: (kind: CategoryKind, name: string) => void;
+  onPick: (kind: CategoryKind, name: string, origin?: { src: string; rect: DOMRect }) => void;
   onKindChange: (kind: CategoryKind) => void;
 };
 
@@ -119,7 +119,11 @@ export function Categories({ kind, groups, loading, onPick, onKindChange }: Prop
                 type="button"
                 className="category-card"
                 key={group.name}
-                onClick={() => onPick(activeKind, group.name)}
+                onClick={(event) => {
+                  const cover = event.currentTarget.querySelector<HTMLElement>(".category-cover");
+                  const rect = (cover ?? event.currentTarget).getBoundingClientRect();
+                  onPick(activeKind, group.name, group.cover_thumb ? { src: assetSrc(group.cover_thumb), rect } : undefined);
+                }}
                 style={{ animationDelay: Math.min(index, 10) * 24 + "ms" }}
               >
                 <span className="category-cover">

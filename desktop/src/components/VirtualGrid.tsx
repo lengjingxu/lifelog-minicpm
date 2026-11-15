@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { Asset } from "../api";
+import { assetSrc, type Asset } from "../api";
 import { GAP } from "../utils";
 import { DURATION, EASE, reducedMotion } from "../motion";
 import { Thumb } from "./Thumb";
@@ -35,6 +35,7 @@ export function VirtualGrid({
   const innerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const prevRects = useRef<Map<string, DOMRect>>(new Map());
+  const prevAssets = useRef<Map<string, Asset>>(new Map());
 
   useEffect(() => {
     const element = innerRef.current;
@@ -68,6 +69,7 @@ export function VirtualGrid({
   };
 
   // 筛掉/重排时：同一张照片从旧位置滑到新位置，而不是瞬间重排。
+  // 被筛掉的先留在原地淡出，剩下的再补位——这样不会出现"穿过网格"的乱跳。
   useLayoutEffect(() => {
     const container = innerRef.current;
     if (!container) return;
@@ -76,7 +78,45 @@ export function VirtualGrid({
     container.querySelectorAll<HTMLElement>("[data-asset-id]").forEach((el) => {
       next.set(el.dataset.assetId ?? "", el.getBoundingClientRect());
     });
+
     if (!reduced && prevRects.current.size) {
+      const viewport = { top: 0, bottom: window.innerHeight, left: 0, right: window.innerWidth };
+      prevRects.current.forEach((rect, id) => {
+        if (next.has(id)) return;
+        const visible =
+          rect.bottom > viewport.top && rect.top < viewport.bottom &&
+          rect.right > viewport.left && rect.left < viewport.right;
+        if (!visible) return;
+        const asset = prevAssets.current.get(id);
+        const ghost = document.createElement("div");
+        ghost.className = "cell ghost";
+        ghost.style.cssText = `position:absolute;left:${rect.left - container.getBoundingClientRect().left}px;top:${rect.top - container.getBoundingClientRect().top}px;width:${rect.width}px;height:${rect.height}px;pointer-events:none;z-index:1`;
+        if (asset) {
+          const img = document.createElement("img");
+          img.src = assetSrc(asset.thumb);
+          img.style.cssText = "width:100%;height:100%;object-fit:cover;border-radius:inherit";
+          ghost.appendChild(img);
+        }
+        container.appendChild(ghost);
+        ghost.animate(
+          [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(0.96)" }],
+          { duration: 130, easing: EASE.out, fill: "forwards" },
+        ).finished.then(() => ghost.remove(), () => ghost.remove());
+      });
+
+      // 新到的一批（续载或换筛选）按 25ms 错峰淡入，而不是凭空出现
+      if (next.size) {
+        let enterIndex = 0;
+        next.forEach((_rect, id) => {
+          if (prevRects.current.has(id)) return;
+          const el = container.querySelector<HTMLElement>(`[data-asset-id="${id}"]`);
+          el?.animate(
+            [{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }],
+            { duration: 180, delay: Math.min(enterIndex++, 8) * 25, easing: EASE.out, fill: "backwards" },
+          );
+        });
+      }
+
       next.forEach((rect, id) => {
         const prev = prevRects.current.get(id);
         if (!prev) return;
@@ -86,11 +126,12 @@ export function VirtualGrid({
         const el = container.querySelector<HTMLElement>(`[data-asset-id="${id}"]`);
         el?.animate(
           [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0, 0)" }],
-          { duration: DURATION.md, easing: EASE.inOut },
+          { duration: DURATION.md, easing: EASE.inOut, delay: 40 },
         );
       });
     }
     prevRects.current = next;
+    prevAssets.current = new Map(assets.map((asset) => [asset.id, asset]));
   }, [assets, columns]);
 
   const virtualRows = virtualizer.getVirtualItems();

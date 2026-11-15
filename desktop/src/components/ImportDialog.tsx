@@ -1,5 +1,5 @@
 import { CloudDownload, RefreshCw } from "lucide-react";
-import { useDialogFocus } from "../useDialogFocus";
+import { useDialogFocus, type GrowRect } from "../useDialogFocus";
 
 export type ImportPlan = {
   listed: number;
@@ -17,6 +17,7 @@ export type ImportProgress = {
 };
 
 type Props = {
+  origin?: GrowRect | null;
   plan: ImportPlan | null;
   progress: ImportProgress | null;
   busy: boolean;
@@ -33,6 +34,7 @@ function gb(bytes: number): string {
 }
 
 export function ImportDialog({
+  origin = null,
   plan,
   progress,
   busy,
@@ -41,7 +43,7 @@ export function ImportDialog({
   onConfirm,
   onRetryAuth,
 }: Props) {
-  const dialogRef = useDialogFocus<HTMLDivElement>(onCancel);
+  const dialogRef = useDialogFocus<HTMLDivElement>(onCancel, { growFrom: origin });
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onCancel}>
       <div
@@ -59,7 +61,7 @@ export function ImportDialog({
           </div>
         </header>
 
-        <div className="dialog-body">
+        <div className="dialog-body" data-grow-stagger>
           {authError ? (
             <>
               <p className="dialog-text">小米云登录态已失效。</p>

@@ -1,4 +1,7 @@
 import { useEffect, useRef } from "react";
+import { DURATION, EASE, reducedMotion } from "./motion";
+
+export type GrowRect = { x: number; y: number; width: number; height: number };
 
 // 对话框里可 Tab 到的元素。禁用的按钮不算，否则 trap 会把焦点丢到灰按钮上。
 const FOCUSABLE =
@@ -11,6 +14,8 @@ type Options = {
   restoreFocus?: boolean;
   /** 组件常驻但弹窗可能没开（如未挂载 DOM）时传 open，避免在隐藏状态下抢焦点。 */
   enabled?: boolean;
+  /** 触发它的那个控件的矩形：弹窗从控件的框里长出来，而不是从中心缩放。 */
+  growFrom?: GrowRect | null;
 };
 
 /**
@@ -19,7 +24,7 @@ type Options = {
  * 返回的 ref 挂到对话框的根元素上（需要能包含所有可聚焦子元素）。
  */
 export function useDialogFocus<T extends HTMLElement>(onClose: () => void, options: Options = {}) {
-  const { focusContainer = false, restoreFocus = true, enabled = true } = options;
+  const { focusContainer = false, restoreFocus = true, enabled = true, growFrom = null } = options;
   const ref = useRef<T | null>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -38,6 +43,39 @@ export function useDialogFocus<T extends HTMLElement>(onClose: () => void, optio
       node.focus({ preventScroll: true });
     } else {
       (focusables()[0] ?? node).focus({ preventScroll: true });
+    }
+
+    // 从控件本身长出来：尺寸、位置、圆角一起补间；里面的行在开度过半后 25ms 错峰落下。
+    if (growFrom && !reducedMotion()) {
+      const box = node.getBoundingClientRect();
+      if (box.width && box.height) {
+        const sx = Math.min(1, Math.max(0.35, growFrom.width / box.width));
+        const sy = Math.min(1, Math.max(0.3, growFrom.height / box.height));
+        const dx = growFrom.x + growFrom.width / 2 - (box.left + box.width / 2);
+        const dy = growFrom.y + growFrom.height / 2 - (box.top + box.height / 2);
+        const radius = getComputedStyle(node).borderRadius;
+        node.animate(
+          [
+            { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, opacity: 0.75, borderRadius: "10px" },
+            { transform: "none", opacity: 1, borderRadius: radius },
+          ],
+          { duration: DURATION.md, easing: EASE.outStrong },
+        );
+        node.querySelectorAll<HTMLElement>("[data-grow-stagger]").forEach((groupEl) => {
+          Array.from(groupEl.children).forEach((child, index) => {
+            (child as HTMLElement).animate(
+              [{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }],
+              { duration: 170, delay: 150 + index * 25, easing: EASE.out, fill: "backwards" },
+            );
+          });
+        });
+      }
+    } else if (!reducedMotion()) {
+      // 没有来处的弹窗（比如空状态里的导入）退化成轻微淡入，不硬切
+      node.animate(
+        [{ opacity: 0, transform: "scale(0.985)" }, { opacity: 1, transform: "none" }],
+        { duration: 180, easing: EASE.out },
+      );
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -72,7 +110,7 @@ export function useDialogFocus<T extends HTMLElement>(onClose: () => void, optio
       node.removeEventListener("keydown", onKeyDown, true);
       if (restoreFocus && previous && previous.isConnected) previous.focus({ preventScroll: true });
     };
-  }, [enabled, focusContainer, restoreFocus]);
+  }, [enabled, focusContainer, restoreFocus, growFrom]);
 
   return ref;
 }
