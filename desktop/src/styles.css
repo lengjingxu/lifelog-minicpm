@@ -80,7 +80,18 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   height: 26px; border-radius: var(--radius-6); display: grid; place-items: center;
   color: var(--text-faint); transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
+.view-switch { position: relative; }
 .view-switch button { width: 28px; }
+/* 一块底色在网格/时间线之间滑过去，而不是各自变色 */
+.view-switch-indicator {
+  position: absolute; top: 2px; left: 2px; z-index: 0;
+  width: 28px; height: 22px; border-radius: var(--radius-8, 8px);
+  background: rgba(255, 255, 255, var(--alpha-0-09));
+  transition: transform 270ms cubic-bezier(.32,.72,0,1);
+}
+.view-switch-indicator[data-pos="1"] { transform: translateX(28px); }
+.view-switch button { position: relative; z-index: 1; }
+[data-theme="light"] .view-switch-indicator { background: rgba(255, 255, 255, var(--alpha-0-95)); }
 .density-switch button { width: 27px; font-size: var(--font-10-5); font-variant-numeric: tabular-nums; }
 .view-switch button:hover, .density-switch button:hover { color: var(--text); }
 
@@ -90,6 +101,12 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 }
 .chip-row { display: flex; align-items: center; gap: var(--space-6); flex-wrap: wrap; }
 
+.condition-slot[data-open="true"] .chip { animation: chip-in 200ms var(--ease-out-strong) both; }
+.condition-slot[data-open="true"] .chip:nth-child(2) { animation-delay: 22ms; }
+.condition-slot[data-open="true"] .chip:nth-child(3) { animation-delay: 44ms; }
+.condition-slot[data-open="true"] .chip:nth-child(4) { animation-delay: 66ms; }
+.condition-slot[data-open="true"] .chip:nth-child(5) { animation-delay: 88ms; }
+@keyframes chip-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
 .chip button { display: inline-flex; color: var(--text-dim); padding: var(--space-2); position: relative; }
 .chip button::after { content: ""; position: absolute; inset: -5px; }
 .chip button:hover { color: var(--text); }
@@ -248,6 +265,9 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 
 .stage-full.loaded { opacity: 1; }
 .stage-image.full-ready .stage-thumb { opacity: 0.18; }
+/* 打开时主体先铺开，侧栏随后淡入（约 45% 处） */
+.overlay-root .inspector { animation: inspector-in 260ms var(--ease-out) 140ms both; }
+@keyframes inspector-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
 .image-loading {
   position: absolute; z-index: 2; left: 50%; bottom: 4px; transform: translateX(-50%);
   font-size: var(--font-10-5); color: var(--text-faint);
@@ -763,12 +783,21 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   from { opacity: 0; transform: translate3d(0, 6px, 0); }
   to { opacity: 1; transform: none; }
 }
+/* 视图切换：按侧栏里的行进方向进入，往下走从下方来，往上走从上方来 */
+.view-shell[data-enter="down"] { animation: view-in-down 260ms var(--ease-out-strong) both; }
+.view-shell[data-enter="up"] { animation: view-in-up 260ms var(--ease-out-strong) both; }
+@keyframes view-in-down { from { opacity: 0; transform: translate3d(0, 10px, 0); } to { opacity: 1; transform: none; } }
+@keyframes view-in-up { from { opacity: 0; transform: translate3d(0, -10px, 0); } to { opacity: 1; transform: none; } }
+/* 工具栏标题在视图之间原地交叉：只缩放/位移，不换行重排 */
+.title-main, .title-sub { animation: title-swap 200ms var(--ease-out) both; }
+@keyframes title-swap { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 
-/* 详情：图片交叉淡入 */
+/* 详情：翻页时图片由 JS 按方向补间，这里只留首帧淡入 */
 @keyframes image-in {
-  from { opacity: 0; transform: scale(0.985); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
+.stage-counter { animation: title-swap 200ms var(--ease-out) both; }
 
 /* toast 从底部生长 */
 @keyframes toast-in {
@@ -781,7 +810,8 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   from { opacity: 0; transform: scale(0.94); }
   to { opacity: 1; transform: none; }
 }
-.dialog { animation: dialog-in var(--dur-base) var(--ease-out) both; transform-origin: var(--dialog-origin, 50% 100%); }
+/* 弹窗的进出由 JS 从触发控件补间，这里只留位置基准 */
+.dialog { transform-origin: var(--dialog-origin, 50% 100%); }
 
 /* 侧栏指示条：一个块在选中项之间滑动 */
 .nav-list { position: relative; }
@@ -821,14 +851,16 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .view-shell, .stage-full, .toast, .dialog, .group-panel,
   .category-card, .organize-phase, .stage-image, .trail { animation-duration: 1ms !important; }
-  .nav-indicator { transition-duration: 1ms !important; }
+  .nav-indicator, .view-switch-indicator { transition-duration: 1ms !important; }
   .cell, .category-card, .nav-item, .tag-pill { transition-duration: 1ms !important; }
   /* 无限循环的"活着"感在减少动态下不留 */
   .skeleton, .live-dot, .content-loading-bar, .select-mark, .spin { animation: none !important; }
   /* hover 的抬升/缩放一并停掉，只留颜色与阴影变化 */
   .cell:hover, .category-card:hover { transform: none !important; }
-  .palette, .palette-backdrop { animation-duration: 1ms !important; }
+  .palette, .palette-backdrop { animation-duration: 1ms !important; transition-duration: 1ms !important; }
   .cell .overlay { transform: none !important; }
+  .condition-slot { transition-duration: 1ms !important; }
+  .condition-slot[data-open="true"] .chip { animation-duration: 1ms !important; }
 }
 
 .view-shell {
@@ -853,7 +885,11 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   from { opacity: 1; transform: none; }
   to { opacity: 0; transform: scale(0.94); }
 }
-.closing .stage-image { animation: detail-out 200ms var(--ease-in) both; }
+/* 图由 JS 反向补间回原卡片；这里只负责遮罩与侧栏淡出 */
+/* 只淡遮罩，不淡照片本身：照片正缩回卡片，淡掉会变成"凭空消失" */
+.overlay-root.closing { background-color: transparent; transition: background-color 300ms var(--ease-in); }
+.overlay-root.closing .inspector { animation: fade-out 220ms var(--ease-in) both; }
+@keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
 .closing.dialog, .dialog.closing { animation: dialog-out 180ms var(--ease-in) both; }
 
 /* 整理视图三态：每次换态时内容从下方 6px 淡入，避免整块硬切 */
@@ -1255,6 +1291,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   display: grid;
   place-items: center;
   padding: var(--space-26);
+  animation: fade 160ms var(--ease-out) both;
   background: rgba(3,3,5,var(--alpha-0-54));
   animation: fade var(--dur-fast) var(--ease-out) both;
   -webkit-backdrop-filter: none;
@@ -1477,6 +1514,20 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   padding: var(--space-6) 0;
   border-top: 0;
 }
+/* 条件栏出现/消失时把下面的网格让开，而不是突然顶下去 */
+.condition-slot {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms var(--ease-out-strong);
+}
+.condition-slot[data-open="true"] { grid-template-rows: 1fr; }
+/* 收起时必须连内边距一起归零，否则 0fr 的行仍留着那段 padding */
+.condition-slot > .condition-bar {
+  overflow: hidden; min-height: 0; padding-bottom: 0;
+  transition: padding-bottom 220ms var(--ease-out-strong);
+}
+.condition-slot[data-open="true"] > .condition-bar { padding-bottom: var(--space-18); }
+
 .condition-bar {
   display: flex;
   align-items: center;
@@ -1508,9 +1559,10 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 }
 .view-switch button.active, .density-switch button.active {
   color: var(--text);
-  background: rgba(255, 255, 255, var(--alpha-0-09));
+  background: transparent;
   box-shadow: none;
 }
+.density-switch button.active { background: rgba(255, 255, 255, var(--alpha-0-09)); }
 [data-theme="light"] .view-switch button.active, [data-theme="light"] .density-switch button.active { background: rgba(255, 255, 255, var(--alpha-0-95)); }
 
 /* 面板只留上高光 + 外投影，不要整圈描边 */
@@ -1860,6 +1912,14 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   border-radius: var(--radius-14);
 }
 
+/* 分类封面飞进工具栏（只在切换的那 0.5 秒存在） */
+.flying-cover {
+  position: fixed; z-index: 60; pointer-events: none;
+  border-radius: var(--radius-10); overflow: hidden;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, var(--alpha-0-4));
+}
+.flying-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
 /* ---------------- ⌘K 面板 ---------------- */
 
 .palette-backdrop {
@@ -1881,16 +1941,12 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   border-radius: 26px;
   overflow: hidden;
   box-shadow: 0 48px 96px rgba(0, 0, 0, var(--alpha-0-5)), inset 0 1px 0 rgba(255, 255, 255, var(--alpha-0-1));
-  animation: palette-in var(--dur-base) var(--ease-out) both;
   transform-origin: 50% 0;
 }
 [data-theme="light"] .palette {
   box-shadow: 0 40px 90px rgba(20, 20, 30, var(--alpha-0-16)), inset 0 1px 0 rgba(255, 255, 255, var(--alpha-0-92));
 }
-@keyframes palette-in {
-  from { opacity: 0; transform: translateY(-8px) scale(0.985); }
-  to { opacity: 1; transform: none; }
-}
+.palette-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
 .palette-input {
   display: flex; align-items: center; gap: var(--space-12);

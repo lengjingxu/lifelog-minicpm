@@ -154,12 +154,16 @@ const route = useMemo(readRoute, []);
   const [anchorId, setAnchorId] = useState<string | null>(route.assetId);
   const [detailId, setDetailId] = useState<string | null>(route.assetId);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [dialogOrigin, setDialogOrigin] = useState<string>("50% 100%");
+  const [dialogRect, setDialogRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [album, setAlbum] = useState<string | null>(null);
   const [detailClosing, setDetailClosing] = useState(false);
   const [dialogClosing, setDialogClosing] = useState(false);
   const [detailOrigin, setDetailOrigin] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [detailStep, setDetailStep] = useState(0);
+  const [selectionOrigin, setSelectionOrigin] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  // 分类卡/月份行进入图库时，把那张封面带过来（落地后淡出，静止状态不变）
+  const [flyCover, setFlyCover] = useState<{ src: string; rect: DOMRect; key: number } | null>(null);
   // ?theme=dark|light 只影响本次会话（测量/截图用），不覆盖用户偏好。
   const forcedTheme = useRef<"dark" | "light" | null>(
     (() => {
@@ -181,6 +185,7 @@ const route = useMemo(readRoute, []);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [recognitionOpen, setRecognitionOpen] = useState(route.modal === "recognize");
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteOrigin, setPaletteOrigin] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const live = useLiveController();
   const demoStarted = useRef(false);
 
@@ -737,7 +742,7 @@ const route = useMemo(readRoute, []);
       detailCloseTimer.current = null;
       setDetailClosing(false);
       setDetailId(null);
-    }, 200);
+    }, 300);
   }, []);
 
   const closeRecognition = useCallback(() => {
@@ -781,6 +786,10 @@ const route = useMemo(readRoute, []);
         }
       }
       if (meta) {
+        const rect = event.currentTarget.getBoundingClientRect();
+        if (selection.length === 0) {
+          setSelectionOrigin({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
+        }
         setSelection((previous) =>
           previous.includes(asset.id)
             ? previous.filter((id) => id !== asset.id)
@@ -792,7 +801,7 @@ const route = useMemo(readRoute, []);
       setSelection([asset.id]);
       setAnchorId(asset.id);
     },
-    [anchorId, currentList],
+    [anchorId, currentList, selection.length],
   );
 
   const applyTag = useCallback((tag: string) => {
@@ -820,6 +829,16 @@ const route = useMemo(readRoute, []);
       pendingSearch.current = { start: performance.now(), value: value.trim() };
       setQuery(value.trim());
     }, 200);
+  }, []);
+
+  // 面板从触发它的搜索框长出来，所以要记住那个框的矩形。
+  const openPalette = useCallback(() => {
+    const field = document.querySelector<HTMLElement>(".search, .sidebar-search");
+    if (field) {
+      const rect = field.getBoundingClientRect();
+      setPaletteOrigin({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
+    }
+    setPaletteOpen(true);
   }, []);
 
   const clearSearch = useCallback(() => {
@@ -861,7 +880,8 @@ const route = useMemo(readRoute, []);
   );
 
   const openCategory = useCallback(
-    (kind: CategoryKind, name: string) => {
+    (kind: CategoryKind, name: string, origin?: { src: string; rect: DOMRect }) => {
+      if (origin) setFlyCover({ src: origin.src, rect: origin.rect, key: Date.now() });
       clearAll();
       if (kind === "tags") setTags([name]);
       else if (kind === "scenes") setScene(name);
@@ -873,7 +893,8 @@ const route = useMemo(readRoute, []);
   );
 
   const openMonth = useCallback(
-    (month: string) => {
+    (month: string, origin?: { src: string; rect: DOMRect }) => {
+      if (origin) setFlyCover({ src: origin.src, rect: origin.rect, key: Date.now() });
       clearAll();
       setDayFrom(month + "-01");
       setDayTo(month + "-31");
@@ -935,6 +956,7 @@ const route = useMemo(readRoute, []);
         }
         return;
       }
+      setDetailStep(delta);
       setDetailId(next.id);
       setSelection([next.id]);
       setAnchorId(next.id);
@@ -994,7 +1016,8 @@ const route = useMemo(readRoute, []);
       if (meta && event.key.toLowerCase() === "k") {
         event.preventDefault();
         if (detailAsset || recognitionOpen || deleteOpen || importPlan) return;
-        setPaletteOpen((open) => !open);
+        if (paletteOpen) setPaletteOpen(false);
+        else openPalette();
         return;
       }
       // 面板打开时，其余快捷键与网格操作都让路（Esc / ↑↓ / ⏎ / Tab 面板自己处理）
@@ -1018,7 +1041,7 @@ const route = useMemo(readRoute, []);
       if (meta && event.key === "3") {
         event.preventDefault();
         setView("library");
-        setPaletteOpen(true);
+        openPalette();
         return;
       }
       if (meta && (event.key === "+" || event.key === "=")) {
@@ -1046,7 +1069,7 @@ const route = useMemo(readRoute, []);
       if (detailAsset) {
         if (event.key === "Escape" || event.key === " ") {
           event.preventDefault();
-          setDetailId(null);
+          closeDetail();
         } else if (event.key === "ArrowLeft") {
           event.preventDefault();
           navigateDetail(-1);
@@ -1111,6 +1134,7 @@ const route = useMemo(readRoute, []);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     detailAsset,
+    closeDetail,
     navigateDetail,
     queryInput,
     clearSearch,
@@ -1126,6 +1150,7 @@ const route = useMemo(readRoute, []);
     deleteOpen,
     importPlan,
     paletteOpen,
+    openPalette,
   ]);
 
   // 选中条被卸载时（取消选择、批量操作完成），焦点会掉到 body；交回原来那张缩略图。
@@ -1144,6 +1169,17 @@ const route = useMemo(readRoute, []);
       : null;
     target?.focus({ preventScroll: true });
   }, [selection.length, anchorId]);
+
+  // 视图切换时的进入方向：按侧栏顺序，往下走就从下方进，往上走就从上方进。
+  const VIEW_ORDER: View[] = ["library", "timeline", "albums", "tags", "people", "places", "organize", "settings"];
+  const lastViewRef = useRef<View>(view);
+  const viewDirRef = useRef<"up" | "down" | "none">("none");
+  if (lastViewRef.current !== view) {
+    const from = VIEW_ORDER.indexOf(lastViewRef.current);
+    const to = VIEW_ORDER.indexOf(view);
+    viewDirRef.current = from < 0 || to < 0 || from === to ? "none" : to > from ? "down" : "up";
+    lastViewRef.current = view;
+  }
 
   const range = yearRange(stats);
   const categoryCount = view === "organize" ? (allAssets?.length ?? 0) : (stats?.assets ?? 0);
@@ -1328,8 +1364,9 @@ const route = useMemo(readRoute, []);
     return (
       <div className="grid-wrap">
         {loading && <div className="content-loading-bar" />}
+        {/* 不按筛选条件重建组件：保住上一批卡片的位置，让它们 FLIP 到新位置，
+            而不是整块网格消失再出现 */}
         <VirtualGrid
-          key={`library-${query}-${tagKey}-${scene}-${person}-${place}`}
           assets={displayAssets}
           dupCounts={dupCounts}
           columns={columns}
@@ -1373,7 +1410,7 @@ const route = useMemo(readRoute, []);
           setPlace((current) => (current === name ? null : name));
           setDetailId(null);
         }}
-        onSearch={() => setPaletteOpen(true)}
+        onSearch={openPalette}
         liveStatus={{
           status: live.view.status,
           done: Math.min(live.view.total, live.view.done),
@@ -1383,9 +1420,7 @@ const route = useMemo(readRoute, []);
         }}
         onRecognition={(rect?: DOMRect) => {
           if (rect) {
-            const x = rect.left + rect.width / 2;
-            const y = rect.top + rect.height / 2;
-            setDialogOrigin(`${x}px ${y}px`);
+            setDialogRect({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
           }
           setRecognitionOpen(true);
         }}
@@ -1398,7 +1433,7 @@ const route = useMemo(readRoute, []);
           subtitle={subtitle}
           onExport={selection.length > 0 || active ? () => void handleExport() : undefined}
           searchValue={queryInput}
-          onSearchOpen={() => setPaletteOpen(true)}
+          onSearchOpen={openPalette}
           onSearchClear={clearSearch}
           density={density}
           onDensity={setDensity}
@@ -1409,7 +1444,8 @@ const route = useMemo(readRoute, []);
           onTheme={setTheme}
         />
 
-        {conditions.length > 0 && view !== "organize" && view !== "settings" && (
+        {view !== "organize" && view !== "settings" && (
+          <div className="condition-slot" data-open={conditions.length > 0} aria-hidden={conditions.length === 0}>
           <div className="condition-bar">
             <div className="result-count">
               <Search size={12} strokeWidth={1.8} />
@@ -1430,10 +1466,11 @@ const route = useMemo(readRoute, []);
             </div>
             <div className="sort-note">按拍摄时间 · 最新优先</div>
           </div>
+          </div>
         )}
 
         <section className={clsx("content", view === "timeline" && "timeline-content")}>
-          <div className="view-shell" key={view}>{content}</div>
+          <div className="view-shell" key={view} data-enter={viewDirRef.current}>{content}</div>
         </section>
       </main>
 
@@ -1451,6 +1488,7 @@ const route = useMemo(readRoute, []);
                 : detailTotal
           }
           origin={detailOrigin}
+          step={detailStep}
           onClose={closeDetail}
           closing={detailClosing}
           onPrev={() => navigateDetail(-1)}
@@ -1464,7 +1502,7 @@ const route = useMemo(readRoute, []);
       <RecognitionDialog
         open={recognitionOpen}
         live={live}
-        origin={dialogOrigin}
+        originRect={dialogRect}
         assets={new Map((allAssets ?? assets).map((asset) => [asset.id, asset]))}
         onClose={closeRecognition}
         closing={dialogClosing}
@@ -1473,6 +1511,7 @@ const route = useMemo(readRoute, []);
       {selection.length > 0 && !detailAsset && (
         <SelectionBar
           count={selection.length}
+          origin={selectionOrigin}
           busy={bulkBusy}
           tagContext={tags.length === 1 && userTagNames.has(tags[0]) ? tags[0] : null}
           albumContext={album}
@@ -1480,7 +1519,10 @@ const route = useMemo(readRoute, []);
           onAlbum={(name) => void runBulk("album", name)}
           onRemoveTag={(tag) => void runRemove("tag", tag)}
           onRemoveAlbum={(name) => void runRemove("album", name)}
-          onDelete={() => setDeleteOpen(true)}
+          onDelete={(rect: DOMRect) => {
+            setDialogRect({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
+            setDeleteOpen(true);
+          }}
           onClear={() => setSelection([])}
         />
       )}
@@ -1488,6 +1530,7 @@ const route = useMemo(readRoute, []);
       {deleteOpen && (
         <DeleteDialog
           count={selection.length}
+          origin={dialogRect}
           busy={deleting}
           onCancel={() => setDeleteOpen(false)}
           onConfirm={() => void confirmDelete()}
@@ -1496,6 +1539,7 @@ const route = useMemo(readRoute, []);
 
       {importPlan && (
         <ImportDialog
+          origin={null}
           plan={importProgress ? null : importPlan}
           progress={importProgress}
           busy={importBusy}
@@ -1511,8 +1555,18 @@ const route = useMemo(readRoute, []);
         />
       )}
 
+      {flyCover && (
+        <FlyingCover
+          key={flyCover.key}
+          src={flyCover.src}
+          from={flyCover.rect}
+          onDone={() => setFlyCover(null)}
+        />
+      )}
+
       <CommandPalette
         open={paletteOpen}
+        origin={paletteOrigin}
         query={queryInput}
         onQueryChange={handleSearchChange}
         sections={paletteSections}
@@ -1537,6 +1591,53 @@ const route = useMemo(readRoute, []);
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 分类卡 / 月份行的封面飞进工具栏标题区：落到位后停一下再淡出，
+ * 所以静止状态和以前完全一样（工具栏里不会多出常驻元素）。
+ */
+function FlyingCover({ src, from, onDone }: { src: string; from: DOMRect; onDone: () => void }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const target = document.querySelector<HTMLElement>(".title-block")?.getBoundingClientRect();
+    if (reduced || !target) {
+      onDone();
+      return;
+    }
+    const size = 26;
+    const left = target.left - size - 10;
+    const top = target.top + 4;
+    const dx = left - from.left;
+    const dy = top - from.top;
+    const scale = size / from.width;
+    const animation = el.animate(
+      [
+        { transform: "none", opacity: 1, borderRadius: "var(--radius-10)" },
+        { transform: `translate(${dx}px, ${dy}px) scale(${scale})`, opacity: 0.9, borderRadius: "8px" },
+      ],
+      { duration: 320, easing: "cubic-bezier(.32,.72,0,1)", fill: "forwards" },
+    );
+    animation.finished.then(() => {
+      el.animate([{ opacity: 0.9 }, { opacity: 0 }], { duration: 220, easing: "ease-out", fill: "forwards" })
+        .finished.then(onDone, onDone);
+    }, onDone);
+    // 只跑一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div
+      ref={ref}
+      className="flying-cover"
+      aria-hidden="true"
+      style={{ left: from.left, top: from.top, width: from.width, height: from.height }}
+    >
+      <img src={src} alt="" />
     </div>
   );
 }

@@ -1,17 +1,18 @@
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
-import { useDialogFocus } from "../useDialogFocus";
+import { useDialogFocus, type GrowRect } from "../useDialogFocus";
 
 type Props = {
   count: number;
+  origin?: GrowRect | null;
   busy?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 };
 
-export function DeleteDialog({ count, busy = false, onCancel, onConfirm }: Props) {
+export function DeleteDialog({ count, busy = false, origin, onCancel, onConfirm }: Props) {
   const [confirmed, setConfirmed] = useState(false);
-  const dialogRef = useDialogFocus<HTMLDivElement>(onCancel);
+  const dialogRef = useDialogFocus<HTMLDivElement>(onCancel, { growFrom: origin });
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onCancel}>
       <div
@@ -29,7 +30,7 @@ export function DeleteDialog({ count, busy = false, onCancel, onConfirm }: Props
           </div>
         </header>
 
-        <div className="dialog-body">
+        <div className="dialog-body" data-grow-stagger>
           <p className="dialog-text">
             将从库中移除这 {count} 张照片的记录（含 AI 描述、用户标签、相册关联）。
           </p>
@@ -43,7 +44,7 @@ export function DeleteDialog({ count, busy = false, onCancel, onConfirm }: Props
           <span>我知道原图不会被删除，但记录移除后无法在此界面撤销</span>
         </label>
 
-        <div className="dialog-actions">
+        <div className="dialog-actions" data-grow-stagger>
           <button type="button" className="ghost-button" onClick={onCancel} disabled={busy}>
             取消
           </button>

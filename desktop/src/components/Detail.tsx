@@ -27,6 +27,8 @@ type Props = {
   onTag: (tag: string) => void;
   onAction: (label: string) => void;
   origin?: { x: number; y: number; w: number; h: number } | null;
+  /** 上一张/下一张的方向：1 向右翻（内容从右侧进），-1 反之 */
+  step?: number;
   closing?: boolean;
 };
 
@@ -39,7 +41,7 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
   );
 }
 
-export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTag, onAction, origin, closing = false, canNext }: Props) {
+export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTag, onAction, origin, closing = false, canNext, step = 0 }: Props) {
   const [fullLoaded, setFullLoaded] = useState(false);
   const [fullFailed, setFullFailed] = useState(false);
   const fullRef = useRef<HTMLImageElement | null>(null);
@@ -78,20 +80,44 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
 
   const stageRef = useRef<HTMLDivElement | null>(null);
 
-  // 从被点开的卡片长成详情大图（关闭时由外部直接移除）。
+  // 详情里的图是 object-fit: contain，箱子等于整块舞台，真正显示的照片是居中的那一块。
+  // 要让首尾帧和卡片对得上，缩放比必须按"照片那块"算，而不是按箱子算。
+  const photoScale = (origin: { x: number; y: number; w: number; h: number }) => {
+    const stage = stageRef.current;
+    const img = fullRef.current;
+    if (!stage) return null;
+    const box = stage.getBoundingClientRect();
+    if (!box.width || !box.height) return null;
+    let pw = box.width;
+    let ph = box.height;
+    if (img?.naturalWidth && img.naturalHeight) {
+      const aspect = img.naturalWidth / img.naturalHeight;
+      if (box.width / box.height > aspect) {
+        ph = box.height;
+        pw = box.height * aspect;
+      } else {
+        pw = box.width;
+        ph = box.width / aspect;
+      }
+    }
+    return {
+      dx: origin.x + origin.w / 2 - (box.left + box.width / 2),
+      dy: origin.y + origin.h / 2 - (box.top + box.height / 2),
+      sx: origin.w / pw,
+      sy: origin.h / ph,
+    };
+  };
+
+  // 从被点开的卡片长成详情大图
   useEffect(() => {
     const el = stageRef.current;
     if (!el || !origin) return;
     if (reducedMotion()) return;
-    const target = el.getBoundingClientRect();
-    if (!target.width || !target.height) return;
-    const scaleX = origin.w / target.width;
-    const scaleY = origin.h / target.height;
-    const dx = origin.x + origin.w / 2 - (target.left + target.width / 2);
-    const dy = origin.y + origin.h / 2 - (target.top + target.height / 2);
+    const t = photoScale(origin);
+    if (!t) return;
     el.animate(
       [
-        { transform: `translate(${dx}px, ${dy}px) scale(${scaleX}, ${scaleY})`, opacity: 0.55 },
+        { transform: `translate(${t.dx}px, ${t.dy}px) scale(${t.sx}, ${t.sy})`, opacity: 0.6 },
         { transform: "none", opacity: 1 },
       ],
       { duration: DURATION.lg, easing: EASE.out },
@@ -99,6 +125,47 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
     // 只在打开时跑一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 关闭：沿打开时那条路径反向缩回原卡片（原卡片一直在底下，动画结束再卸载就是无缝的）。
+  useEffect(() => {
+    if (!closing) return;
+    const el = stageRef.current;
+    if (!el) return;
+    if (reducedMotion()) return;
+    const t = origin ? photoScale(origin) : null;
+    if (!t) {
+      el.animate([{ transform: "none", opacity: 1 }, { transform: "scale(0.94)", opacity: 0 }], {
+        duration: DURATION.md,
+        easing: EASE.inOut,
+        fill: "forwards",
+      });
+      return;
+    }
+    el.animate(
+      [
+        { transform: "none", opacity: 1 },
+        { transform: `translate(${t.dx}px, ${t.dy}px) scale(${t.sx}, ${t.sy})`, opacity: 0.9 },
+      ],
+      { duration: DURATION.md, easing: EASE.inOut, fill: "forwards" },
+    );
+    // origin 在打开时固定，关闭只看 closing
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closing]);
+
+  // 翻页：内容按方向从侧边滑入，而不是同一张淡入
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el || !step || reducedMotion()) return;
+    el.animate(
+      [
+        { transform: `translateX(${step * 5}%)`, opacity: 0.35 },
+        { transform: "none", opacity: 1 },
+      ],
+      { duration: 240, easing: EASE.outStrong },
+    );
+    // 只在 asset 变化时跑
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asset.id]);
 
   const thumb = assetSrc(asset.thumb);
   const original = assetSrc(asset.original);

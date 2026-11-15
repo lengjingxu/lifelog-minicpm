@@ -38,8 +38,8 @@ export function Topbar({
   return (
     <header className="toolbar">
       <div className="title-block">
-        <div className="title-main">{title}</div>
-        <div className="title-sub">{subtitle}</div>
+        <div className="title-main" key={`t-${title}`}>{title}</div>
+        <div className="title-sub" key={`s-${subtitle}`}>{subtitle}</div>
       </div>
 
       <div className="toolbar-spacer" />
@@ -82,6 +82,7 @@ export function Topbar({
       <div className="toolbar-divider" />
 
       <div className="view-switch" role="group" aria-label="视图切换">
+        <span className="view-switch-indicator" data-pos={view === "timeline" ? 1 : 0} aria-hidden="true" />
         <button
           type="button"
           className={clsx(view === "library" && "active")}

@@ -5,7 +5,7 @@ import { monthLabel } from "../utils";
 
 type Props = {
   months: MonthSummary[];
-  onOpenMonth: (month: string) => void;
+  onOpenMonth: (month: string, origin?: { src: string; rect: DOMRect }) => void;
 };
 
 /**
@@ -31,7 +31,14 @@ export function Timeline({ months, onOpenMonth }: Props) {
               type="button"
               key={month.month}
               className="month-row"
-              onClick={() => onOpenMonth(month.month)}
+              onClick={(event) => {
+                const cover = event.currentTarget.querySelector<HTMLElement>(".month-cover");
+                const rect = (cover ?? event.currentTarget).getBoundingClientRect();
+                onOpenMonth(
+                  month.month,
+                  month.cover_thumb ? { src: assetSrc(month.cover_thumb), rect } : undefined,
+                );
+              }}
               style={{
                 position: "absolute",
                 top: 0,

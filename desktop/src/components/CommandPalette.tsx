@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Search } from "lucide-react";
+import { DURATION, EASE, reducedMotion } from "../motion";
 import { useDialogFocus } from "../useDialogFocus";
 
 export type PaletteItem = {
@@ -16,16 +17,82 @@ export type PaletteItem = {
 
 export type PaletteSection = { label: string; items: PaletteItem[] };
 
+type Rect = { x: number; y: number; width: number; height: number };
+
 type Props = {
   open: boolean;
+  /** 打开它的那个字段的矩形：面板从它的框里长出来 */
+  origin?: Rect | null;
   query: string;
   onQueryChange: (value: string) => void;
   sections: PaletteSection[];
   onClose: () => void;
 };
 
-export function CommandPalette({ open, query, onQueryChange, sections, onClose }: Props) {
-  const dialogRef = useDialogFocus<HTMLDivElement>(onClose, { enabled: open });
+export function CommandPalette({ open, origin, query, onQueryChange, sections, onClose }: Props) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [closing, setClosing] = useState(false);
+
+  const requestClose = useCallback(() => {
+    if (closing) return;
+    if (reducedMotion() || !origin || !panelRef.current) {
+      onClose();
+      return;
+    }
+    setClosing(true);
+  }, [closing, onClose, origin]);
+
+  const dialogRef = useDialogFocus<HTMLDivElement>(requestClose, { enabled: open });
+
+  // 进：从触发字段的框长成居中卡片；出：原路缩回去。
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!open || !el || !origin || reducedMotion()) return;
+    const box = el.getBoundingClientRect();
+    if (!box.width || !box.height) return;
+    const sx = origin.width / box.width;
+    const sy = origin.height / box.height;
+    const dx = origin.x + origin.width / 2 - (box.left + box.width / 2);
+    const dy = origin.y + origin.height / 2 - (box.top + box.height / 2);
+    el.animate(
+      [
+        { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, borderRadius: "10px", opacity: 0.85 },
+        { transform: "none", borderRadius: "26px", opacity: 1 },
+      ],
+      { duration: 260, easing: EASE.outStrong },
+    );
+    contentRef.current?.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: 150,
+      delay: 110,
+      easing: EASE.out,
+      fill: "backwards",
+    });
+    // 只在打开时按当时的字段位置跑一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => {
+    if (!closing) return;
+    const el = panelRef.current;
+    if (!el || !origin) {
+      onClose();
+      return;
+    }
+    const box = el.getBoundingClientRect();
+    const sx = origin.width / box.width;
+    const sy = origin.height / box.height;
+    const dx = origin.x + origin.width / 2 - (box.left + box.width / 2);
+    const dy = origin.y + origin.height / 2 - (box.top + box.height / 2);
+    const animation = el.animate(
+      [
+        { transform: "none", borderRadius: "26px", opacity: 1 },
+        { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, borderRadius: "10px", opacity: 0 },
+      ],
+      { duration: DURATION.sm, easing: EASE.inOut, fill: "forwards" },
+    );
+    animation.onfinish = () => onClose();
+  }, [closing, origin, onClose]);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const [active, setActive] = useState(0);
@@ -77,7 +144,7 @@ export function CommandPalette({ open, query, onQueryChange, sections, onClose }
   return (
     <div className="palette-backdrop" role="presentation" onMouseDown={onClose}>
       <div
-        ref={dialogRef}
+        ref={(node) => { dialogRef.current = node; panelRef.current = node; }}
         className="palette glass-surface"
         role="dialog"
         aria-modal="true"
@@ -98,6 +165,7 @@ export function CommandPalette({ open, query, onQueryChange, sections, onClose }
           />
         </div>
 
+        <div ref={contentRef} className="palette-body">
         <div className="palette-list" ref={listRef} role="listbox" aria-label="结果">
           {flat.length === 0 ? (
             <div className="palette-empty">没有匹配的内容</div>
@@ -139,6 +207,7 @@ export function CommandPalette({ open, query, onQueryChange, sections, onClose }
         <div className="palette-foot">
           <span>↑↓ 选择 · ⏎ 打开</span>
           <span>Esc 关闭</span>
+        </div>
         </div>
       </div>
     </div>
