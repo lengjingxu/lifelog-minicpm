@@ -47,6 +47,8 @@ export function useDialogFocus<T extends HTMLElement>(onClose: () => void, optio
 
     // 从控件本身长出来：尺寸、位置、圆角一起补间；里面的行在开度过半后 25ms 错峰落下。
     if (growFrom && !reducedMotion()) {
+      // 量之前先把可能还在跑的补间撤掉：带着 transform 量出来的框会失真
+      node.getAnimations().forEach((animation) => animation.cancel());
       const box = node.getBoundingClientRect();
       if (box.width && box.height) {
         const sx = Math.min(1, Math.max(0.35, growFrom.width / box.width));

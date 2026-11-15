@@ -86,6 +86,8 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
     const stage = stageRef.current;
     const img = fullRef.current;
     if (!stage) return null;
+    // 打开/关闭时这个元素身上可能还有另一个补间，带着它量出来会失真
+    stage.getAnimations().forEach((animation) => animation.cancel());
     const box = stage.getBoundingClientRect();
     if (!box.width || !box.height) return null;
     let pw = box.width;

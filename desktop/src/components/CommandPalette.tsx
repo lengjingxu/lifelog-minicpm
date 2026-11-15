@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Search } from "lucide-react";
@@ -32,67 +32,32 @@ type Props = {
 export function CommandPalette({ open, origin, query, onQueryChange, sections, onClose }: Props) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
-  const [closing, setClosing] = useState(false);
+  const [visible, setVisible] = useState(open);
+  const animRef = useRef<Animation | null>(null);
 
-  const requestClose = useCallback(() => {
-    if (closing) return;
-    if (reducedMotion() || !origin || !panelRef.current) {
-      onClose();
-      return;
-    }
-    setClosing(true);
-  }, [closing, onClose, origin]);
+  const dialogRef = useDialogFocus<HTMLDivElement>(onClose, { enabled: open });
 
-  const dialogRef = useDialogFocus<HTMLDivElement>(requestClose, { enabled: open });
-
-  // 进：从触发字段的框长成居中卡片；出：原路缩回去。
-  useEffect(() => {
+  const grow = (dir: "in" | "out") => {
     const el = panelRef.current;
-    if (!open || !el || !origin || reducedMotion()) return;
+    if (!el || !origin || reducedMotion()) return null;
+    const running = el.getAnimations();
+    if (dir === "in" && running.length) running.forEach((animation) => animation.cancel());
     const box = el.getBoundingClientRect();
-    if (!box.width || !box.height) return;
+    if (!box.width || !box.height) return null;
     const sx = origin.width / box.width;
     const sy = origin.height / box.height;
     const dx = origin.x + origin.width / 2 - (box.left + box.width / 2);
     const dy = origin.y + origin.height / 2 - (box.top + box.height / 2);
-    el.animate(
-      [
-        { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, borderRadius: "10px", opacity: 0.85 },
-        { transform: "none", borderRadius: "26px", opacity: 1 },
-      ],
-      { duration: 260, easing: EASE.outStrong },
-    );
-    contentRef.current?.animate([{ opacity: 0 }, { opacity: 1 }], {
-      duration: 150,
-      delay: 110,
-      easing: EASE.out,
-      fill: "backwards",
+    const from = { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, borderRadius: "10px", opacity: 0.85 };
+    const to = { transform: "none", borderRadius: "26px", opacity: 1 };
+    return el.animate(dir === "in" ? [from, to] : [to, { ...from, opacity: 0 }], {
+      duration: dir === "in" ? 260 : DURATION.sm,
+      easing: dir === "in" ? EASE.outStrong : EASE.inOut,
+      fill: "both",
     });
-    // 只在打开时按当时的字段位置跑一次
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  };
 
-  useEffect(() => {
-    if (!closing) return;
-    const el = panelRef.current;
-    if (!el || !origin) {
-      onClose();
-      return;
-    }
-    const box = el.getBoundingClientRect();
-    const sx = origin.width / box.width;
-    const sy = origin.height / box.height;
-    const dx = origin.x + origin.width / 2 - (box.left + box.width / 2);
-    const dy = origin.y + origin.height / 2 - (box.top + box.height / 2);
-    const animation = el.animate(
-      [
-        { transform: "none", borderRadius: "26px", opacity: 1 },
-        { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`, borderRadius: "10px", opacity: 0 },
-      ],
-      { duration: DURATION.sm, easing: EASE.inOut, fill: "forwards" },
-    );
-    animation.onfinish = () => onClose();
-  }, [closing, origin, onClose]);
+
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const [active, setActive] = useState(0);
@@ -101,13 +66,8 @@ export function CommandPalette({ open, origin, query, onQueryChange, sections, o
   const flat = useMemo(() => sections.flatMap((section) => section.items), [sections]);
 
   useEffect(() => {
-    if (open) setActive(0);
-  }, [open, query]);
-
-  useEffect(() => {
-    if (!open) return;
-    inputRef.current?.focus({ preventScroll: true });
-  }, [open]);
+    setActive(0);
+  }, [query]);
 
   useEffect(() => {
     const node = listRef.current?.querySelector<HTMLElement>(`[data-palette-index="${active}"]`);
@@ -138,7 +98,45 @@ export function CommandPalette({ open, origin, query, onQueryChange, sections, o
     }
   };
 
-  if (!open) return null;
+  // 开合都跟着 open 走：关闭时先播完缩回动画再卸载，快速开关会互相取消。
+  useEffect(() => {
+    animRef.current?.cancel();
+    animRef.current = null;
+    if (open) {
+      setVisible(true);
+      setActive(0);
+      return;
+    }
+    if (!visible) return;
+    const animation = grow("out");
+    if (!animation) {
+      setVisible(false);
+      return;
+    }
+    animRef.current = animation;
+    animation.onfinish = () => {
+      animRef.current = null;
+      setVisible(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // 进场动画要等面板真正挂上 DOM 之后才量得到
+  useLayoutEffect(() => {
+    if (!open || !visible) return;
+    inputRef.current?.focus({ preventScroll: true });
+    const animation = grow("in");
+    animRef.current = animation;
+    contentRef.current?.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: 150,
+      delay: 110,
+      easing: EASE.out,
+      fill: "backwards",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, visible]);
+
+  if (!open && !visible) return null;
 
   let cursor = -1;
   return (

@@ -832,11 +832,11 @@ const route = useMemo(readRoute, []);
   }, []);
 
   // 面板从触发它的搜索框长出来，所以要记住那个框的矩形。
-  const openPalette = useCallback(() => {
-    const field = document.querySelector<HTMLElement>(".search, .sidebar-search");
-    if (field) {
-      const rect = field.getBoundingClientRect();
-      setPaletteOrigin({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
+  const openPalette = useCallback((from?: DOMRect) => {
+    // 从哪个控件打开就从哪里长出来；键盘 ⌘K 默认用顶栏搜索框。
+    const box = from ?? document.querySelector<HTMLElement>(".search")?.getBoundingClientRect();
+    if (box) {
+      setPaletteOrigin({ x: box.left, y: box.top, width: box.width, height: box.height });
     }
     setPaletteOpen(true);
   }, []);
@@ -1410,7 +1410,7 @@ const route = useMemo(readRoute, []);
           setPlace((current) => (current === name ? null : name));
           setDetailId(null);
         }}
-        onSearch={openPalette}
+        onSearch={(rect?: DOMRect) => openPalette(rect)}
         liveStatus={{
           status: live.view.status,
           done: Math.min(live.view.total, live.view.done),
@@ -1433,7 +1433,7 @@ const route = useMemo(readRoute, []);
           subtitle={subtitle}
           onExport={selection.length > 0 || active ? () => void handleExport() : undefined}
           searchValue={queryInput}
-          onSearchOpen={openPalette}
+          onSearchOpen={(rect: DOMRect) => openPalette(rect)}
           onSearchClear={clearSearch}
           density={density}
           onDensity={setDensity}

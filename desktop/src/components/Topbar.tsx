@@ -8,7 +8,7 @@ type Props = {
   title: string;
   subtitle: string;
   searchValue: string;
-  onSearchOpen: () => void;
+  onSearchOpen: (rect: DOMRect) => void;
   onSearchClear: () => void;
   density: Density;
   onDensity: (density: Density) => void;
@@ -51,7 +51,10 @@ export function Topbar({
         <button
           type="button"
           className={clsx("search-trigger", !searchValue && "empty")}
-          onClick={onSearchOpen}
+          onClick={(event) => {
+            const field = event.currentTarget.closest<HTMLElement>(".search") ?? event.currentTarget;
+            onSearchOpen(field.getBoundingClientRect());
+          }}
           aria-label="搜索照片（⌘K）"
           title="搜索与跳转 ⌘K"
         >

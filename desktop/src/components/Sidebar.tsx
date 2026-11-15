@@ -30,7 +30,7 @@ type Props = {
   onTag: (tag: string) => void;
   onPerson: (person: string) => void;
   onPlace: (place: string) => void;
-  onSearch: () => void;
+  onSearch: (rect?: DOMRect) => void;
   liveStatus: { status: LiveStatus; done: number; total: number; rate: number | null; paused: boolean } | null;
   onRecognition: (rect?: DOMRect) => void;
   onSettings: () => void;
@@ -124,7 +124,11 @@ export function Sidebar({
         </div>
       </div>
 
-      <button type="button" className="sidebar-search glass-control" onClick={onSearch}>
+      <button
+        type="button"
+        className="sidebar-search glass-control"
+        onClick={(event) => onSearch(event.currentTarget.getBoundingClientRect())}
+      >
         <Search size={13} strokeWidth={1.8} />
         <span>搜索照片</span>
         <kbd>⌘K</kbd>
