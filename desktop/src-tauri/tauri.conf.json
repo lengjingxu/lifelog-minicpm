@@ -43,6 +43,16 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "infoPlist": {
+        "NSRemovableVolumesUsageDescription": "读取外置盘里的照片，删除时把原图移到废纸篓。",
+        "NSNetworkVolumesUsageDescription": "读取网络磁盘里的照片。",
+        "NSDesktopFolderUsageDescription": "读取桌面上的照片。",
+        "NSDocumentsFolderUsageDescription": "读取文稿里的照片。",
+        "NSDownloadsFolderUsageDescription": "读取下载目录里的照片。",
+        "NSPhotoLibraryUsageDescription": "从系统相册导入照片。"
+      }
+    }
   }
 }
