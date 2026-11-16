@@ -560,8 +560,10 @@ const route = useMemo(readRoute, []);
         const blocked = report.roots.filter((root) => root.exists && !root.readable).map((root) => root.root);
         setBlockedRoots(blocked.length ? blocked : null);
       })
-      .catch(() => undefined);
-  }, []);
+      .catch((reason: unknown) => {
+        showToast(`检查照片目录权限失败：${String(reason)}`);
+      });
+  }, [showToast]);
 
   useEffect(checkAccess, [checkAccess]);
 
