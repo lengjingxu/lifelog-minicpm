@@ -150,6 +150,13 @@ def list_albums() -> dict:
     return {"ok": True, "albums": [{"id": r[0], "name": r[1], "count": r[2]} for r in rows]}
 
 
+def drop_from_cleanup_queue(ids: list[str]) -> int:
+    """真实清理后同步移除待清理清单行。清单表不存在时什么也不做。"""
+    from . import space
+
+    return space.drop_ids(ids)
+
+
 def delete_records(ids: list[str]) -> dict:
     """从库里移除记录：只删数据库行，不动磁盘文件。
 

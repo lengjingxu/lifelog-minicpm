@@ -31,6 +31,8 @@ type Props = {
   theme?: "dark" | "light";
   onTheme?: (theme: "dark" | "light") => void;
   onExport?: () => void;
+  /** 空间页只需要标题、搜索和主题，网格工具（视图/排序/多选/密度）都藏起来。 */
+  hideGridTools?: boolean;
 };
 
 export function Topbar({
@@ -51,6 +53,7 @@ export function Topbar({
   theme = "dark",
   onTheme,
   onExport,
+  hideGridTools = false,
 }: Props) {
   return (
     <header className="toolbar">
@@ -101,6 +104,7 @@ export function Topbar({
       )}
       <div className="toolbar-divider" />
 
+      {!hideGridTools && (
       <div className="view-switch" role="group" aria-label="视图切换">
         <span className="view-switch-indicator" data-pos={view === "timeline" ? 1 : 0} aria-hidden="true" />
         <button
@@ -124,8 +128,9 @@ export function Topbar({
           <Clock size={14} strokeWidth={1.8} />
         </button>
       </div>
+      )}
 
-      {onExport && (
+      {onExport && !hideGridTools && (
         <button
           type="button"
           className="icon-button"
@@ -136,6 +141,7 @@ export function Topbar({
           <Download size={15} strokeWidth={1.8} />
         </button>
       )}
+      {!hideGridTools && (
       <button
         type="button"
         className={clsx("icon-button select-mode-button", selectMode && "on")}
@@ -146,7 +152,9 @@ export function Topbar({
       >
         <CheckSquare size={15} strokeWidth={1.8} />
       </button>
-      <SortButton sort={sort} onSort={onSort} />
+      )}
+      {!hideGridTools && <SortButton sort={sort} onSort={onSort} />}
+      {!hideGridTools && (
       <div className="density-switch" role="group" aria-label="网格密度">
         <button
           type="button"
@@ -169,6 +177,7 @@ export function Topbar({
           8
         </button>
       </div>
+      )}
         </>
       )}
     </header>

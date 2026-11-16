@@ -915,6 +915,65 @@ fn trash_with(path: &std::path::Path) -> Result<(), trash::Error> {
     trash::delete(path)
 }
 
+// 清单读写走 Python 侧（lifelog/space.py）：命令行、测试和桌面端同一份实现，
+// 也能保证 config.DB_PATH 与桌面端实际打开的库是同一个文件。
+
+#[tauri::command]
+async fn cleanup_list(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || run_python_cli(&home, &["cleanup-list".to_string()]))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+/// 加入待清理：只写 cleanup_queue，不动文件、不删 assets 行。
+#[tauri::command]
+async fn cleanup_add(
+    db: State<'_, Db>,
+    ids: Vec<String>,
+    source: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    let source = source.unwrap_or_else(|| "space".to_string());
+    let source = if source.trim().is_empty() { "space".to_string() } else { source };
+    tauri::async_runtime::spawn_blocking(move || {
+        run_python_cli(
+            &home,
+            &[
+                "cleanup-add".to_string(),
+                "--ids".to_string(),
+                ids.join(","),
+                "--source".to_string(),
+                source,
+            ],
+        )
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+/// 从待清理里移出（还原），只删清单行。
+#[tauri::command]
+async fn cleanup_remove(db: State<'_, Db>, ids: Vec<String>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        run_python_cli(
+            &home,
+            &["cleanup-remove".to_string(), "--ids".to_string(), ids.join(",")],
+        )
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn space_summary(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || run_python_cli(&home, &["space-summary".to_string()]))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
 #[tauri::command]
 async fn delete_records(
     db: State<'_, Db>,
@@ -992,6 +1051,7 @@ async fn delete_records(
             &home,
             &["record-delete".to_string(), "--ids".to_string(), ids.join(",")],
         )?;
+        // record-delete（lifelog/cli.py）会在同一个库里同步删掉 cleanup_queue 的行。
         // 记录没了，缩略图缓存就成了孤儿，顺手清掉。
         let _ = run_python_cli(
             &home,
@@ -1187,6 +1247,14 @@ async fn generate_thumbs(
 }
 
 /// 导入本地文件夹：先跑 Python 的 ingest，再补齐缩略图，两步都流式回报。
+/// Python 侧默认把库放在 $LIFELOG_HOME/lifelog.sqlite；桌面端允许用 LIFELOG_DB 单独指定，
+/// 这里必须把这个设置传过去，否则清单会写到另一个库里。
+fn python_db_path(home: &Path) -> PathBuf {
+    std::env::var("LIFELOG_DB")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| home.join("lifelog.sqlite"))
+}
+
 fn run_python_cli(home: &Path, args: &[String]) -> Result<serde_json::Value, String> {
     // lifelog 包在仓库根目录，不在 desktop/ 下；用 desktop_root 会 ModuleNotFoundError
     let root = repo_root();
@@ -1197,6 +1265,7 @@ fn run_python_cli(home: &Path, args: &[String]) -> Result<serde_json::Value, Str
         .current_dir(&root)
         .env("PYTHONPATH", &root)
         .env("LIFELOG_HOME", home)
+        .env("LIFELOG_DB", python_db_path(home))
         .output()
         .map_err(|err| format!("启动 Python 侧失败：{err}"))?;
     if !output.status.success() {
@@ -1417,6 +1486,10 @@ pub fn run() {
             album_add,
             album_list,
             dup_groups,
+            cleanup_list,
+            cleanup_add,
+            cleanup_remove,
+            space_summary,
             live::live_health,
             live::live_start,
             live::live_state,
