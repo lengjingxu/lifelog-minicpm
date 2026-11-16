@@ -10,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 import clsx from "clsx";
-import { assetSrc, openExternal, revealInFinder, type Asset } from "../api";
+import { assetSrc, type Asset } from "../api";
 import { DURATION, EASE, reducedMotion } from "../motion";
 import { useDialogFocus } from "../useDialogFocus";
 import { kindLabel, peopleList, splitList, timeLabel } from "../utils";
@@ -26,13 +26,24 @@ type Props = {
   /** 已经加载到的列表里还有没有下一张；没传时按 total 推算。 */
   canNext?: boolean;
   onTag: (tag: string) => void;
-  onAction: (label: string) => void;
+  /** 详情页操作的真实回调；没有占位分支。 */
+  actions: {
+    onRecognize: () => void;
+    onAddToAlbum: () => void;
+    onExport: () => void;
+    onReveal: () => void;
+    onOpenExternal: () => void;
+  };
   /** 删除这一张：由 App 弹确认卡并真正调 delete_records。 */
   onDelete: () => void;
+  /** 导出这一张时禁用导出按钮。 */
+  exporting?: boolean;
   /** 删除失败的一句话，显示在详情里，不静默。 */
   deleteError?: string | null;
   /** 删除进行中：禁用按钮，避免重复确认。 */
   deleting?: boolean;
+  /** 正在后台重新识别这一张。 */
+  recognition?: boolean;
   origin?: { x: number; y: number; w: number; h: number } | null;
   /** 上一张/下一张的方向：1 向右翻（内容从右侧进），-1 反之 */
   step?: number;
@@ -49,8 +60,8 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
 }
 
 export function Detail({
-  asset, dup, index, total, onClose, onPrev, onNext, onTag, onAction,
-  onDelete, deleteError = null, deleting = false,
+  asset, dup, index, total, onClose, onPrev, onNext, onTag, actions, onDelete,
+  deleteError = null, deleting = false, recognition = false, exporting = false,
   origin, closing = false, canNext, step = 0,
 }: Props) {
   const [fullLoaded, setFullLoaded] = useState(false);
@@ -234,7 +245,7 @@ export function Detail({
                 <div className="stage-video-fallback">
                   <strong>这个格式系统解不了</strong>
                   <span>{asset.path.split("/").pop()}</span>
-                  <button type="button" onClick={() => void openExternal(asset.path).catch((reason: unknown) => setExternalError(String(reason)))}>
+                  <button type="button" onClick={() => actions.onOpenExternal()}>
                     在外部播放器打开
                   </button>
                   {externalError && <em>{externalError}</em>}
@@ -286,6 +297,9 @@ export function Detail({
         </button>
 
         <div className="inspector-kicker">{kindLabel(asset)} · 详情</div>
+        {recognition && (
+          <span className="status-pill muted inspector-recognition">识别中…</span>
+        )}
         <h2>{timeLabel(asset.taken_at)}</h2>
         <p className="file-name" title={asset.path}>{asset.path.split("/").pop()}</p>
         <p className="file-path" title={asset.path}>{asset.path}</p>
@@ -325,20 +339,20 @@ export function Detail({
         )}
 
         <div className="inspector-actions">
-          <button type="button" onClick={() => onAction("重新识别")}>
-            <RotateCcw size={13} strokeWidth={1.8} />重新识别
+          <button type="button" onClick={actions.onRecognize} disabled={recognition}>
+            <RotateCcw size={13} strokeWidth={1.8} />{recognition ? "识别中…" : "重新识别"}
           </button>
-          <button type="button" onClick={() => onAction("加入相册")}>
+          <button type="button" onClick={actions.onAddToAlbum}>
             <Plus size={13} strokeWidth={1.8} />加入相册
           </button>
-          <button type="button" onClick={() => onAction("导出")}>
-            <Download size={13} strokeWidth={1.8} />导出
+          <button type="button" onClick={actions.onExport} disabled={exporting}>
+            <Download size={13} strokeWidth={1.8} />{exporting ? "导出中…" : "导出"}
           </button>
-          <button type="button" onClick={() => void revealInFinder(asset.path).catch(() => onAction("在 Finder 中显示"))}>
+          <button type="button" onClick={actions.onReveal}>
             <FolderOpen size={13} strokeWidth={1.8} />Finder 中显示
           </button>
           {isVideo && (
-            <button type="button" onClick={() => void openExternal(asset.path).catch(() => onAction("在外部播放器打开"))}>
+            <button type="button" onClick={actions.onOpenExternal}>
               <FolderOpen size={13} strokeWidth={1.8} />外部播放器
             </button>
           )}

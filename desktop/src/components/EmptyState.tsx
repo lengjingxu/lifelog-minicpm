@@ -30,7 +30,7 @@ export function EmptyState({ mode = "library", onChoose, onReset }: Props) {
         <Images size={26} strokeWidth={1.5} />
       </div>
       <h2>相册还是空的</h2>
-      <p>先把照片带进来。拾光只读本地库，导入与识别会在 P2 接通。</p>
+      <p>先把照片带进来。小米云、本地文件夹导入和逐张识别都已经接在真实链路上。</p>
       <div className="empty-actions">
         <button type="button" className="empty-card glass-panel" onClick={() => onChoose("导入小米相册")}>
           <Sparkles size={18} strokeWidth={1.6} />

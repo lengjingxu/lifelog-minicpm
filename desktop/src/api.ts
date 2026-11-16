@@ -515,12 +515,16 @@ async function mockStart(args: {
   count?: number;
   concurrency?: number;
   speed?: number;
+  ids?: string[];
 }): Promise<LiveStartResult> {
   if (mockSession?.status === "running") {
     return { ok: false, error: "会话进行中，请先暂停或等待完成" };
   }
   awaitFixtureAssets = await loadFixture();
-  const pool = awaitFixtureAssets.assets.filter((asset) => asset.kind === "image");
+  const wanted = new Set(args.ids ?? []);
+  const pool = awaitFixtureAssets.assets.filter(
+    (asset) => asset.kind === "image" && (wanted.size === 0 || wanted.has(asset.id)),
+  );
   const requested = Math.max(1, Math.min(args.count ?? 24, pool.length));
   const shuffled = [...pool].sort(() => Math.random() - 0.5).slice(0, requested);
   const photos = shuffled.map((asset) => ({ id: asset.id, thumb: `thumbs/${asset.id}.jpg` }));
@@ -564,6 +568,8 @@ export async function liveStart(args: {
   count?: number;
   concurrency?: number;
   speed?: number;
+  ids?: string[];
+  force?: boolean;
 }): Promise<LiveStartResult> {
   if (!isTauri) return mockStart(args);
   return invokeLive<LiveStartResult>("live_start", { args });

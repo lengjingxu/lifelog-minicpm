@@ -125,11 +125,14 @@ class SimSession(Session):
 class LiveSession(Session):
     """真实识别：llama.cpp 在位后启用。事件来自 run_caption 的 on_result 回调。"""
 
-    def __init__(self, total: int, concurrency: int, model_key: str, count: int | None):
+    def __init__(self, total: int, concurrency: int, model_key: str, count: int | None,
+                 ids: list[str] | None = None, force: bool = False):
         super().__init__("live", total, concurrency,
                          {"model": model_key, "label": "真实推理 · llama.cpp"})
         self.model_key = model_key
         self.count = count
+        self.ids = ids
+        self.force = force
 
     def run(self) -> None:  # pragma: no cover - 依赖 llama-server
         from . import caption
@@ -144,7 +147,8 @@ class LiveSession(Session):
 
         try:
             caption.run_caption(self.model_key, limit=self.count,
-                                concurrency=self.concurrency, on_result=on_result)
+                                concurrency=self.concurrency, on_result=on_result,
+                                ids=self.ids, force=self.force)
         except Exception as exc:
             self.push({"type": "error", "message": str(exc)})
         self.finish("done")
@@ -176,7 +180,8 @@ def _sim_photos(count: int | None) -> list[dict]:
 
 
 def start(mode: str = "sim", count: int | None = 40, concurrency: int = DEFAULT_CONCURRENCY,
-          speed: float = 2.0) -> dict:
+          speed: float = 2.0, ids: list[str] | None = None,
+          force: bool = False) -> dict:
     """启动一次会话；已有会话未结束时拒绝。
 
     返回 photos（本次会话的照片队列，含缩略图地址），前端据此铺「待识别堆」，
@@ -195,8 +200,9 @@ def start(mode: str = "sim", count: int | None = 40, concurrency: int = DEFAULT_
         elif mode == "live":
             from . import caption as caption_mod
             todo = caption_mod.pending_assets("minicpm-v-4.7-1b", caption_mod.PROMPT_VERSION,
-                                              limit=count)
-            session = LiveSession(len(todo), concurrency, "minicpm-v-4.7-1b", count)
+                                              limit=count, ids=ids or None, force=force)
+            session = LiveSession(len(todo), concurrency, "minicpm-v-4.7-1b", count,
+                                  ids=ids or None, force=force)
         else:
             return {"ok": False, "error": f"未知模式 {mode}"}
         session.thread = threading.Thread(target=session.run, daemon=True)

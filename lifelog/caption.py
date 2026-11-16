@@ -192,12 +192,26 @@ def clean_tags(value) -> list[str]:
 
 def pending_assets(model: str, prompt_version: str = PROMPT_VERSION, limit: int | None = None,
                    since_day: str | None = None, until_day: str | None = None,
-                   sample: int | None = None) -> list[dict]:
+                   sample: int | None = None, ids: list[str] | None = None,
+                   force: bool = False) -> list[dict]:
     query = """SELECT a.id, a.path, a.day, a.taken_at FROM assets a
                LEFT JOIN captions c
                  ON c.asset_id = a.id AND c.model = ? AND c.prompt_version = ?
-               WHERE (c.asset_id IS NULL OR c.status != 'ok') AND a.kind = 'image'"""
+               WHERE {status_clause} AND a.kind = 'image'"""
+    # force：详情页「重新识别这一张」要覆盖已有描述，不能只挑还没描述的。
+    status_clause = (
+        "CASE WHEN ? THEN 1 ELSE (c.asset_id IS NULL OR c.status != 'ok') END"
+        if force
+        else "(c.asset_id IS NULL OR c.status != 'ok')"
+    )
+    query = query.format(status_clause=status_clause)
     params: list = [model, prompt_version]
+    if force:
+        params.append(1)
+    if ids:
+        marks = ",".join("?" for _ in ids)
+        query += f" AND a.id IN ({marks})"
+        params.extend(ids)
     if since_day:
         query += " AND a.day >= ?"
         params.append(since_day)
@@ -242,7 +256,8 @@ def store_caption(con, asset_id: str, model: str, model_version: str, data: dict
 def run_caption(model_key: str, limit: int | None = None, since_day: str | None = None,
                 until_day: str | None = None, max_side: int = 1024,
                 sample: int | None = None, concurrency: int = 1,
-                on_result: Callable | None = None) -> dict:
+                on_result: Callable | None = None, ids: list[str] | None = None,
+                force: bool = False) -> dict:
     """对尚未描述的照片逐张跑 MiniCPM。可重复运行，自动续跑。
 
     on_result(asset, data, ok, elapsed_ms)：每张完成时回调（供实时可视化等场景）。
@@ -251,7 +266,7 @@ def run_caption(model_key: str, limit: int | None = None, since_day: str | None 
 
     db.init_db()
     model_version = config.MODELS[model_key]["title"]
-    todo = pending_assets(model_key, PROMPT_VERSION, limit, since_day, until_day, sample)
+    todo = pending_assets(model_key, PROMPT_VERSION, limit, since_day, until_day, sample, ids=ids, force=force)
     stats = {"todo": len(todo), "ok": 0, "failed": 0, "skipped": 0}
     if not todo:
         return stats

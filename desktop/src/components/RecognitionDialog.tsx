@@ -1,18 +1,32 @@
 import clsx from "clsx";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   AlertCircle,
   CheckCircle2,
   Cloud,
+  CloudDownload,
+  FolderSearch,
   LoaderCircle,
   Pause,
   Play,
+  RefreshCw,
   Sparkles,
   X,
 } from "lucide-react";
-import type { Asset } from "../api";
+import {
+  assetSrc,
+  generateThumbs,
+  importFolder,
+  importXiaomi,
+  isTauri,
+  pickFolder,
+  thumbStatus,
+  type Asset,
+  type ImportPlan,
+} from "../api";
+import { importProgressText, type ImportProgress } from "./ImportDialog";
 import type { LiveController } from "../live";
-import { assetSrc } from "../api";
 import { useDialogFocus, type GrowRect } from "../useDialogFocus";
 
 type Props = {
@@ -23,8 +37,24 @@ type Props = {
   origin?: string;
   originRect?: GrowRect | null;
   closing?: boolean;
-
+  /** 导入/识别完成后让 App 刷新库与缩略图。 */
+  onImported?: () => Promise<void> | void;
 };
+
+function extractMessage(value: unknown): string {
+  const raw = typeof value === "string" ? value : value instanceof Error ? value.message : String(value);
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.message === "string") return parsed.message;
+  } catch {
+    // 不是 JSON 就原样返回
+  }
+  return raw;
+}
+
+function gb(bytes: number): string {
+  return bytes >= 1e9 ? (bytes / 1e9).toFixed(1) + " GB" : Math.max(1, Math.round(bytes / 1e6)) + " MB";
+}
 
 function formatRemaining(total: number, done: number, rate: number | null): string {
   if (rate === null) return "等待测速";
@@ -43,6 +73,7 @@ export function RecognitionDialog({
   origin = "50% 100%",
   originRect = null,
   closing = false,
+  onImported,
 }: Props) {
   const [count, setCount] = useState(18);
   const [concurrency, setConcurrency] = useState(4);
@@ -89,6 +120,95 @@ export function RecognitionDialog({
     }
   };
 
+  const [importPlan, setImportPlan] = useState<ImportPlan | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importStage, setImportStage] = useState<string>("");
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const importTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (!open) return;
+    let unlisten: (() => void) | undefined;
+    void listen<ImportProgress>("import-progress", (event) => {
+      setImportProgress(event.payload);
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => undefined);
+    return () => unlisten?.();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !isTauri) return;
+    let alive = true;
+    const tick = () => {
+      thumbStatus()
+        .then((status) => {
+          if (!alive) return;
+          setImportStage(`本地索引 ${status.assets.toLocaleString()} 个 · 缩略图 ${status.thumbs.toLocaleString()} 个`);
+        })
+        .catch(() => undefined);
+    };
+    tick();
+    importTimer.current = window.setInterval(tick, 4000);
+    return () => {
+      alive = false;
+      window.clearInterval(importTimer.current);
+    };
+  }, [open]);
+
+  const previewImport = async () => {
+    setImportBusy(true);
+    setImportError(null);
+    try {
+      const plan = await importXiaomi(true);
+      setImportPlan(plan);
+    } catch (reason: unknown) {
+      const message = extractMessage(reason);
+      setImportError(message);
+      setImportPlan(null);
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const startImport = async () => {
+    setImportBusy(true);
+    setImportError(null);
+    setImportProgress({ message: "正在准备导入…" });
+    try {
+      await importXiaomi(false);
+      await generateThumbs(false);
+      if (onImported) await onImported();
+      setImportPlan(null);
+      setImportProgress(null);
+    } catch (reason: unknown) {
+      const message = extractMessage(reason);
+      setImportError(message);
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const importLocal = async () => {
+    const folder = await pickFolder({ title: "选择要导入的文件夹" });
+    if (!folder) return;
+    setImportBusy(true);
+    setImportError(null);
+    try {
+      const result = await importFolder(folder);
+      if (!result.ok) throw new Error("导入没有返回成功");
+      await generateThumbs(false);
+      if (onImported) await onImported();
+    } catch (reason: unknown) {
+      setImportError(extractMessage(reason));
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
   const primary = (() => {
     if (submitting || live.busy) {
       return (
@@ -100,85 +220,94 @@ export function RecognitionDialog({
     if (running) {
       return (
         <button type="button" className="primary-button" onClick={() => void live.pause()}>
-          <Pause size={14} /> 暂停识别
+          <Pause size={14} /> 暂停预览
         </button>
       );
     }
     if (view.active && view.paused) {
       return (
         <button type="button" className="primary-button" onClick={() => void live.resume()}>
-          <Play size={14} /> 继续识别
+          <Play size={14} /> 继续预览
         </button>
       );
     }
     return (
       <button type="button" className="primary-button" onClick={() => void begin()}>
-        <Sparkles size={14} /> {view.active ? "再跑一轮" : "开始识别"}
+        <Sparkles size={14} /> {view.active ? "再跑一轮预览" : "预览识别流程"}
       </button>
     );
   })();
 
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <section
-        ref={dialogRef}
-        className={clsx("recognition-dialog dialog glass-surface", closing && "closing")}
-        style={{ ["--dialog-origin" as string]: origin }}
-        role="dialog"
-        aria-modal="true"
-        aria-label="识别进度"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header className="dialog-head">
-          <div>
-            <div className="eyebrow">RECOGNITION</div>
-            <h2>识别进度</h2>
-            <p>小米云导入与 AI 打标在同一个现场，关闭后继续在后台运行。</p>
-          </div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="关闭识别进度">
-            <X size={16} />
-          </button>
-        </header>
-
-        {live.error && (
-          <div className="inline-alert">
-            <AlertCircle size={15} />
-            <div>
-              <strong>识别服务未启动</strong>
-              <span>{live.error}</span>
-            </div>
-          </div>
-        )}
-
-        <div className="recognition-grid">
-          <section className="recognition-block import-block">
-            <div className="block-title">
-              <Cloud size={16} />
-              <span>小米云导入</span>
-              <span className="status-pill muted">P2 占位</span>
-            </div>
-            <p className="block-copy">真实导入仍由 Python 侧完成，本阶段只展示入口与登录态。</p>
-            <div className="import-row">
+      return (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+          <section
+            ref={dialogRef}
+            className={clsx("recognition-dialog dialog glass-surface", closing && "closing")}
+            style={{ ["--dialog-origin" as string]: origin }}
+            role="dialog"
+            aria-modal="true"
+            aria-label="导入与识别"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="dialog-head">
               <div>
-                <strong>未连接</strong>
-                <span>不执行真实下载，也不会写入数据库</span>
+                <div className="eyebrow">IMPORT &amp; RECOGNITION</div>
+                <h2>导入与识别</h2>
+                <p>小米云导入、本地文件夹导入都在这里；真实识别在详情页逐张触发。</p>
               </div>
-              <button type="button" className="ghost-button" disabled>
-                连接小米云
+              <button type="button" className="icon-button" onClick={onClose} aria-label="关闭">
+                <X size={16} />
               </button>
-            </div>
-            <div className="import-placeholder">
-              <div className="import-placeholder-head">
-                <span>导入进度</span>
-                <em>等待真实导入接入</em>
+            </header>
+
+            {(live.error || live.errorMessage) && (
+              <div className="inline-alert">
+                <AlertCircle size={15} />
+                <div>
+                  <strong>识别服务报错</strong>
+                  <span>{live.errorMessage ?? live.error}</span>
+                </div>
               </div>
-              <div className="import-placeholder-track" />
-              <div className="import-placeholder-foot">
-                <span>云端相册</span>
-                <span>本地扫描</span>
-              </div>
-            </div>
-          </section>
+            )}
+
+            <div className="recognition-grid">
+              <section className="recognition-block import-block">
+                <div className="block-title">
+                  <Cloud size={16} />
+                  <span>导入照片</span>
+                  <span className="status-pill">{importBusy ? "进行中" : "真实链路"}</span>
+                </div>
+                <p className="block-copy">小米云先预演再下载；本地文件夹直接建索引。导入后自动补缩略图。</p>
+                <div className="import-row">
+                  <div>
+                    <strong>{importStage || "读取本地索引…"}</strong>
+                    <span>{importError ?? (importProgress ? importProgressText(importProgress) : "只下载到本地，云端只读")}</span>
+                  </div>
+                  <button type="button" className="ghost-button" onClick={() => void previewImport()} disabled={importBusy}>
+                    <RefreshCw size={13} /> 扫描云相册
+                  </button>
+                </div>
+                {importPlan && (
+                  <div className="import-plan">
+                    <p className="dialog-text">
+                      区间内共 {importPlan.listed} 张：将新增 <b>{importPlan.new}</b> 张，本地已有 <b>{importPlan.existing}</b> 张。
+                    </p>
+                    <p className="dialog-text dim">需要下载约 {gb(importPlan.bytes)}；中断可续传。</p>
+                    <div className="dialog-actions">
+                      <button type="button" className="ghost-button" onClick={() => setImportPlan(null)} disabled={importBusy}>
+                        取消
+                      </button>
+                      <button type="button" className="primary-button" onClick={() => void startImport()} disabled={importBusy}>
+                        <CloudDownload size={14} /> {importBusy ? "导入中…" : "开始导入"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <button type="button" className="ghost-button full" onClick={() => void importLocal()} disabled={importBusy || !isTauri}>
+                  <FolderSearch size={14} /> 导入本地文件夹
+                </button>
+                {!isTauri && <p className="dialog-footnote">浏览器预览里不能选文件夹，请在桌面端使用。</p>}
+              </section>
 
           <section className="recognition-block mark-block">
             <div className="block-title">
@@ -211,13 +340,13 @@ export function RecognitionDialog({
                 />
               </label>
               <label>
-                <span>速度</span>
+                <span>速度（仅预览模拟）</span>
                 <select
                   value={speed}
                   disabled={view.active}
                   onChange={(event) => setSpeed(Number(event.target.value))}
                 >
-                  <option value={1}>1× 实测</option>
+                  <option value={1}>1×</option>
                   <option value={2}>2×</option>
                   <option value={4}>4×</option>
                   <option value={8}>8×</option>
@@ -270,7 +399,7 @@ export function RecognitionDialog({
               </button>
             </div>
             <p className="dialog-footnote">
-              暂停会调用 stop 结束当前会话；继续会按剩余条数重开会话，已完成进度按累计值保留。
+              这里的「开始识别」是界面预览；真实识别在详情页点「重新识别」，只跑当前这一张。
             </p>
           </section>
         </div>
@@ -301,3 +430,4 @@ export function RecognitionDialog({
     </div>
   );
 }
+

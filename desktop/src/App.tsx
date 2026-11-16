@@ -68,8 +68,9 @@ import { OrganizeView } from "./components/OrganizeView";
 import { RecognitionDialog } from "./components/RecognitionDialog";
 import { SettingsView } from "./components/SettingsView";
 import { SpaceView, assetFromEntry } from "./components/SpaceView";
-import { openTrash } from "./api";
-import { useLiveController } from "./live";
+import { AlbumPicker } from "./components/AlbumPicker";
+import { openTrash, openExternal } from "./api";
+import { liveEventMessage, useLiveController } from "./live";
 import {
   gridColumnCount,
   matchesFilters,
@@ -188,6 +189,11 @@ const route = useMemo(readRoute, []);
   // 详情页单张删除：独立的确认卡与错误，不和网格选择混在一起。
   const [detailDelete, setDetailDelete] = useState<{ id: string; origin: DOMRect | null } | null>(null);
   const [detailDeleteError, setDetailDeleteError] = useState<string | null>(null);
+  // 详情页「加入相册」选择器；导出这一张时禁一下重复点击。
+  const [albumPick, setAlbumPick] = useState<{ id: string } | null>(null);
+  const [detailExporting, setDetailExporting] = useState(false);
+  // 详情页单张识别进行中：按钮禁用，事件回来时刷新这一张。
+  const [recognizing, setRecognizing] = useState(false);
   const [dialogClosing, setDialogClosing] = useState(false);
   const [detailOrigin, setDetailOrigin] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [detailStep, setDetailStep] = useState(0);
@@ -247,7 +253,7 @@ const route = useMemo(readRoute, []);
   const showToast = useCallback((message: string, action?: ToastAction) => {
     setToast({ text: message, action });
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), action ? 5000 : 2400);
+    toastTimer.current = window.setTimeout(() => setToast(null), action ? 6000 : 3600);
   }, []);
 
   const refreshData = useCallback(() => {
@@ -256,6 +262,22 @@ const route = useMemo(readRoute, []);
     libraryStats().then(setStats).catch(() => undefined);
     setDataVersion((version) => version + 1);
   }, []);
+
+  /** 识别/编辑后只刷新详情里这一张，避免整页重排。 */
+  const refreshAsset = useCallback(async (id: string) => {
+    // 详情里重识别后拿回完整的一行（包括新的 caption/tags），不然面板还是旧描述。
+    try {
+      const [fresh] = await queryAssets({ limit: 1, offset: 0, query: id });
+      if (fresh) {
+        setAssets((previous) => previous.map((asset) => (asset.id === id ? fresh : asset)));
+        setSpacePreviewAsset((previous) => (previous?.id === id ? fresh : previous));
+        setSpacePreviewList((previous) => previous.map((asset) => (asset.id === id ? fresh : asset)));
+      }
+    } catch {
+      // 刷新失败不影响识别本身
+    }
+    refreshData();
+  }, [refreshData]);
 
   const setLocalRemoval = useCallback((scope: string, ids: string[], removed: boolean) => {
     setLocalRemoved((previous) => {
@@ -548,28 +570,24 @@ const route = useMemo(readRoute, []);
   }, [refreshData, showToast]);
 
   const handleEmptyChoice = async (label: string) => {
-    if (label.includes("小米")) {
-      setImportPlan({ listed: 0, new: 0, existing: 0, bytes: 0 });
-      void runImportPlan();
+    if (label.includes(String.fromCharCode(23567,31859)) || label.includes(String.fromCharCode(35782,21035))) {
+      setRecognitionOpen(true);
       return;
     }
-    if (!label.includes("扫描")) {
-      showToast(`${label}将在后续版本接入`);
-      return;
-    }
+    if (!label.includes(String.fromCharCode(25195,25551))) return;
     try {
       const folder = await pickFolder();
       if (!folder) return;
-      showToast("正在导入，缩略图会随后自动生成…");
+      showToast(String.fromCharCode(27491,22312,23548,20837));
       const result = await importFolder(folder);
       if (result.ok) {
-        showToast("导入完成，正在刷新…");
-        window.location.reload();
+        showToast(String.fromCharCode(23548,20837,23436,25104));
+        refreshData();
       } else {
-        showToast("导入失败，请查看设置页或日志");
+        showToast(String.fromCharCode(23548,20837,22833,36133));
       }
     } catch (err) {
-      showToast(`导入失败：${String(err)}`);
+      showToast(String.fromCharCode(23548,20837,22833,36133,65306) + extractMessage(err));
     }
   };
 
@@ -803,6 +821,8 @@ const route = useMemo(readRoute, []);
 
   const groups = groupsByKind[catKind] ?? null;
 
+  // 详情页「重新识别这一张」：记住触发时的 id，识别事件回来只刷新这一张。
+
   // 空间页的预览复用详情：已加载的按大小排序列表就是它的前后翻页范围。
   const [spacePreviewList, setSpacePreviewList] = useState<Asset[]>([]);
   const [spacePreviewAsset, setSpacePreviewAsset] = useState<Asset | null>(null);
@@ -811,6 +831,8 @@ const route = useMemo(readRoute, []);
     if (view === "space") return spacePreviewList;
     return [];
   }, [view, displayAssets, spacePreviewList]);
+
+
 
   const detailAsset = useMemo(() => {
     if (!detailId) return null;
@@ -841,6 +863,32 @@ const route = useMemo(readRoute, []);
     }, 300);
   }, []);
 
+  /** 单张重新识别：真实识别（mode=live）只跑这一张并覆盖旧描述。 */
+  const recognizeOne = useCallback(
+    async (asset: Asset) => {
+      if (recognizing) return;
+      setDetailDeleteError(null);
+      try {
+        const ok = await live.start({
+          mode: isFixture ? "sim" : "live",
+          ids: [asset.id],
+          force: true,
+          count: 1,
+          concurrency: 1,
+        });
+        if (!ok) {
+          setDetailDeleteError(live.error ?? "识别服务没有启动，请稍后重试");
+          return;
+        }
+        setRecognizing(true);
+        showToast(isFixture ? "预览模式：逐张识别只跑模拟" : "正在重新识别这一张…");
+      } catch (err) {
+        setDetailDeleteError(`重新识别失败：${extractMessage(err)}`);
+      }
+    },
+    [isFixture, live, recognizing, showToast],
+  );
+
   const askDeleteDetail = useCallback((rect?: DOMRect | null) => {
     if (!detailAsset || deleting) return;
     setDetailDeleteError(null);
@@ -866,6 +914,47 @@ const route = useMemo(readRoute, []);
       setDeleting(false);
     }
   }, [closeDetail, deleteRecords, deleting, detailDelete, refreshData, showToast]);
+
+  const exportOne = useCallback(async (asset: Asset) => {
+    if (detailExporting) return;
+    const remembered = window.localStorage.getItem("sg-export-dir") ?? undefined;
+    const target = await pickFolder({ title: "选择导出目录", defaultPath: remembered });
+    if (!target) return;
+    window.localStorage.setItem("sg-export-dir", target);
+    setDetailExporting(true);
+    try {
+      const result = await exportAssets({ ids: [asset.id], target });
+      showToast(
+        result.copied ? `已导出这一张（${result.copied} 个文件）` : "目标目录里已有同名且一致的文件",
+        { label: "在 Finder 中显示", run: () => void revealInFinder(result.manifest) },
+      );
+    } catch (err) {
+      showToast(`导出失败：${extractMessage(err)}`);
+    } finally {
+      setDetailExporting(false);
+    }
+  }, [detailExporting, showToast]);
+
+  // 识别事件回来：失败就在详情里说明，成功则只刷新当前这一张，并关掉「识别中」。
+  useEffect(() => {
+    if (!recognizing || !detailId) return;
+    const failure = liveEventMessage(live.events);
+    const finished = live.events.some(
+      (event) => event.type === "done" && event.asset_id === detailId,
+    );
+    const stopped = live.events.some((event) => event.type === "session_done" || event.type === "session_stopped");
+    if (failure) {
+      setDetailDeleteError(`重新识别失败：${failure}`);
+      showToast(`重新识别失败：${failure}`);
+      setRecognizing(false);
+      return;
+    }
+    if (finished || (stopped && !live.view.active)) {
+      setRecognizing(false);
+      void refreshAsset(detailId);
+      showToast("已重新识别这一张");
+    }
+  }, [detailId, live.events, live.view.active, recognizing, refreshAsset, showToast]);
 
   const closeRecognition = useCallback(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -1652,10 +1741,29 @@ const route = useMemo(readRoute, []);
           onNext={() => navigateDetail(1)}
           canNext={detailIndex < currentList.length - 1 || (view === "library" && hasMore)}
           onTag={applyTag}
-          onAction={(label) => showToast(`${label}将在 P2 接入`)}
-          onDelete={() => askDeleteDetail(document.querySelector<HTMLElement>(".inspector-delete")?.getBoundingClientRect() ?? null)}
+          actions={{
+            onRecognize: () => void recognizeOne(detailAsset),
+            onAddToAlbum: () => setAlbumPick({ id: detailAsset.id }),
+            onExport: () => void exportOne(detailAsset),
+            onReveal: () => {
+              void revealInFinder(detailAsset.path).catch((err: unknown) =>
+                showToast(`在 Finder 中显示失败：${extractMessage(err)}`),
+              );
+            },
+            onOpenExternal: () =>
+              void openExternal(detailAsset.path).catch((err: unknown) =>
+                showToast(`外部播放器打不开：${extractMessage(err)}`),
+              ),
+          }}
+          onDelete={() =>
+            askDeleteDetail(
+              document.querySelector<HTMLElement>(".inspector-delete")?.getBoundingClientRect() ?? null,
+            )
+          }
           deleteError={detailDeleteError}
           deleting={deleting}
+          recognition={recognizing}
+          exporting={detailExporting}
         />
       )}
 
@@ -1663,9 +1771,10 @@ const route = useMemo(readRoute, []);
         open={recognitionOpen}
         live={live}
         originRect={dialogRect}
-        assets={new Map((allAssets ?? assets).map((asset) => [asset.id, asset]))}
+        assets={new Map([...assets, ...(allAssets ?? [])].map((asset) => [asset.id, asset]))}
         onClose={closeRecognition}
         closing={dialogClosing}
+        onImported={refreshData}
       />
 
       {selection.length > 0 && !detailAsset && (
@@ -1711,6 +1820,18 @@ const route = useMemo(readRoute, []);
           busy={deleting}
           onCancel={() => setDetailDelete(null)}
           onConfirm={() => void confirmDetailDelete()}
+        />
+      )}
+
+      {albumPick && (
+        <AlbumPicker
+          assetId={albumPick.id}
+          onCancel={() => setAlbumPick(null)}
+          onAdded={(album, created) => {
+            setAlbumPick(null);
+            refreshData();
+            showToast(created ? `已新建相册「${album}」并加入` : `已加入相册「${album}」`);
+          }}
         />
       )}
 

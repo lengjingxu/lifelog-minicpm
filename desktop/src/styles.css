@@ -358,7 +358,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 }
 
 /* ======================================================================== */
-/* P2 · recognition, organize, settings                                    */
+/* recognition, organize, settings                                        */
 /* ======================================================================== */
 
 .eyebrow {
@@ -2421,3 +2421,22 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   background: rgba(255, 74, 74, var(--alpha-0-07));
   box-shadow: 0 0 0 1px var(--accent-line) inset;
 }
+/* 识别对话框里的真实导入块 */
+.import-plan { margin-top: var(--space-12); padding: var(--space-12); border-radius: var(--radius-10); background: rgba(255,255,255,var(--alpha-0-025)); box-shadow: 0 0 0 1px var(--line) inset; }
+.import-plan .dialog-text { margin: 0 0 var(--space-4); font-size: var(--font-10-5); }
+.import-plan .dialog-actions { margin-top: var(--space-10); justify-content: flex-end; }
+.recognition-block .ghost-button.full { margin-top: var(--space-12); }
+.inspector-recognition { margin-top: var(--space-6); }
+/* 详情页「加入相册」选择器 */
+.album-picker-list { display: flex; flex-direction: column; gap: var(--space-2); max-height: 220px; overflow-y: auto; margin-bottom: var(--space-10); }
+.album-picker-item { display: flex; align-items: center; gap: var(--space-8); padding: var(--space-8) var(--space-10); border-radius: var(--radius-10); text-align: left; color: var(--text-dim); }
+.album-picker-item:hover { background: var(--bg-hover); color: var(--text); }
+.album-picker-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-11-5); }
+.album-picker-item em { margin-left: auto; font-style: normal; font-size: var(--font-9-5); color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.album-picker-item .album-picker-check { opacity: 0; color: var(--text-faint); }
+.album-picker-item:hover .album-picker-check { opacity: 1; }
+.album-picker-empty { display: flex; align-items: center; gap: var(--space-6); padding: var(--space-10); font-size: var(--font-10-5); color: var(--text-faint); }
+.album-picker-new { display: flex; gap: var(--space-8); }
+.album-picker-new input { flex: 1; min-width: 0; height: 32px; padding: 0 var(--space-10); border: 0; outline: none; border-radius: var(--radius-10); background: rgba(255,255,255,var(--alpha-0-045)); box-shadow: 0 0 0 1px var(--line) inset; color: var(--text); font-size: var(--font-11-5); }
+.album-picker-new .primary-btn { display: inline-flex; align-items: center; gap: var(--space-4); height: 32px; padding: 0 var(--space-10); border-radius: var(--radius-10); font-size: var(--font-11); }
+.album-picker-error { margin: var(--space-8) 0 0; font-size: var(--font-10); color: var(--accent); }

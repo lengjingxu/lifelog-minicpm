@@ -25,7 +25,9 @@ def cmd_ingest(args) -> int:
 def cmd_caption(args) -> int:
     stats = caption.run_caption(args.model, limit=args.limit, since_day=args.since,
                                 until_day=args.until, sample=args.sample,
-                                concurrency=args.concurrency)
+                                concurrency=args.concurrency,
+                                ids=_ids(args.ids) if args.ids else None,
+                                force=args.force)
     print(json.dumps(stats, ensure_ascii=False))
     return 0
 
@@ -405,6 +407,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--concurrency", type=int, default=1, help="并发请求数（llama.cpp 多 slot）")
     p.add_argument("--since")
     p.add_argument("--until")
+    p.add_argument("--ids", help="逗号分隔的 asset id；只重跑这些")
+    p.add_argument("--force", action="store_true", help="已有描述也重跑（详情页单张重识别）")
     p.set_defaults(func=cmd_caption)
 
     p = sub.add_parser("ocr", help="用 MiniCPM-OCR 抽图内文字")
