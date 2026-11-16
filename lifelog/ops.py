@@ -150,24 +150,20 @@ def list_albums() -> dict:
     return {"ok": True, "albums": [{"id": r[0], "name": r[1], "count": r[2]} for r in rows]}
 
 
-def delete_records(ids: list[str], with_files: bool = False) -> dict:
-    """从库里移除记录。
+def delete_records(ids: list[str]) -> dict:
+    """从库里移除记录：只删数据库行，不动磁盘文件。
 
-    默认只删数据库行，不动磁盘文件；with_files=True 时连原图一起删（不可恢复）。
-    文件只按库里记的 path 删，不接受外部传入的任意路径。
+    删文件由桌面端负责（原图移到废纸篓），CLI 这边不碰磁盘。
     """
     ids = [i for i in ids if i]
     if not ids:
         raise SystemExit("没有要删除的记录")
     conn = connect()
-    marks = ",".join("?" for _ in ids)
-    paths: list[str] = []
-    if with_files:
-        paths = [row[0] for row in conn.execute(f"SELECT path FROM assets WHERE id IN ({marks})", ids)]
     removed = {"captions": 0, "asset_tags": 0, "album_assets": 0, "assets": 0}
     try:
         conn.execute("BEGIN")
         for table in ("captions", "asset_tags", "album_assets", "assets"):
+            marks = ",".join("?" for _ in ids)
             cur = conn.execute(
                 f"DELETE FROM {table} WHERE "
                 + ("asset_id IN (" + marks + ")" if table != "assets" else "id IN (" + marks + ")"),
@@ -180,26 +176,7 @@ def delete_records(ids: list[str], with_files: bool = False) -> dict:
         raise
     finally:
         conn.close()
-
-    files = {"requested": len(paths), "removed": 0, "missing": 0, "failed": []}
-    if with_files:
-        for raw in paths:
-            path = Path(raw).expanduser()
-            if not path.is_absolute():
-                path = config.DATA_DIR / raw
-            if not path.exists():
-                files["missing"] += 1
-                continue
-            if not path.is_file():
-                files["failed"].append(str(path))
-                continue
-            try:
-                path.unlink()
-                files["removed"] += 1
-            except OSError:
-                files["failed"].append(str(path))
-
-    return {"ok": True, "requested": len(ids), "removed": removed, "files": files}
+    return {"ok": True, "requested": len(ids), "removed": removed}
 
 
 def prune_orphan_thumbs(ids: list[str] | None = None, dry_run: bool = False) -> dict:

@@ -899,6 +899,20 @@ fn reveal_in_finder(path: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// 把文件移进系统废纸篓（macOS 用 NSFileManager，其它平台用 crate 默认实现）。
+#[cfg(target_os = "macos")]
+fn trash_with(path: &std::path::Path) -> Result<(), trash::Error> {
+    use trash::macos::{DeleteMethod, TrashContextExtMacos};
+    let mut ctx = trash::TrashContext::new();
+    ctx.set_delete_method(DeleteMethod::NsFileManager);
+    ctx.delete(path)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn trash_with(path: &std::path::Path) -> Result<(), trash::Error> {
+    trash::delete(path)
+}
+
 #[tauri::command]
 async fn delete_records(
     db: State<'_, Db>,
@@ -906,22 +920,83 @@ async fn delete_records(
     with_files: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let home = db.data_dir.clone();
+    let ids: Vec<String> = ids.into_iter().filter(|id| !id.trim().is_empty()).collect();
+    if ids.is_empty() {
+        return Err("没有选中要删除的照片".to_string());
+    }
+
+    // 先取路径（只认库里登记的记录，不接受外部传入的路径）
+    let mut paths: Vec<String> = Vec::new();
+    if with_files.unwrap_or(false) {
+        let guard = db.open()?;
+        let conn = guard.as_ref().unwrap();
+        let marks = vec!["?"; ids.len()].join(",");
+        let mut stmt = conn
+            .prepare(&format!("SELECT path FROM assets WHERE id IN ({marks})"))
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params_from_iter(ids.iter()), |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            paths.push(row.map_err(|e| e.to_string())?);
+        }
+    }
+
     tauri::async_runtime::spawn_blocking(move || {
-        let ids: Vec<String> = ids.into_iter().filter(|id| !id.trim().is_empty()).collect();
-        if ids.is_empty() {
-            return Err("没有选中要移除的记录".to_string());
+        let mut files = serde_json::json!({
+            "requested": paths.len(),
+            "trashed": 0,
+            "missing": 0,
+            "failed": Vec::<String>::new(),
+        });
+
+        if !paths.is_empty() {
+            let mut trashed = 0usize;
+            let mut missing = 0usize;
+            let mut failed: Vec<String> = Vec::new();
+            for raw in &paths {
+                let path = std::path::PathBuf::from(raw);
+                if !path.exists() {
+                    missing += 1;
+                    continue;
+                }
+                // 移到废纸篓而不是直接抹掉，误删还能捞回来。
+                // 走 NSFileManager 而不是 Finder：不需要额外授权，也不会去唤醒 Finder。
+                match trash_with(&path) {
+                    Ok(()) => trashed += 1,
+                    Err(err) => failed.push(format!("{}: {err}", path.display())),
+                }
+            }
+            files = serde_json::json!({
+                "requested": paths.len(),
+                "trashed": trashed,
+                "missing": missing,
+                "failed": failed,
+            });
+            // 有文件没能移进废纸篓就整体停下：只删记录会把文件变成看不见的孤儿
+            if let Some(first) = failed.first() {
+                return Err(format!(
+                    "有 {} 个文件无法移到废纸篓，已停止且未删除任何记录（{}）",
+                    failed.len(),
+                    first
+                ));
+            }
         }
-        let mut args: Vec<String> = vec!["record-delete".to_string(), "--ids".to_string(), ids.join(",")];
-        if with_files.unwrap_or(false) {
-            args.push("--with-files".to_string());
-        }
-        let result = run_python_cli(&home, &args)?;
-        // 记录没了，缩略图缓存就成了孤儿，顺手清掉（只动缓存，不动原图）。
+
+        let result = run_python_cli(
+            &home,
+            &["record-delete".to_string(), "--ids".to_string(), ids.join(",")],
+        )?;
+        // 记录没了，缩略图缓存就成了孤儿，顺手清掉。
         let _ = run_python_cli(
             &home,
             &["thumbs-prune".to_string(), "--ids".to_string(), ids.join(",")],
         );
-        Ok(result)
+        let mut out = result;
+        if let serde_json::Value::Object(map) = &mut out {
+            map.insert("files".to_string(), files);
+        }
+        Ok(out)
     })
     .await
     .map_err(|err| err.to_string())?
@@ -1814,6 +1889,23 @@ mod filter_tests {
             total - seen.len() as i64
         );
         assert!(seen.contains("z001") && seen.contains("z002") && seen.contains("z003"));
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod trash_tests {
+    use super::trash_with;
+
+    /// 移到废纸篓后，原路径上就不该再有这个文件（内容还在废纸篓里）。
+    #[test]
+    fn moves_file_into_trash() {
+        let dir = std::env::temp_dir().join(format!("sg-trash-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("sample.txt");
+        std::fs::write(&file, b"hello").unwrap();
+        trash_with(&file).expect("移到废纸篓失败");
+        assert!(!file.exists(), "原路径应已不存在");
+        let _ = std::fs::remove_dir(&dir);
     }
 }
 

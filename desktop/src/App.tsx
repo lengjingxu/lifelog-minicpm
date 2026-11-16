@@ -431,7 +431,11 @@ const route = useMemo(readRoute, []);
       setSelection([]);
       refreshData();
       const failed = result.files?.failed?.length ?? 0;
-      showToast(`已删除 ${result.removed.assets} 张${failed ? `，${failed} 个失败` : ""}`);
+      showToast(
+        failed
+          ? `${failed} 个文件没能移到废纸篓，未删除任何记录`
+          : `已删除 ${result.removed.assets} 张，原图在废纸篓`,
+      );
     } catch (err) {
       showToast(`移除失败：${String(err)}`);
     } finally {

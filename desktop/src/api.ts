@@ -631,7 +631,8 @@ export type DeleteResult = {
   ok: boolean;
   requested: number;
   removed: { captions: number; asset_tags: number; album_assets: number; assets: number };
-  files?: { requested: number; removed: number; missing: number; failed: string[] };
+  /** 原图移到废纸篓的结果；failed 非空时后端会整体失败、不会删记录 */
+  files?: { requested: number; trashed: number; missing: number; failed: string[] };
   days_rebuilt?: number;
   events_rebuilt?: number;
 };
