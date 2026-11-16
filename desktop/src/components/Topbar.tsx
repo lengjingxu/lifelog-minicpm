@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Clock, Command, Download, LayoutGrid, Moon, Search, Sun, X } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckSquare, Clock, Command, Download, LayoutGrid, Moon, Search, Sun, X } from "lucide-react";
 import clsx from "clsx";
 import type { SortKey } from "../api";
 import type { View } from "../utils";
@@ -23,6 +23,8 @@ type Props = {
   onDensity: (density: Density) => void;
   sort: SortKey;
   onSort: (sort: SortKey) => void;
+  selectMode: boolean;
+  onSelectMode: (next: boolean) => void;
   view: View;
   onView: (view: View) => void;
   minimal?: boolean;
@@ -41,6 +43,8 @@ export function Topbar({
   onDensity,
   sort,
   onSort,
+  selectMode,
+  onSelectMode,
   view,
   onView,
   minimal = false,
@@ -132,6 +136,16 @@ export function Topbar({
           <Download size={15} strokeWidth={1.8} />
         </button>
       )}
+      <button
+        type="button"
+        className={clsx("icon-button select-mode-button", selectMode && "on")}
+        onClick={() => onSelectMode(!selectMode)}
+        aria-label={selectMode ? "退出多选" : "多选"}
+        aria-pressed={selectMode}
+        title={selectMode ? "退出多选（Esc）" : "多选"}
+      >
+        <CheckSquare size={15} strokeWidth={1.8} />
+      </button>
       <SortButton sort={sort} onSort={onSort} />
       <div className="density-switch" role="group" aria-label="网格密度">
         <button

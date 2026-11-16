@@ -23,7 +23,7 @@ export function DeleteDialog({ count, origin = null, busy = false, onCancel, onC
         onMouseDown={(event) => event.stopPropagation()}
       >
         <h2 className="delete-title">删除 {count} 张？</h2>
-        <p className="delete-note">原图和记录一起删除。</p>
+        <p className="delete-note">原图移到废纸篓，记录一并删除。</p>
 
         <div className="dialog-actions">
           <button type="button" className="ghost-button" onClick={onCancel} disabled={busy}>

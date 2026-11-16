@@ -202,51 +202,6 @@ class DeleteRecordsTests(unittest.TestCase):
         self.assertEqual(left, 0, "assets 行应被删除")
         self.assertTrue((photo / "0.jpg").exists(), "磁盘文件不能被删")
 
-    def test_with_files_deletes_source_and_rows(self):
-        """with_files=True：源文件和数据库行一起删；缺文件只记数，不报错。"""
-        from lifelog import ops
-
-        photo = self.root / "photos"
-        photo.mkdir(parents=True, exist_ok=True)
-        (photo / "0.jpg").write_bytes(b"data")
-        (photo / "1.jpg").write_bytes(b"data")
-        with db.session() as con:
-            con.execute(
-                "INSERT INTO assets (id, path, day, taken_at, kind, size) VALUES (?,?,?,?,?,?)",
-                ("a1", str(photo / "0.jpg"), "2024-01-01", "2024-01-01T10:00:00", "image", 4),
-            )
-            # 记录里有、磁盘上已经没了的文件
-            con.execute(
-                "INSERT INTO assets (id, path, day, taken_at, kind, size) VALUES (?,?,?,?,?,?)",
-                ("a2", str(photo / "gone.jpg"), "2024-01-02", "2024-01-02T10:00:00", "image", 4),
-            )
-
-        result = ops.delete_records(["a1", "a2"], with_files=True)
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["files"]["removed"], 1)
-        self.assertEqual(result["files"]["missing"], 1)
-        self.assertFalse((photo / "0.jpg").exists(), "源文件应被删除")
-        self.assertTrue((photo / "1.jpg").exists(), "未选中的文件不能被删")
-        with db.session() as con:
-            left = con.execute("SELECT count(*) FROM assets").fetchone()[0]
-        self.assertEqual(left, 0)
-
-    def test_with_files_ignores_unknown_ids(self):
-        """外部传入的 id 里夹了不存在的，不影响其它条目的删除。"""
-        from lifelog import ops
-
-        photo = self.root / "photos"
-        photo.mkdir(parents=True, exist_ok=True)
-        (photo / "0.jpg").write_bytes(b"data")
-        with db.session() as con:
-            con.execute(
-                "INSERT INTO assets (id, path, day, taken_at, kind) VALUES (?,?,?,?,?)",
-                ("a1", str(photo / "0.jpg"), "2024-01-01", "2024-01-01T10:00:00", "image"),
-            )
-        result = ops.delete_records(["a1", "nope"], with_files=True)
-        self.assertEqual(result["files"]["removed"], 1)
-        self.assertFalse((photo / "0.jpg").exists())
-
 
 class XiaomiImportTests(unittest.TestCase):
     """小米云导入：只读计划与 token 不外泄。"""

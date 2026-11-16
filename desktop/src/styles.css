@@ -1934,7 +1934,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .flying-cover {
   position: fixed; z-index: 60; pointer-events: none;
   border-radius: var(--radius-10); overflow: hidden;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, var(--alpha-0-4));
+  box-shadow: 0 18px 40px rgba(0, 0, 0, var(--alpha-0-45));
 }
 .flying-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
@@ -2068,16 +2068,21 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 
 /* 删除对话框是一张实心卡：里面有两种破坏性选项，压在照片上必须看得清 */
 .delete-dialog {
-  background: color-mix(in srgb, var(--bg) 92%, #fff);
+  background: var(--solid-bg);
   border-radius: var(--radius-20, 20px);
   padding: var(--space-22) var(--space-22) var(--space-18);
-  box-shadow: 0 32px 80px rgba(0, 0, 0, var(--alpha-0-4));
+  box-shadow: 0 32px 80px rgba(0, 0, 0, var(--alpha-0-45));
   max-width: min(440px, calc(100vw - 96px));
 }
 [data-theme="light"] .delete-dialog {
-  background: #fff;
   box-shadow: 0 24px 60px rgba(20, 20, 30, var(--alpha-0-14));
 }
 
 .delete-title { margin: 0 0 var(--space-6); font-size: var(--font-16); font-weight: 600; letter-spacing: -0.01em; }
-.delete-note { margin: 0 0 var(--space-18); font-size: var(--font-11-5); color: var(--text-faint); }
+.delete-note { margin: 0 0 var(--space-18); font-size: var(--font-12); color: var(--text-dim); }
+
+/* 多选开关：开启时强调色，和普通图标按钮区分 */
+.select-mode-button.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}

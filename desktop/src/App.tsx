@@ -164,6 +164,8 @@ const route = useMemo(readRoute, []);
     return value === "taken_asc" || value === "size_desc" || value === "size_asc" ? value : "taken_desc";
   });
   const [selection, setSelection] = useState<string[]>(route.assetId ? [route.assetId] : []);
+  /** 选择模式：单击即选中，不弹详情；由右上角的「多选」开关切换 */
+  const [selectMode, setSelectMode] = useState(false);
   const [anchorId, setAnchorId] = useState<string | null>(route.assetId);
   const [detailId, setDetailId] = useState<string | null>(route.assetId);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -431,7 +433,11 @@ const route = useMemo(readRoute, []);
       setSelection([]);
       refreshData();
       const failed = result.files?.failed?.length ?? 0;
-      showToast(`已删除 ${result.removed.assets} 张${failed ? `，${failed} 个失败` : ""}`);
+      showToast(
+        failed
+          ? `${failed} 个文件没能移到废纸篓，未删除任何记录`
+          : `已删除 ${result.removed.assets} 张，原图在废纸篓`,
+      );
     } catch (err) {
       showToast(`移除失败：${String(err)}`);
     } finally {
@@ -798,7 +804,7 @@ const route = useMemo(readRoute, []);
           return;
         }
       }
-      if (meta) {
+      if (meta || selectMode) {
         const rect = event.currentTarget.getBoundingClientRect();
         if (selection.length === 0) {
           setSelectionOrigin({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
@@ -814,7 +820,7 @@ const route = useMemo(readRoute, []);
       setSelection([asset.id]);
       setAnchorId(asset.id);
     },
-    [anchorId, currentList, selection.length],
+    [anchorId, currentList, selection.length, selectMode],
   );
 
   const applyTag = useCallback((tag: string) => {
@@ -1107,7 +1113,10 @@ const route = useMemo(readRoute, []);
       }
 
       if (event.key === "Escape") {
-        if (active) clearAll();
+        if (selectMode) {
+          setSelectMode(false);
+          setSelection([]);
+        } else if (active) clearAll();
         else setSelection([]);
         return;
       }
@@ -1162,6 +1171,7 @@ const route = useMemo(readRoute, []);
     openDetail,
     navigate,
     recognitionOpen,
+    selectMode,
     deleteOpen,
     importPlan,
     paletteOpen,
@@ -1387,6 +1397,7 @@ const route = useMemo(readRoute, []);
           columns={columns}
           selection={new Set(selection)}
           multi={selection.length > 1}
+          selectMode={selectMode}
           onSelect={handleSelect}
           onOpen={openDetail}
           onLoadMore={loadMore}
@@ -1454,6 +1465,11 @@ const route = useMemo(readRoute, []);
           onDensity={setDensity}
           sort={sort}
           onSort={setSort}
+          selectMode={selectMode}
+          onSelectMode={(next: boolean) => {
+            setSelectMode(next);
+            if (!next) setSelection([]);
+          }}
           view={view}
           onView={navigate}
           minimal={view === "organize" || view === "settings"}
