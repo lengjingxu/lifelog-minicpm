@@ -1984,16 +1984,16 @@ fn permission_hint(errors: &[String]) -> Option<String> {
     ))
 }
 
-/// 库里记录的资产分布在哪些顶层目录（/Volumes/X、/Users/xxx）。
-/// 启动时用来检查授权：被 TCC 拒绝时 read_dir 直接报 EPERM。
-fn library_roots(conn: &Connection) -> Vec<String> {
+/// 库里记录的资产分散在哪些顶层目录（/Volumes/X、/Users/xxx），各有多少条。
+/// 授权检查按它给出的照片为准：只看目录能不能读，会漏掉“目录能进、照片打不开”。
+fn library_roots(conn: &Connection) -> Vec<(String, usize)> {
+    let mut roots: Vec<(String, usize)> = Vec::new();
     let Ok(mut stmt) = conn.prepare("SELECT path FROM assets") else {
-        return Vec::new();
+        return roots;
     };
     let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) else {
-        return Vec::new();
+        return roots;
     };
-    let mut roots: Vec<String> = Vec::new();
     for path in rows.filter_map(Result::ok) {
         let root = if let Some(rest) = path.strip_prefix("/Volumes/") {
             match rest.split('/').next() {
@@ -2009,16 +2009,29 @@ fn library_roots(conn: &Connection) -> Vec<String> {
         } else {
             continue;
         };
-        if !roots.contains(&root) {
-            roots.push(root);
+        match roots.iter_mut().find(|(known, _)| known == &root) {
+            Some((_, count)) => *count += 1,
+            None => roots.push((root, 1)),
         }
     }
     roots
 }
 
-/// 能不能列出目录内容。读得到就说明这一层的授权通了。
-fn can_list_dir(path: &std::path::Path) -> bool {
-    std::fs::read_dir(path).is_ok()
+/// 挑该目录下（按路径序）的前几张，逐个确认能不能打开。
+/// 被 TCC 拒绝时 open 报 EPERM；文件已经不在（ENOENT）不算授权问题。
+fn can_read_sample<S: Iterator<Item = String>>(paths: S, limit: usize) -> bool {
+    let mut probed = 0;
+    for path in paths {
+        if probed >= limit {
+            break;
+        }
+        match std::fs::File::open(&path) {
+            Ok(_) => probed += 1,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return false,
+        }
+    }
+    true
 }
 
 #[derive(serde::Serialize)]
@@ -2030,35 +2043,32 @@ pub struct AccessRoot {
 }
 
 fn access_report(conn: &Connection) -> Vec<AccessRoot> {
-    let mut count = std::collections::HashMap::<String, usize>::new();
-    for root in library_roots(conn) {
-        count.entry(root).or_default();
-    }
-    if let Ok(mut stmt) = conn.prepare("SELECT path FROM assets") {
-        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
-            for path in rows.filter_map(Result::ok) {
-                for root in count.keys().cloned().collect::<Vec<_>>() {
-                    if path.starts_with(&root) {
-                        *count.get_mut(&root).unwrap() += 1;
-                        break;
-                    }
+    const SAMPLES: usize = 3;
+    let mut report = Vec::new();
+    for (root, assets) in library_roots(conn) {
+        let dir = std::path::PathBuf::from(&root);
+        let exists = dir.exists();
+        let readable = if !exists || std::fs::read_dir(&dir).is_err() {
+            false
+        } else {
+            let mut stmt = match conn
+                .prepare("SELECT path FROM assets WHERE path LIKE ?1 ORDER BY path LIMIT ?2")
+            {
+                Ok(stmt) => stmt,
+                Err(_) => {
+                    report.push(AccessRoot { root, exists, readable: true, assets });
+                    continue;
                 }
+            };
+            let prefix = format!("{root}/%");
+            match stmt.query_map(params_from_iter([prefix.as_str(), &SAMPLES.to_string()]), |row| row.get::<_, String>(0)) {
+                Ok(paths) => can_read_sample(paths.filter_map(Result::ok), SAMPLES),
+                Err(_) => true,
             }
-        }
+        };
+        report.push(AccessRoot { root, exists, readable, assets });
     }
-    count
-        .into_iter()
-        .map(|(root, assets)| {
-            let path = std::path::PathBuf::from(&root);
-            let exists = path.exists();
-            AccessRoot {
-                root,
-                exists,
-                readable: exists && can_list_dir(&path),
-                assets,
-            }
-        })
-        .collect()
+    report
 }
 
 #[tauri::command]
@@ -2068,7 +2078,6 @@ fn library_access(db: State<'_, Db>) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "roots": access_report(conn) }))
 }
 
-/// 打开「隐私与安全性 → 完全磁盘访问权限」，列表里能直接勾拾光。
 #[tauri::command]
 fn open_privacy_settings() -> Result<(), String> {
     std::process::Command::new("open")
