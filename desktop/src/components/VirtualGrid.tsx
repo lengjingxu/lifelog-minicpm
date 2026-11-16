@@ -12,6 +12,7 @@ type Props = {
   columns: number;
   selection: Set<string>;
   multi: boolean;
+  selectMode?: boolean;
   onSelect: (asset: Asset, event: MouseEvent) => void;
   onOpen: (asset: Asset, rect?: DOMRect) => void;
   onLoadMore?: () => void;
@@ -25,6 +26,7 @@ export function VirtualGrid({
   columns,
   selection,
   multi,
+  selectMode = false,
   onSelect,
   onOpen,
   onLoadMore,
@@ -175,6 +177,7 @@ export function VirtualGrid({
                     dupCount={dupCounts?.get(asset.id)}
                     selected={selection.has(asset.id)}
                     multi={multi}
+                    selectMode={selectMode}
                     onSelect={onSelect}
                     onOpen={onOpen}
                   />

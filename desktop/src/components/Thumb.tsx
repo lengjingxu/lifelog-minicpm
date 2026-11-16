@@ -9,11 +9,13 @@ type Props = {
   dupCount?: number;
   selected?: boolean;
   multi?: boolean;
+  /** 选择模式：单击切换选中，不再打开详情 */
+  selectMode?: boolean;
   onSelect: (asset: Asset, event: MouseEvent) => void;
   onOpen: (asset: Asset, rect?: DOMRect) => void;
 };
 
-export function Thumb({ asset, dupCount, selected, multi, onSelect, onOpen }: Props) {
+export function Thumb({ asset, dupCount, selected, multi, selectMode = false, onSelect, onOpen }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [useOriginal, setUseOriginal] = useState(false);
@@ -41,15 +43,18 @@ export function Thumb({ asset, dupCount, selected, multi, onSelect, onOpen }: Pr
       data-asset-id={asset.id}
       aria-label={`${kindLabel(asset)} · ${asset.caption || asset.path}`}
       aria-pressed={selected}
-      // 单击直接看大图；按住 ⌘/⌃/⇧ 才是多选（批量操作用）
+      // 普通模式单击看大图；选择模式下单击即选中，双击才看大图
       onClick={(event) => {
-        if (event.metaKey || event.ctrlKey || event.shiftKey) {
+        if (selectMode || event.metaKey || event.ctrlKey || event.shiftKey) {
           onSelect(asset, event);
           return;
         }
         onOpen(asset, event.currentTarget.getBoundingClientRect());
       }}
-      onDoubleClick={(event) => event.preventDefault()}
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        if (selectMode) onOpen(asset, event.currentTarget.getBoundingClientRect());
+      }}
     >
       <span className="thumb-frame">
         {!loaded && !failed && <span className="skeleton" aria-hidden="true" />}
