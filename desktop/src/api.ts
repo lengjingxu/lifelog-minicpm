@@ -274,12 +274,23 @@ export async function countAssets(filter: Filter): Promise<number> {
 /** 守卫：任何一次取图都不许超过 2000 条，避免再把整库塞进内存（10 万条约 40MB JSON）。 */
 export const MAX_PAGE_LIMIT = 2000;
 
+/** Tauri 的 invoke 会把 Rust Option<i64> 的 None 变成 null；这里统一成 number | null。 */
+function normalizeSize(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  return null;
+}
+
 export async function queryAssets(filter: Filter): Promise<Asset[]> {
   if ((filter.limit ?? 0) > MAX_PAGE_LIMIT) {
     throw new Error("queryAssets limit " + filter.limit + " 超过上限 " + MAX_PAGE_LIMIT + "，请改成分页");
   }
   if (!isTauri) return fixtureQuery(filter);
-  return invoke<Asset[]>("query_assets", { filter });
+  const rows = await invoke<Asset[]>("query_assets", { filter });
+  return rows.map((row) => ({ ...row, size: normalizeSize(row.size) }));
+
 }
 
 export type MonthSummary = { month: string; count: number; cover_id: string; cover_thumb: string };
@@ -636,6 +647,22 @@ export type DeleteResult = {
   days_rebuilt?: number;
   events_rebuilt?: number;
 };
+
+/** 把删除失败原文（Tauri 抛的是字符串）转成能看懂的一句，授权问题带上该去哪儿开 */
+export function describeDeleteError(reason: unknown): string {
+  const raw = typeof reason === "string" ? reason : reason instanceof Error ? reason.message : String(reason);
+  if (/Operation not permitted|permission|权限|NSPOSIXErrorDomain Code=1/i.test(raw)) {
+    return "没有权限移动这些原图。请在「系统设置 → 隐私与安全性 → 文件与文件夹」里给拾光打开所在的磁盘，或打开「完全磁盘访问权限」后重启拾光。";
+  }
+  return raw.replace(/^Error:\s*/, "");
+}
+
+export type LibraryRoot = { root: string; exists: boolean; readable: boolean; assets: number };
+export type LibraryAccess = { roots: LibraryRoot[] };
+
+/** 库里照片所在的顶层目录能不能读：被 TCC 拒绝时这里就是 false。 */
+export const libraryAccess = () => invoke<LibraryAccess>("library_access");
+export const openPrivacySettings = () => invoke<void>("open_privacy_settings");
 
 export const deleteRecords = (ids: string[], withFiles = false) =>
   invoke<DeleteResult>("delete_records", { ids, withFiles });

@@ -630,8 +630,10 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
                 mood: row.get(10)?,
                 tags: parse_tags(row.get(11)?),
                 ocr_text: row.get(12)?,
-                score: row.get(13).ok(),
-                size: row.get(14).ok(),
+                // 没有 asset_quality 表时 SELECT 里没有 q.score 这一列，后面两列要各退一位，
+                // 否则 size 永远读成 None（空间页整列显示成「—」）。
+                score: if score_mode { row.get(13).ok() } else { None },
+                size: if score_mode { row.get(14).ok() } else { row.get(13).ok() },
             })
         })
         .map_err(|e| e.to_string())?;
@@ -974,11 +976,14 @@ async fn delete_records(
                 "failed": failed,
             });
             // 有文件没能移进废纸篓就整体停下：只删记录会把文件变成看不见的孤儿
-            if let Some(first) = failed.first() {
+            if !failed.is_empty() {
+                if let Some(hint) = permission_hint(&failed) {
+                    return Err(hint);
+                }
                 return Err(format!(
                     "有 {} 个文件无法移到废纸篓，已停止且未删除任何记录（{}）",
                     failed.len(),
-                    first
+                    failed[0]
                 ));
             }
         }
@@ -1394,6 +1399,8 @@ pub fn run() {
             export_assets,
             import_xiaomi,
             delete_records,
+            library_access,
+            open_privacy_settings,
             reveal_in_finder,
             facets,
             timeline_months,
@@ -1527,6 +1534,21 @@ mod filter_tests {
         f.limit = Some(1);
         f.offset = Some(1);
         assert_eq!(list(&conn, &f), 1);
+    }
+
+    #[test]
+    fn asset_size_survives_without_score_column() {
+        // 没有 asset_quality 表时 SELECT 少一列，size 不能跟着错位成 None。
+        let conn = seed();
+        // 测试 schema 里 assets 没有 size 列，真实库有。
+        conn.execute_batch(
+            "ALTER TABLE assets ADD COLUMN size INTEGER; UPDATE assets SET size = 12345 WHERE id = 'a1';",
+        )
+        .unwrap();
+        let sql = "SELECT a.id, a.path, a.day, a.taken_at, a.kind,                 c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text, a.size          FROM assets a LEFT JOIN captions c ON c.rowid = (              SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)          WHERE a.id = 'a1'";
+        // 与 query_assets 里 score_mode=false 时的列下标保持一致
+        let size: Option<i64> = conn.query_row(sql, [], |row| Ok(row.get(13).ok())).unwrap();
+        assert_eq!(size, Some(12345), "size 应读在第 13 列");
     }
 
     #[test]
@@ -1957,3 +1979,135 @@ mod dup_tests {
     }
 }
 
+
+/// 删除失败时把“没有权限”单独认出来：macOS 对没声明用途说明的目录（外置盘等）
+/// 不会弹授权框，只会返回 EPERM，得把它转成能照着做的提示。
+fn permission_hint(errors: &[String]) -> Option<String> {
+    const DENIED: [&str; 4] = [
+        "Operation not permitted",
+        "permission",
+        "Permission",
+        "NSPOSIXErrorDomain Code=1",
+    ];
+    let blocked = errors
+        .iter()
+        .filter(|e| DENIED.iter().any(|word| e.contains(word)))
+        .count();
+    if blocked == 0 {
+        return None;
+    }
+    Some(format!(
+        "没有权限移动这 {blocked} 个原图（文件在受保护的磁盘目录里）。请在「系统设置 → 隐私与安全性」里给拾光打开该磁盘的访问权限，或开启「完全磁盘访问权限」后重启拾光。"
+    ))
+}
+
+/// 库里记录的资产分散在哪些顶层目录（/Volumes/X、/Users/xxx），各有多少条。
+/// 授权检查按它给出的照片为准：只看目录能不能读，会漏掉“目录能进、照片打不开”。
+fn library_roots(conn: &Connection) -> Vec<(String, usize)> {
+    let mut roots: Vec<(String, usize)> = Vec::new();
+    let Ok(mut stmt) = conn.prepare("SELECT path FROM assets") else {
+        return roots;
+    };
+    let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) else {
+        return roots;
+    };
+    for path in rows.filter_map(Result::ok) {
+        let root = if let Some(rest) = path.strip_prefix("/Volumes/") {
+            match rest.split('/').next() {
+                Some(volume) if !volume.is_empty() => format!("/Volumes/{volume}"),
+                _ => continue,
+            }
+        } else if let Some(user) = path.strip_prefix("/Users/").and_then(|rest| rest.split('/').next())
+        {
+            match user {
+                "" => continue,
+                user => format!("/Users/{user}"),
+            }
+        } else {
+            continue;
+        };
+        match roots.iter_mut().find(|(known, _)| known == &root) {
+            Some((_, count)) => *count += 1,
+            None => roots.push((root, 1)),
+        }
+    }
+    roots
+}
+
+/// 挑该目录下（按路径序）的前几张，逐个确认能不能打开。
+/// 被 TCC 拒绝时 open 报 EPERM；文件已经不在（ENOENT）不算授权问题。
+fn can_read_sample<S: Iterator<Item = String>>(paths: S, limit: usize) -> bool {
+    let mut probed = 0;
+    for path in paths {
+        if probed >= limit {
+            break;
+        }
+        match std::fs::File::open(&path) {
+            Ok(_) => probed += 1,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return false,
+        }
+    }
+    true
+}
+
+#[derive(serde::Serialize)]
+pub struct AccessRoot {
+    root: String,
+    exists: bool,
+    readable: bool,
+    assets: usize,
+}
+
+fn access_report(conn: &Connection) -> Vec<AccessRoot> {
+    const SAMPLES: usize = 3;
+    let mut report = Vec::new();
+    for (root, assets) in library_roots(conn) {
+        let dir = std::path::PathBuf::from(&root);
+        let exists = dir.exists();
+        let readable = if !exists || std::fs::read_dir(&dir).is_err() {
+            false
+        } else {
+            let mut stmt = match conn
+                .prepare("SELECT path FROM assets WHERE path LIKE ?1 ORDER BY path LIMIT ?2")
+            {
+                Ok(stmt) => stmt,
+                Err(_) => {
+                    report.push(AccessRoot { root, exists, readable: true, assets });
+                    continue;
+                }
+            };
+            let prefix = format!("{root}/%");
+            match stmt.query_map(params_from_iter([prefix.as_str(), &SAMPLES.to_string()]), |row| row.get::<_, String>(0)) {
+                Ok(paths) => can_read_sample(paths.filter_map(Result::ok), SAMPLES),
+                Err(_) => true,
+            }
+        };
+        report.push(AccessRoot { root, exists, readable, assets });
+    }
+    report
+}
+
+#[tauri::command]
+fn library_access(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let guard = db.open()?;
+    let conn = guard.as_ref().unwrap();
+    Ok(serde_json::json!({ "roots": access_report(conn) }))
+}
+
+#[tauri::command]
+fn open_privacy_settings() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles")
+        .status()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// 命令行诊断入口用：按数据目录里的库算一份授权检查结果。
+pub fn access_report_for(data_dir: &Path) -> Vec<AccessRoot> {
+    match Connection::open(data_dir.join("lifelog.sqlite")) {
+        Ok(conn) => access_report(&conn),
+        Err(_) => Vec::new(),
+    }
+}
