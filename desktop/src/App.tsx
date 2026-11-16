@@ -1281,7 +1281,7 @@ const route = useMemo(readRoute, []);
   const range = yearRange(stats);
   const categoryCount = view === "organize" ? (allAssets?.length ?? 0) : (stats?.assets ?? 0);
   const title = (() => {
-    if (view === "space") return "空间";
+    if (view === "space") return "图库清理";
     if (view === "organize") return "整理视图";
     if (view === "settings") return "设置";
     if (album) return `相册 · ${album}`;
@@ -1355,7 +1355,7 @@ const route = useMemo(readRoute, []);
     const jumps: PaletteItem[] = [
       { id: "view-library", title: "全部照片", subtitle: `${stats?.assets ?? 0} 张`, icon: Images, keycap: "⌘1", run: () => navigate("library") },
       { id: "view-timeline", title: "时间线", subtitle: "按月份回看", icon: Clock, keycap: "⌘2", run: () => navigate("timeline") },
-      { id: "view-space", title: "空间", subtitle: "按体积清理", icon: HardDrive, run: () => navigate("space") },
+      { id: "view-space", title: "图库清理", subtitle: "按体积清理 · 带播放器", icon: HardDrive, run: () => navigate("space") },
       { id: "view-tags", title: "分类浏览", subtitle: "标签 · 人物 · 地点", icon: Tags, run: () => navigate("tags") },
       { id: "view-organize", title: "整理视图", subtitle: "AI 归位预演", icon: Sparkles, run: () => navigate("organize") },
       { id: "view-settings", title: "设置", subtitle: "本地库 · 模型 · 缓存", icon: Settings, keycap: "⌘,", run: () => navigate("settings") },
@@ -1407,7 +1407,7 @@ const route = useMemo(readRoute, []);
     if (view === "space") {
       return (
         <SpaceView
-          onPreview={(entry, list) => openSpacePreview(entry, list)}
+          onOpenDetail={(entry, list) => openSpacePreview(entry, list)}
           onClean={openSpaceClean}
           onToast={showToast}
           dataVersion={dataVersion}

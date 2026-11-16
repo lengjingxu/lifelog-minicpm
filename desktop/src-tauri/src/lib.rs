@@ -891,6 +891,16 @@ async fn export_assets(db: State<'_, Db>, args: ExportArgs) -> Result<serde_json
     .map_err(|e| e.to_string())?
 }
 
+/// 系统默认播放器 / 预览打开：视频格式 WebView 解不了时用它兜底。
+#[tauri::command]
+fn open_external(path: String) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(path)
+        .status()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn reveal_in_finder(path: String) -> Result<(), String> {
     std::process::Command::new("open")
@@ -1471,6 +1481,7 @@ pub fn run() {
             library_access,
             open_privacy_settings,
             reveal_in_finder,
+            open_external,
             facets,
             timeline_months,
             album_groups,

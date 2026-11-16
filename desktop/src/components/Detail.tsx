@@ -9,7 +9,7 @@ import {
   X,
 } from "lucide-react";
 import clsx from "clsx";
-import { assetSrc, type Asset } from "../api";
+import { assetSrc, openExternal, revealInFinder, type Asset } from "../api";
 import { DURATION, EASE, reducedMotion } from "../motion";
 import { useDialogFocus } from "../useDialogFocus";
 import { kindLabel, peopleList, splitList, timeLabel } from "../utils";
@@ -44,6 +44,8 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
 export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTag, onAction, origin, closing = false, canNext, step = 0 }: Props) {
   const [fullLoaded, setFullLoaded] = useState(false);
   const [fullFailed, setFullFailed] = useState(false);
+  const isVideo = asset.kind === "video";
+  const [externalError, setExternalError] = useState<string | null>(null);
   const fullRef = useRef<HTMLImageElement | null>(null);
   const dialogRef = useDialogFocus<HTMLDivElement>(onClose, { focusContainer: true });
 
@@ -52,6 +54,8 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
   useEffect(() => {
     setFullLoaded(false);
     setFullFailed(false);
+    setExternalError(null);
+    if (isVideo) return;
 
     const el = fullRef.current;
     if (!el) return;
@@ -76,7 +80,7 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
     return () => {
       cancelled = true;
     };
-  }, [asset.id, asset.original]);
+  }, [asset.id, asset.original, isVideo]);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
 
@@ -187,7 +191,33 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
       <div className="stage" onClick={(event) => event.target === event.currentTarget && onClose()}>
         <div ref={stageRef} className={clsx("stage-image", fullLoaded && "full-ready")}>
           <img className="stage-thumb" src={thumb} alt="" aria-hidden="true" />
-          {!fullFailed && (
+          {isVideo ? (
+            <div className="stage-video">
+              {!fullFailed ? (
+                <video
+                  key={asset.id}
+                  className="stage-video-player"
+                  src={original}
+                  poster={thumb}
+                  controls
+                  autoPlay
+                  playsInline
+                  onLoadedData={() => setFullLoaded(true)}
+                  onError={() => setFullFailed(true)}
+                />
+              ) : (
+                <div className="stage-video-fallback">
+                  <strong>这个格式系统解不了</strong>
+                  <span>{asset.path.split("/").pop()}</span>
+                  <button type="button" onClick={() => void openExternal(asset.path).catch((reason: unknown) => setExternalError(String(reason)))}>
+                    在外部播放器打开
+                  </button>
+                  {externalError && <em>{externalError}</em>}
+                </div>
+              )}
+              {!fullLoaded && !fullFailed && <span className="image-loading">载入视频…</span>}
+            </div>
+          ) : !fullFailed && (
             <img
               key={asset.id}
               className={clsx("stage-full", fullLoaded && "loaded")}
@@ -199,7 +229,7 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
               onError={() => setFullFailed(true)}
             />
           )}
-          {!fullLoaded && !fullFailed && <span className="image-loading">载入原图…</span>}
+          {!isVideo && !fullLoaded && !fullFailed && <span className="image-loading">载入原图…</span>}
         </div>
 
         <button
@@ -233,6 +263,7 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
         <div className="inspector-kicker">{kindLabel(asset)} · 详情</div>
         <h2>{timeLabel(asset.taken_at)}</h2>
         <p className="file-name" title={asset.path}>{asset.path.split("/").pop()}</p>
+        <p className="file-path" title={asset.path}>{asset.path}</p>
         {dup && dup.count > 1 && (
           <p className="dup-note">
             {dup.keeperId === asset.id ? `同组 ${dup.count} 张 · 保留这张` : `同组 ${dup.count} 张 · 已折叠`}
@@ -278,9 +309,14 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
           <button type="button" onClick={() => onAction("导出")}>
             <Download size={13} strokeWidth={1.8} />导出
           </button>
-          <button type="button" onClick={() => onAction("在 Finder 中显示")}>
+          <button type="button" onClick={() => void revealInFinder(asset.path).catch(() => onAction("在 Finder 中显示"))}>
             <FolderOpen size={13} strokeWidth={1.8} />Finder 中显示
           </button>
+          {isVideo && (
+            <button type="button" onClick={() => void openExternal(asset.path).catch(() => onAction("在外部播放器打开"))}>
+              <FolderOpen size={13} strokeWidth={1.8} />外部播放器
+            </button>
+          )}
         </div>
       </aside>
     </div>

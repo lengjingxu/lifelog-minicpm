@@ -638,6 +638,9 @@ export const exportAssets = (payload: { ids?: string[]; filter?: Filter; target:
 
 export const revealInFinder = (path: string) => invoke<void>("reveal_in_finder", { path });
 
+/** 用系统默认播放器 / 预览打开：WebView 解不了的视频格式走这里。 */
+export const openExternal = (path: string) => invoke<void>("open_external", { path });
+
 /** 清理只把文件移进废纸篓，不给假的撤销；这里只是把废纸篓打开给人自己找。 */
 export const openTrash = () =>
   isTauri ? invoke<void>("reveal_in_finder", { path: "~/.Trash" }).catch(() => undefined) : Promise.resolve();
