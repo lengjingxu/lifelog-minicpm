@@ -299,11 +299,41 @@ def cmd_thumbs_prune(args) -> int:
 
 def cmd_record_delete(args) -> int:
     from . import aggregate, ops
-    result = ops.delete_records(_ids(args.ids))
+    ids = _ids(args.ids)
+    result = ops.delete_records(ids)
+    # 文件已经移进废纸篓，清单里不该再留着这些 id；删除本身成功就不因为清单同步失败而报错。
+    try:
+        result["cleanup_removed"] = ops.drop_from_cleanup_queue(ids)
+    except Exception as exc:  # noqa: BLE001 - 清单只是辅助状态
+        result["cleanup_error"] = str(exc)
     # 记录被移除后，天与生活片段是物化数据，需要重算，避免留着旧数字。
     result["days_rebuilt"] = aggregate.build_days()
     result["events_rebuilt"] = aggregate.build_events()
     print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+def cmd_cleanup_list(args) -> int:
+    from . import space
+    print(json.dumps(space.list_queue(), ensure_ascii=False))
+    return 0
+
+
+def cmd_cleanup_add(args) -> int:
+    from . import space
+    print(json.dumps(space.add_to_queue(_ids(args.ids), source=args.source), ensure_ascii=False))
+    return 0
+
+
+def cmd_cleanup_remove(args) -> int:
+    from . import space
+    print(json.dumps(space.remove_from_queue(_ids(args.ids)), ensure_ascii=False))
+    return 0
+
+
+def cmd_space_summary(args) -> int:
+    from . import space
+    print(json.dumps(space.summary(), ensure_ascii=False))
     return 0
 
 
@@ -472,6 +502,21 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("record-delete", help="从库中移除记录（原图由桌面端移到废纸篓）")
     p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
     p.set_defaults(func=cmd_record_delete)
+
+    p = sub.add_parser("cleanup-list", help="列出待清理清单（空间页）")
+    p.set_defaults(func=cmd_cleanup_list)
+
+    p = sub.add_parser("cleanup-add", help="把照片加入待清理清单（只记 id，不动文件）")
+    p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
+    p.add_argument("--source", default="space", help="加入来源，默认 space")
+    p.set_defaults(func=cmd_cleanup_add)
+
+    p = sub.add_parser("cleanup-remove", help="把照片移出待清理清单（不删文件）")
+    p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
+    p.set_defaults(func=cmd_cleanup_remove)
+
+    p = sub.add_parser("space-summary", help="空间页统计：照片/视频/大视频的体积")
+    p.set_defaults(func=cmd_space_summary)
 
     p = sub.add_parser("album-list", help="列出相册")
     p.set_defaults(func=cmd_album_list)

@@ -5,6 +5,7 @@ import {
   AlertCircle,
   Clock,
   Folder,
+  HardDrive,
   Images,
   LoaderCircle,
   MapPin,
@@ -38,6 +39,8 @@ import {
   importFolder,
   isTauri,
   importXiaomi,
+  cleanupList,
+  type CleanupEntry,
   generateThumbs,
   bulkTag,
   exportAssets,
@@ -64,6 +67,8 @@ import { EmptyState } from "./components/EmptyState";
 import { OrganizeView } from "./components/OrganizeView";
 import { RecognitionDialog } from "./components/RecognitionDialog";
 import { SettingsView } from "./components/SettingsView";
+import { SpaceView, assetFromEntry } from "./components/SpaceView";
+import { openTrash } from "./api";
 import { useLiveController } from "./live";
 import {
   gridColumnCount,
@@ -99,6 +104,7 @@ function readRoute() {
     requestedView === "tags" ||
     requestedView === "people" ||
     requestedView === "places" ||
+    requestedView === "space" ||
     requestedView === "organize" ||
     requestedView === "settings"
       ? requestedView
@@ -177,6 +183,8 @@ const route = useMemo(readRoute, []);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [album, setAlbum] = useState<string | null>(null);
   const [detailClosing, setDetailClosing] = useState(false);
+  // 空间页的清理删的是待清理清单，不是网格里的选择；单独存一份，确认卡复用 DeleteDialog。
+  const [spaceClean, setSpaceClean] = useState<{ ids: string[]; bytes: number } | null>(null);
   const [dialogClosing, setDialogClosing] = useState(false);
   const [detailOrigin, setDetailOrigin] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [detailStep, setDetailStep] = useState(0);
@@ -450,6 +458,46 @@ const route = useMemo(readRoute, []);
       setDeleting(false);
     }
   }, [deleting, selection, refreshData, showToast]);
+
+  const openSpaceClean = useCallback((ids: string[], rect: DOMRect) => {
+    if (!ids.length) return;
+    setDialogRect({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
+    void cleanupList()
+      .then((list) => {
+        const wanted = new Set(ids);
+        const bytes = list.items
+          .filter((item) => wanted.has(item.asset_id))
+          .reduce((sum, item) => sum + (item.size ?? 0), 0);
+        setSpaceClean({ ids, bytes });
+      })
+      .catch(() => setSpaceClean({ ids, bytes: 0 }));
+  }, []);
+
+  const openSpacePreview = useCallback(
+    (entry: CleanupEntry, list: Asset[] = []) => {
+      const asset = list.find((item) => item.id === entry.asset_id) ?? assetFromEntry(entry);
+      setSpacePreviewList(list);
+      setSpacePreviewAsset(asset);
+      setDetailOrigin(null);
+      setDetailId(entry.asset_id);
+    },
+    [],
+  );
+
+  const confirmSpaceClean = useCallback(async () => {
+    if (deleting || !spaceClean) return;
+    setDeleting(true);
+    try {
+      const result = await deleteRecords(spaceClean.ids, true);
+      setSpaceClean(null);
+      refreshData();
+      showToast("已清理 " + result.removed.assets + " 个，原图在废纸篓 · 清单已同步移除", { label: "打开废纸篓", run: () => void openTrash() });
+    } catch (err) {
+      showToast("清理失败：" + describeDeleteError(err));
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleting, spaceClean, refreshData, showToast]);
 
   const [importPlan, setImportPlan] = useState<ImportPlan | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
@@ -749,19 +797,23 @@ const route = useMemo(readRoute, []);
 
   const groups = groupsByKind[catKind] ?? null;
 
+  // 空间页的预览复用详情：已加载的按大小排序列表就是它的前后翻页范围。
+  const [spacePreviewList, setSpacePreviewList] = useState<Asset[]>([]);
+  const [spacePreviewAsset, setSpacePreviewAsset] = useState<Asset | null>(null);
   const currentList = useMemo(() => {
     if (view === "library") return displayAssets;
+    if (view === "space") return spacePreviewList;
     return [];
-  }, [view, displayAssets]);
+  }, [view, displayAssets, spacePreviewList]);
 
   const detailAsset = useMemo(() => {
     if (!detailId) return null;
     return (
       currentList.find((asset) => asset.id === detailId) ??
       assets.find((asset) => asset.id === detailId) ??
-      null
+      (spacePreviewAsset?.id === detailId ? spacePreviewAsset : null)
     );
-  }, [detailId, currentList, assets]);
+  }, [detailId, currentList, assets, spacePreviewAsset]);
 
   const detailIndex = detailAsset ? currentList.findIndex((asset) => asset.id === detailAsset.id) : -1;
   const detailTotal = currentList.length || (detailAsset ? 1 : 0);
@@ -1064,7 +1116,7 @@ const route = useMemo(readRoute, []);
       if (paletteOpen) return;
       // 弹窗自己处理 Esc / Tab（useDialogFocus 在捕获阶段拦截），这里不重复处理。
       if (recognitionOpen) return;
-      if ((deleteOpen || importPlan) && event.key === "Escape") return;
+      if ((deleteOpen || importPlan || spaceClean) && event.key === "Escape") return;
 
       if (onInteractive && activationKey && !meta) return;
 
@@ -1120,8 +1172,8 @@ const route = useMemo(readRoute, []);
         return;
       }
 
-      // 整理/设置视图没有网格快捷键，但焦点所在元素上的 Enter/Space 已经在上方放行
-      if (view === "organize" || view === "settings") return;
+      // 整理/空间/设置视图没有网格快捷键，但焦点所在元素上的 Enter/Space 已经在上方放行
+      if (view === "organize" || view === "settings" || view === "space") return;
 
       if (typing) {
         if (event.key === "Escape") {
@@ -1192,6 +1244,7 @@ const route = useMemo(readRoute, []);
     recognitionOpen,
     selectMode,
     deleteOpen,
+    spaceClean,
     importPlan,
     paletteOpen,
     openPalette,
@@ -1228,6 +1281,7 @@ const route = useMemo(readRoute, []);
   const range = yearRange(stats);
   const categoryCount = view === "organize" ? (allAssets?.length ?? 0) : (stats?.assets ?? 0);
   const title = (() => {
+    if (view === "space") return "空间";
     if (view === "organize") return "整理视图";
     if (view === "settings") return "设置";
     if (album) return `相册 · ${album}`;
@@ -1247,7 +1301,9 @@ const route = useMemo(readRoute, []);
 
   const count = view === "library" ? (active ? (totalCount ?? filteredAssets.length) : (stats?.assets ?? assets.length)) : categoryCount;
   const subtitle = [
-    view === "organize"
+    view === "space"
+      ? "按体积清理 · 待清理只记清单"
+      : view === "organize"
       ? "AI 归位过程 · 只在内存预演"
       : view === "settings"
         ? "本地库 · 模型 · 缓存"
@@ -1299,6 +1355,7 @@ const route = useMemo(readRoute, []);
     const jumps: PaletteItem[] = [
       { id: "view-library", title: "全部照片", subtitle: `${stats?.assets ?? 0} 张`, icon: Images, keycap: "⌘1", run: () => navigate("library") },
       { id: "view-timeline", title: "时间线", subtitle: "按月份回看", icon: Clock, keycap: "⌘2", run: () => navigate("timeline") },
+      { id: "view-space", title: "空间", subtitle: "按体积清理", icon: HardDrive, run: () => navigate("space") },
       { id: "view-tags", title: "分类浏览", subtitle: "标签 · 人物 · 地点", icon: Tags, run: () => navigate("tags") },
       { id: "view-organize", title: "整理视图", subtitle: "AI 归位预演", icon: Sparkles, run: () => navigate("organize") },
       { id: "view-settings", title: "设置", subtitle: "本地库 · 模型 · 缓存", icon: Settings, keycap: "⌘,", run: () => navigate("settings") },
@@ -1344,6 +1401,18 @@ const route = useMemo(readRoute, []);
           <h2>读取本地库失败</h2>
           <p>{error}</p>
         </div>
+      );
+    }
+
+    if (view === "space") {
+      return (
+        <SpaceView
+          onPreview={(entry, list) => openSpacePreview(entry, list)}
+          onClean={openSpaceClean}
+          onToast={showToast}
+          dataVersion={dataVersion}
+          onRows={setSpacePreviewList}
+        />
       );
     }
 
@@ -1492,11 +1561,12 @@ const route = useMemo(readRoute, []);
           view={view}
           onView={navigate}
           minimal={view === "organize" || view === "settings"}
+          hideGridTools={view === "space"}
           theme={theme}
           onTheme={setTheme}
         />
 
-        {view !== "organize" && view !== "settings" && (
+        {view !== "organize" && view !== "settings" && view !== "space" && (
           <div className="condition-slot" data-open={conditions.length > 0} aria-hidden={conditions.length === 0}>
           <div className="condition-bar">
             <div className="result-count">
@@ -1545,7 +1615,7 @@ const route = useMemo(readRoute, []);
           closing={detailClosing}
           onPrev={() => navigateDetail(-1)}
           onNext={() => navigateDetail(1)}
-          canNext={detailIndex < currentList.length - 1 || hasMore}
+          canNext={detailIndex < currentList.length - 1 || (view === "library" && hasMore)}
           onTag={applyTag}
           onAction={(label) => showToast(`${label}将在 P2 接入`)}
         />
@@ -1576,6 +1646,17 @@ const route = useMemo(readRoute, []);
             setDeleteOpen(true);
           }}
           onClear={() => setSelection([])}
+        />
+      )}
+
+      {spaceClean && (
+        <DeleteDialog
+          count={spaceClean.ids.length}
+          bytes={spaceClean.bytes}
+          origin={dialogRect}
+          busy={deleting}
+          onCancel={() => setSpaceClean(null)}
+          onConfirm={() => void confirmSpaceClean()}
         />
       )}
 

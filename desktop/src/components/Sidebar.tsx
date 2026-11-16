@@ -2,6 +2,7 @@ import {
   Clock,
   Database,
   Folder,
+  HardDrive,
   Images,
   MapPin,
   Search,
@@ -43,6 +44,7 @@ const NAV = [
   { id: "tags" as const, label: "标签", icon: Tags },
   { id: "people" as const, label: "人物", icon: Users },
   { id: "places" as const, label: "地点", icon: MapPin },
+  { id: "space" as const, label: "空间", icon: HardDrive },
   { id: "organize" as const, label: "整理视图", icon: Sparkles },
 ];
 

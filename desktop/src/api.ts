@@ -627,6 +627,10 @@ export const exportAssets = (payload: { ids?: string[]; filter?: Filter; target:
 
 export const revealInFinder = (path: string) => invoke<void>("reveal_in_finder", { path });
 
+/** 清理只把文件移进废纸篓，不给假的撤销；这里只是把废纸篓打开给人自己找。 */
+export const openTrash = () =>
+  isTauri ? invoke<void>("reveal_in_finder", { path: "~/.Trash" }).catch(() => undefined) : Promise.resolve();
+
 export type DeleteResult = {
   ok: boolean;
   requested: number;
@@ -655,6 +659,113 @@ export const openPrivacySettings = () => invoke<void>("open_privacy_settings");
 
 export const deleteRecords = (ids: string[], withFiles = false) =>
   invoke<DeleteResult>("delete_records", { ids, withFiles });
+
+export type CleanupEntry = {
+  asset_id: string;
+  added_at: string;
+  source: string;
+  path: string;
+  day: string | null;
+  taken_at: string | null;
+  kind: string | null;
+  size: number | null;
+  thumb?: string;
+};
+
+export type CleanupList = { items: CleanupEntry[]; count: number; bytes: number };
+export type CleanupChange = { changed: number; count: number; bytes: number };
+
+export type SpaceSummary = {
+  assets: number;
+  bytes: number;
+  photos: { count: number; bytes: number };
+  videos: { count: number; bytes: number };
+  big_videos: { count: number; bytes: number };
+  queue_count: number;
+  queue_bytes: number;
+};
+
+// 浏览器 fixture 没有后端表，用内存队列把「加入 / 移出」跑通，方便预览与截图。
+let fixtureQueue: CleanupEntry[] = [];
+
+function fixtureEntry(asset: Asset): CleanupEntry {
+  return {
+    asset_id: asset.id,
+    added_at: String(Math.floor(Date.now() / 1000)),
+    source: "space",
+    path: asset.path,
+    day: asset.day,
+    taken_at: asset.taken_at,
+    kind: asset.kind,
+    size: asset.size ?? null,
+    thumb: asset.thumb,
+  };
+}
+
+function fixtureQueueList(): CleanupList {
+  return {
+    items: fixtureQueue,
+    count: fixtureQueue.length,
+    bytes: fixtureQueue.reduce((sum, item) => sum + (item.size ?? 0), 0),
+  };
+}
+
+export async function cleanupList(): Promise<CleanupList> {
+  if (!isTauri) return fixtureQueueList();
+  return invoke<CleanupList>("cleanup_list");
+}
+
+export async function cleanupAdd(ids: string[], source = "space"): Promise<CleanupChange> {
+  if (!isTauri) {
+    const { assets } = await loadFixture();
+    const known = new Map(assets.map((asset) => [asset.id, asset]));
+    let changed = 0;
+    for (const id of ids) {
+      if (fixtureQueue.some((item) => item.asset_id === id)) continue;
+      const asset = known.get(id);
+      if (!asset) continue;
+      fixtureQueue = [fixtureEntry(asset), ...fixtureQueue];
+      changed += 1;
+    }
+    return { changed, ...fixtureQueueList() };
+  }
+  return invoke<CleanupChange>("cleanup_add", { ids, source });
+}
+
+export async function cleanupRemove(ids: string[]): Promise<CleanupChange> {
+  if (!isTauri) {
+    const drop = new Set(ids);
+    fixtureQueue = fixtureQueue.filter((item) => !drop.has(item.asset_id));
+    return { changed: ids.length, ...fixtureQueueList() };
+  }
+  return invoke<CleanupChange>("cleanup_remove", { ids });
+}
+
+export async function spaceSummary(): Promise<SpaceSummary> {
+  if (!isTauri) {
+    const { assets } = await loadFixture();
+    const photos = assets.filter((asset) => asset.kind !== "video");
+    const videos = assets.filter((asset) => asset.kind === "video");
+    const add = (list: Asset[]) => ({
+      count: list.length,
+      bytes: list.reduce((sum, asset) => sum + (asset.size ?? 0), 0),
+    });
+    const photoStats = add(photos);
+    const videoStats = add(videos);
+    const big = add(videos.filter((asset) => (asset.size ?? 0) >= 104857600));
+    const queue = fixtureQueueList();
+    return {
+      assets: assets.length,
+      bytes: photoStats.bytes + videoStats.bytes,
+      photos: photoStats,
+      videos: videoStats,
+      big_videos: big,
+      queue_count: queue.count,
+      queue_bytes: queue.bytes,
+    };
+  }
+  return invoke<SpaceSummary>("space_summary");
+}
 
 export type ImportPlan = {
   listed: number;
