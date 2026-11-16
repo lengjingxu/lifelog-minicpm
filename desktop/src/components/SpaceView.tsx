@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
 import {
   Check,
   CheckSquare,
   ChevronsDown,
+  ExternalLink,
   Film,
+  Maximize2,
   HardDrive,
   Image as ImageIcon,
   LoaderCircle,
   Plus,
+  Search,
   Trash2,
   Undo2,
   X,
@@ -19,6 +21,7 @@ import {
   cleanupAdd,
   cleanupList,
   cleanupRemove,
+  openExternal as openExternalPath,
   queryAssets,
   revealInFinder,
   spaceSummary,
@@ -46,10 +49,6 @@ function kindText(entry: CleanupEntry): string {
 /** 空间页统计要区分「0 B」和「读不到」，不能用 — 表示空。 */
 function statBytes(bytes: number): string {
   return bytes > 0 ? formatBytes(bytes) : "0 B";
-}
-
-function previewSource(entry: CleanupEntry): string {
-  return assetSrc(entry.thumb || entry.path);
 }
 
 export function entryFromAsset(asset: Asset): CleanupEntry {
@@ -89,8 +88,8 @@ export function assetFromEntry(entry: CleanupEntry): Asset {
 }
 
 type Props = {
-  /** 打开预览交给 App：它已经有完整的详情视图和前后翻页。list 是当前已载入的大小排行。 */
-  onPreview: (entry: CleanupEntry, list: Asset[]) => void;
+  /** 打开大图详情（图片/视频通用）。list 是当前已载入的大小排行，详情里可以前后翻页。 */
+  onOpenDetail: (entry: CleanupEntry, list: Asset[]) => void;
   /** 交给 App 统一渲染删除确认（DeleteDialog），清理后由 App 通知我们刷新。 */
   onClean: (ids: string[], rect: DOMRect) => void;
   onToast: (text: string, action?: { label: string; run: () => void }) => void;
@@ -100,7 +99,7 @@ type Props = {
   onRows: (rows: Asset[]) => void;
 };
 
-export function SpaceView({ onPreview, onClean, onToast, dataVersion, onRows }: Props) {
+export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows }: Props) {
   // 清空清单后保留一句本地提示：结算区恢复成 0 B，但刚刚清掉多少还要看得见。
   const [lastClean, setLastClean] = useState<{ count: number; bytes: number } | null>(null);
   const cleanedVersion = useRef(dataVersion);
@@ -121,10 +120,14 @@ export function SpaceView({ onPreview, onClean, onToast, dataVersion, onRows }: 
   }, []);
   const [busy, setBusy] = useState(false);
   const [focusId, setFocusId] = useState<string | null>(null);
+  // 大库不必翻页找：输入路径/文件名片段就能从服务端直接筛出来（中文也按子串匹配）。
+  const [filterInput, setFilterInput] = useState("");
+  const [pathFilter, setPathFilter] = useState("");
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const requestId = useRef(0);
+  const filterTimer = useRef<number | undefined>(undefined);
   const queueIds = useMemo(() => new Set((queue?.items ?? []).map((item) => item.asset_id)), [queue]);
   const selectedSet = useMemo(() => new Set(selection), [selection]);
   const rowById = useMemo(() => new Map(rows.map((asset) => [asset.id, asset])), [rows]);
@@ -162,7 +165,12 @@ export function SpaceView({ onPreview, onClean, onToast, dataVersion, onRows }: 
     const ticket = ++requestId.current;
     try {
       // 按大小降序、offset 分页：单次 200 条，避开 queryAssets 的 2000 上限。
-      const page = await queryAssets({ limit: PAGE_SIZE, offset, sort: "size_desc" });
+      const page = await queryAssets({
+        limit: PAGE_SIZE,
+        offset,
+        sort: "size_desc",
+        query: pathFilter || undefined,
+      });
       if (ticket !== requestId.current) return;
       setRows((previous) => (offset === 0 ? page : [...previous, ...page]));
       setHasMore(page.length === PAGE_SIZE);
@@ -178,8 +186,9 @@ export function SpaceView({ onPreview, onClean, onToast, dataVersion, onRows }: 
   }, []);
 
   useEffect(() => {
+    setRows([]);
     void fetchPage(0);
-  }, [fetchPage, dataVersion]);
+  }, [fetchPage, dataVersion, pathFilter]);
 
   useEffect(() => {
     onRows(rows);
@@ -225,9 +234,16 @@ export function SpaceView({ onPreview, onClean, onToast, dataVersion, onRows }: 
         setAnchor(asset.id);
       }
       setFocusId(asset.id);
-      // 普通单击只选中，双击才打开预览。
+      // 普通单击只选中；双击由下面的 openRow 打开大图预览。
     },
     [rows, setAnchor],
+  );
+
+  const openRow = useCallback(
+    (asset: Asset) => {
+      onOpenDetail(entryFromAsset(asset), rows);
+    },
+    [onOpenDetail, rows],
   );
 
   const addSelected = useCallback(async () => {
@@ -334,12 +350,9 @@ export function SpaceView({ onPreview, onClean, onToast, dataVersion, onRows }: 
     [rowById, selection],
   );
 
-  const rowVirtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 62,
-    overscan: 10,
-  });
+  // 列表用普通滚动而不是虚拟滚动：大库首屏只有 200 行，DOM 开销可以接受；
+  // 虚拟化需要给每行固定高度，而鼠标滚轮在 WKWebView 里会跳过没渲染的行，直接滚不到。
+  const ROW_HEIGHT = 62;
 
   const queueTotal = queue?.count ?? 0;
   const queueBytes = queue?.bytes ?? 0;
@@ -376,9 +389,38 @@ export function SpaceView({ onPreview, onClean, onToast, dataVersion, onRows }: 
           <div className="space-pane-head">
             <div>
               <h2>大小排行</h2>
-              <p>{loading ? "读取中…" : "已载入 " + rows.length + (hasMore ? "+" : "") + " 个 · 从大到小"}</p>
+              <p>{loading ? "读取中…" : "已载入 " + rows.length + " 个" + (pathFilter ? " · 筛选 " + pathFilter : " · 从大到小")}</p>
             </div>
-            <span className="space-hint">⇧ 连选 · ⌘ 点选</span>
+            <div className="space-rank-tools">
+              <span className="space-hint">⇧ 连选 · ⌘ 点选</span>
+              <div className="space-filter">
+                <Search size={11} strokeWidth={1.8} />
+                <input
+                  value={filterInput}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setFilterInput(value);
+                    // 短片段（比如 "_sgcheck"）也立即生效，不等 debounce，避免看起来像没筛。
+                    window.clearTimeout(filterTimer.current);
+                    filterTimer.current = window.setTimeout(() => setPathFilter(value.trim()), 0);
+                  }}
+                  placeholder="按路径筛选…"
+                  aria-label="按路径筛选大小排行"
+                />
+                {filterInput && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilterInput("");
+                      setPathFilter("");
+                    }}
+                    aria-label="清除路径筛选"
+                  >
+                    <X size={11} strokeWidth={2} />
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
 
           <div
@@ -388,10 +430,8 @@ export function SpaceView({ onPreview, onClean, onToast, dataVersion, onRows }: 
             aria-multiselectable="true"
             aria-label="按大小排序的文件"
           >
-            <div style={{ height: rowVirtualizer.getTotalSize() + "px", position: "relative" }}>
-              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                const asset = rows[virtualRow.index];
-                if (!asset) return null;
+            <div>
+              {rows.map((asset) => {
                 return (
                   <div
                     key={asset.id}
@@ -403,9 +443,9 @@ export function SpaceView({ onPreview, onClean, onToast, dataVersion, onRows }: 
                       selectedSet.has(asset.id) && "selected",
                       focusId === asset.id && "focused",
                     )}
-                    style={{ transform: "translateY(" + virtualRow.start + "px)", height: virtualRow.size + "px" }}
+                    style={{ height: ROW_HEIGHT + "px" }}
                     onClick={(event) => handlePick(asset, event)}
-                    onDoubleClick={() => onPreview(entryFromAsset(asset), rows)}
+                    onDoubleClick={() => openRow(asset)}
                   >
                     <span className="space-check" aria-hidden="true">
                       {selectedSet.has(asset.id) && <Check size={11} strokeWidth={2.6} />}
@@ -454,23 +494,25 @@ export function SpaceView({ onPreview, onClean, onToast, dataVersion, onRows }: 
           <div className="space-pane-head">
             <div>
               <h2>预览</h2>
-              <p>{preview ? kindText(preview) + " · " + formatBytes(preview.size ?? 0) : "点一个文件看它是什么"}</p>
+              <p>{preview ? kindText(preview) + " · " + formatBytes(preview.size ?? 0) : "点一个文件，这里显示原图或播放视频"}</p>
             </div>
           </div>
           {preview ? (
             <PreviewBody
               entry={preview}
               inQueue={queueIds.has(preview.asset_id)}
-              onOpen={() => onPreview(preview, rows)}
+              onOpenDetail={() => onOpenDetail(preview, rows)}
+              busy={busy}
               onReveal={() => {
                 void revealInFinder(preview.path).catch(() => onToast("在 Finder 中显示失败"));
               }}
               onAdd={() => void addEntry(preview.asset_id)}
+              onRemove={() => void restoreIds([preview.asset_id])}
             />
           ) : (
             <div className="space-preview-empty">
               <ImageIcon size={26} strokeWidth={1.4} />
-              <span>选中左侧的文件后，这里显示原图或视频首帧。</span>
+              <span>选中左侧的文件后，这里显示原图；视频可以直接播放。</span>
             </div>
           )}
         </section>
@@ -497,7 +539,9 @@ export function SpaceView({ onPreview, onClean, onToast, dataVersion, onRows }: 
             {(queue?.items ?? []).length === 0 ? (
               <div className="space-queue-empty">
                 <CheckSquare size={22} strokeWidth={1.4} />
-                <span>还没有挑中的文件。在左边多选后「加入待清理」，随时可以移出。</span>
+                <strong>待清理清单是空的</strong>
+                <span>在左边挑出想删的文件，点「加入待清理」先放进来；这一步只记清单，不动文件。</span>
+                <span>确认后点右下角「清理」，原图才会移进废纸篓、库里的记录一并移除。</span>
               </div>
             ) : (
               (queue?.items ?? []).map((entry) => (
@@ -507,7 +551,7 @@ export function SpaceView({ onPreview, onClean, onToast, dataVersion, onRows }: 
                     className="space-queue-main"
                     onClick={() => {
                       setFocusId(entry.asset_id);
-                      onPreview(entry, rows);
+                      onOpenDetail(entry, rows);
                     }}
                     title={entry.path}
                   >
@@ -567,76 +611,139 @@ export function SpaceView({ onPreview, onClean, onToast, dataVersion, onRows }: 
 function PreviewBody({
   entry,
   inQueue,
-  onOpen,
+  onOpenDetail,
   onReveal,
   onAdd,
+  onRemove,
+  busy,
 }: {
   entry: CleanupEntry;
   inQueue: boolean;
-  onOpen: () => void;
+  onOpenDetail: () => void;
   onReveal: () => void;
   onAdd: () => void;
+  onRemove: () => void;
+  busy: boolean;
 }) {
   const [useOriginal, setUseOriginal] = useState(false);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+  // 视频先走助手的 loading，再走 error；两者都不来时用超时兜底，面板不能一直空着。
+  const [mediaTimeout, setMediaTimeout] = useState(false);
+  const [externalError, setExternalError] = useState<string | null>(null);
+  const isVideo = entry.kind === "video";
 
   useEffect(() => {
+    // 换文件时把播放器/图片状态全部重置，避免上一段视频的错误落在下一张上。
     setUseOriginal(false);
     setReady(false);
     setFailed(false);
+    setMediaTimeout(false);
+    setExternalError(null);
   }, [entry.asset_id]);
 
-  const src = useOriginal ? assetSrc(entry.path) : previewSource(entry);
+  useEffect(() => {
+    if (ready || failed) return;
+    const timer = window.setTimeout(() => setMediaTimeout(true), isVideo ? 8000 : 4000);
+    return () => window.clearTimeout(timer);
+  }, [entry.asset_id, failed, isVideo, ready]);
+
+  const broken = failed || mediaTimeout;
+
+  const thumb = assetSrc(entry.thumb || "");
+  const original = assetSrc(entry.path);
+
+  const openExternal = () => {
+    setExternalError(null);
+    openExternalPath(entry.path).catch((reason: unknown) => {
+      setExternalError("无法交给系统播放器：" + String(reason));
+    });
+  };
 
   return (
     <div className="space-preview-body">
-      <div className={clsx("space-preview-stage", failed && "failed")}>
-        {!failed && (
-          <img
-            key={entry.asset_id + (useOriginal ? "-original" : "-thumb")}
-            src={src}
-            alt=""
-            draggable={false}
-            className={clsx(ready && "ready")}
-            onLoad={() => setReady(true)}
-            onError={() => {
-              // 首帧/缩略图读不到就退回原图；原图也不行就只留大小 + 文件名。
-              if (!useOriginal && entry.path && entry.path !== entry.thumb) {
-                setUseOriginal(true);
-                return;
-              }
-              setFailed(true);
-            }}
-          />
+      <div
+        className={clsx("space-preview-stage", isVideo && "video", broken && "failed")}
+        onDoubleClick={onOpenDetail}
+        title="双击打开大图 / 播放"
+      >
+        {isVideo ? (
+          !broken && (
+            <video
+              key={entry.asset_id}
+              className={clsx("space-video", ready && "ready")}
+              src={original}
+              poster={thumb || undefined}
+              controls
+              playsInline
+              preload="metadata"
+              onLoadedMetadata={() => setReady(true)}
+              onCanPlay={() => setReady(true)}
+              onError={() => setFailed(true)}
+            />
+          )
+        ) : (
+          !broken && (
+            <img
+              key={entry.asset_id + (useOriginal ? "-original" : "-thumb")}
+              src={useOriginal ? original : thumb || original}
+              alt={entry.path.split("/").pop() ?? ""}
+              draggable={false}
+              className={clsx(ready && "ready")}
+              onLoad={() => setReady(true)}
+              onError={() => {
+                // 缩略图缺失就退回原图；原图也解不了才显示兜底。
+                if (!useOriginal) {
+                  setUseOriginal(true);
+                  return;
+                }
+                setFailed(true);
+              }}
+            />
+          )
         )}
-        {!ready && !failed && <span className="skeleton" aria-hidden="true" />}
-        {failed && (
+        {!ready && !broken && <span className="skeleton" aria-hidden="true" />}
+        {broken && (
           <div className="space-preview-fallback">
             <Film size={22} strokeWidth={1.4} />
-            <strong>{cleanPath(entry.path)}</strong>
-            <span>{formatBytes(entry.size ?? 0)} · 没有可显示的封面</span>
+            <strong>这个格式系统解不了</strong>
+            <span>{entry.path.split("/").pop()}</span>
+            <button type="button" className="space-fallback-open" onClick={openExternal}>
+              <ExternalLink size={12} strokeWidth={1.8} /> 在外部播放器打开
+            </button>
+            {externalError && <em className="space-fallback-error">{externalError}</em>}
           </div>
         )}
       </div>
+
       <div className="space-preview-info">
-        <strong title={entry.path}>{cleanPath(entry.path)}</strong>
-        <span>{kindText(entry)} · {formatBytes(entry.size ?? 0)}</span>
+        <strong title={entry.path}>{entry.path.split("/").pop()}</strong>
+        <span>{kindText(entry)} · {statBytes(entry.size ?? 0)}</span>
         <span>{timeLabel(entry.taken_at)}</span>
+        <span className="space-preview-path" title={entry.path}>{entry.path}</span>
       </div>
+
       <div className="space-preview-actions">
-        <button type="button" className="ghost-button" onClick={onOpen}>
-          <ImageIcon size={12} strokeWidth={1.8} /> 打开原图
+        {inQueue ? (
+          <button type="button" className="ghost-button" onClick={onRemove} disabled={busy}>
+            <Undo2 size={12} strokeWidth={1.9} /> 移出待清理
+          </button>
+        ) : (
+          <button type="button" className="ghost-button" onClick={onAdd} disabled={busy}>
+            <Plus size={12} strokeWidth={2} /> 加入待清理
+          </button>
+        )}
+        <button type="button" className="ghost-button" onClick={onOpenDetail}>
+          <Maximize2 size={12} strokeWidth={1.8} /> 大图
         </button>
         <button type="button" className="ghost-button" onClick={onReveal}>
           在 Finder 中显示
         </button>
-        {!inQueue && (
-          <button type="button" className="ghost-button" onClick={onAdd}>
-            <Plus size={12} strokeWidth={2} /> 加入待清理
-          </button>
-        )}
+        <button type="button" className="ghost-button" onClick={openExternal}>
+          <ExternalLink size={12} strokeWidth={1.8} /> 外部播放器
+        </button>
       </div>
     </div>
   );
 }
+
