@@ -630,8 +630,10 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
                 mood: row.get(10)?,
                 tags: parse_tags(row.get(11)?),
                 ocr_text: row.get(12)?,
-                score: row.get(13).ok(),
-                size: row.get(14).ok(),
+                // 没有 asset_quality 表时 SELECT 里没有 q.score 这一列，后面两列要各退一位，
+                // 否则 size 永远读成 None（空间页整列显示成「—」）。
+                score: if score_mode { row.get(13).ok() } else { None },
+                size: if score_mode { row.get(14).ok() } else { row.get(13).ok() },
             })
         })
         .map_err(|e| e.to_string())?;
@@ -1605,6 +1607,21 @@ mod filter_tests {
         f.limit = Some(1);
         f.offset = Some(1);
         assert_eq!(list(&conn, &f), 1);
+    }
+
+    #[test]
+    fn asset_size_survives_without_score_column() {
+        // 没有 asset_quality 表时 SELECT 少一列，size 不能跟着错位成 None。
+        let conn = seed();
+        // 测试 schema 里 assets 没有 size 列，真实库有。
+        conn.execute_batch(
+            "ALTER TABLE assets ADD COLUMN size INTEGER; UPDATE assets SET size = 12345 WHERE id = 'a1';",
+        )
+        .unwrap();
+        let sql = "SELECT a.id, a.path, a.day, a.taken_at, a.kind,                 c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text, a.size          FROM assets a LEFT JOIN captions c ON c.rowid = (              SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)          WHERE a.id = 'a1'";
+        // 与 query_assets 里 score_mode=false 时的列下标保持一致
+        let size: Option<i64> = conn.query_row(sql, [], |row| Ok(row.get(13).ok())).unwrap();
+        assert_eq!(size, Some(12345), "size 应读在第 13 列");
     }
 
     #[test]
