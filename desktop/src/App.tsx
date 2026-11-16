@@ -185,6 +185,9 @@ const route = useMemo(readRoute, []);
   const [detailClosing, setDetailClosing] = useState(false);
   // 空间页的清理删的是待清理清单，不是网格里的选择；单独存一份，确认卡复用 DeleteDialog。
   const [spaceClean, setSpaceClean] = useState<{ ids: string[]; bytes: number } | null>(null);
+  // 详情页单张删除：独立的确认卡与错误，不和网格选择混在一起。
+  const [detailDelete, setDetailDelete] = useState<{ id: string; origin: DOMRect | null } | null>(null);
+  const [detailDeleteError, setDetailDeleteError] = useState<string | null>(null);
   const [dialogClosing, setDialogClosing] = useState(false);
   const [detailOrigin, setDetailOrigin] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [detailStep, setDetailStep] = useState(0);
@@ -476,6 +479,7 @@ const route = useMemo(readRoute, []);
   const openSpacePreview = useCallback(
     (entry: CleanupEntry, list: Asset[] = []) => {
       const asset = list.find((item) => item.id === entry.asset_id) ?? assetFromEntry(entry);
+      setDetailDeleteError(null);
       setSpacePreviewList(list);
       setSpacePreviewAsset(asset);
       setDetailOrigin(null);
@@ -498,6 +502,8 @@ const route = useMemo(readRoute, []);
       setDeleting(false);
     }
   }, [deleting, spaceClean, refreshData, showToast]);
+
+
 
   const [importPlan, setImportPlan] = useState<ImportPlan | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
@@ -835,6 +841,32 @@ const route = useMemo(readRoute, []);
     }, 300);
   }, []);
 
+  const askDeleteDetail = useCallback((rect?: DOMRect | null) => {
+    if (!detailAsset || deleting) return;
+    setDetailDeleteError(null);
+    setDetailDelete({ id: detailAsset.id, origin: rect ?? null });
+  }, [deleting, detailAsset]);
+
+  const confirmDetailDelete = useCallback(async () => {
+    if (!detailDelete || deleting) return;
+    setDeleting(true);
+    try {
+      const result = await deleteRecords([detailDelete.id], true);
+      setDetailDelete(null);
+      setDetailDeleteError(null);
+      closeDetail();
+      refreshData();
+      showToast(`已删除 ${result.removed.assets} 张，原图在废纸篓`);
+    } catch (err) {
+      const message = describeDeleteError(err);
+      setDetailDeleteError(message);
+      showToast("删除失败：" + message);
+      setDetailDelete(null);
+    } finally {
+      setDeleting(false);
+    }
+  }, [closeDetail, deleteRecords, deleting, detailDelete, refreshData, showToast]);
+
   const closeRecognition = useCallback(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setRecognitionOpen(false);
@@ -1048,6 +1080,7 @@ const route = useMemo(readRoute, []);
         }
         return;
       }
+      setDetailDeleteError(null);
       setDetailStep(delta);
       setDetailId(next.id);
       setSelection([next.id]);
@@ -1159,6 +1192,8 @@ const route = useMemo(readRoute, []);
       }
 
       if (detailAsset) {
+        // Backspace/Delete 交给 Detail 自己的监听：它只弹确认，不会直接删。
+        if (event.key === "Backspace" || event.key === "Delete") return;
         if (event.key === "Escape" || event.key === " ") {
           event.preventDefault();
           closeDetail();
@@ -1618,6 +1653,9 @@ const route = useMemo(readRoute, []);
           canNext={detailIndex < currentList.length - 1 || (view === "library" && hasMore)}
           onTag={applyTag}
           onAction={(label) => showToast(`${label}将在 P2 接入`)}
+          onDelete={() => askDeleteDetail(document.querySelector<HTMLElement>(".inspector-delete")?.getBoundingClientRect() ?? null)}
+          deleteError={detailDeleteError}
+          deleting={deleting}
         />
       )}
 
@@ -1657,6 +1695,22 @@ const route = useMemo(readRoute, []);
           busy={deleting}
           onCancel={() => setSpaceClean(null)}
           onConfirm={() => void confirmSpaceClean()}
+        />
+      )}
+
+      {detailDelete && detailAsset && (
+        <DeleteDialog
+          count={1}
+          title="删除这一张？"
+          note="原图移到废纸篓，记录一并删除。"
+          origin={
+            detailDelete.origin
+              ? { x: detailDelete.origin.left, y: detailDelete.origin.top, width: detailDelete.origin.width, height: detailDelete.origin.height }
+              : null
+          }
+          busy={deleting}
+          onCancel={() => setDetailDelete(null)}
+          onConfirm={() => void confirmDetailDelete()}
         />
       )}
 

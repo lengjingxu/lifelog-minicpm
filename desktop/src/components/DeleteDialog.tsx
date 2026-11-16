@@ -5,6 +5,9 @@ type Props = {
   count: number;
   /** 空间页结算时显示总大小，普通删除不传。 */
   bytes?: number | null;
+  /** 指定标题/正文（详情页单张删除用）；不传时走批量文案。 */
+  title?: string;
+  note?: string;
   origin?: GrowRect | null;
   busy?: boolean;
   onCancel: () => void;
@@ -16,7 +19,7 @@ function sizeText(bytes: number): string {
   return (bytes / 1024 / 1024 / 1024).toFixed(1) + " GB";
 }
 
-export function DeleteDialog({ count, bytes = null, origin = null, busy = false, onCancel, onConfirm }: Props) {
+export function DeleteDialog({ count, bytes = null, title, note, origin = null, busy = false, onCancel, onConfirm }: Props) {
   const dialogRef = useDialogFocus<HTMLDivElement>(onCancel, { growFrom: origin });
 
   return (
@@ -29,8 +32,12 @@ export function DeleteDialog({ count, bytes = null, origin = null, busy = false,
         aria-label="删除照片"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <h2 className="delete-title">{bytes != null ? "清理 " + count + " 个 · " + sizeText(bytes) : "删除 " + count + " 张"}？</h2>
-        <p className="delete-note">{bytes != null ? "原图会移进废纸篓，库里的记录一并移除。" : "原图移到废纸篓，记录一并删除。"}</p>
+        <h2 className="delete-title">
+          {title ?? (bytes != null ? "清理 " + count + " 个 · " + sizeText(bytes) : "删除 " + count + " 张")}
+        </h2>
+        <p className="delete-note">
+          {note ?? (bytes != null ? "原图会移进废纸篓，库里的记录一并移除。" : "原图移到废纸篓，记录一并删除。")}
+        </p>
 
         <div className="dialog-actions">
           <button type="button" className="ghost-button" onClick={onCancel} disabled={busy}>

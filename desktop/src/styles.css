@@ -2403,3 +2403,21 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 
 @media (max-width: 1180px) { .space-preview { display: none; } .space-columns { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); } }
 @media (max-width: 900px) { .space-columns { grid-template-columns: minmax(0, 1fr); } }
+/* 详情页底部删除：和 DeleteDialog 的 danger-btn 同一视觉，但铺满一格 */
+.inspector-actions .inspector-delete {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.inspector-actions .inspector-delete:not(:disabled):hover { background: #ff5d5d; color: #fff; }
+.inspector-actions .inspector-delete:disabled { opacity: 0.5; }
+.inspector-delete-error {
+  margin: var(--space-10) 0 0;
+  padding: var(--space-8) var(--space-10);
+  border-radius: var(--radius-10);
+  font-size: var(--font-10-5);
+  line-height: 1.55;
+  color: var(--text-dim);
+  background: rgba(255, 74, 74, var(--alpha-0-07));
+  box-shadow: 0 0 0 1px var(--accent-line) inset;
+}

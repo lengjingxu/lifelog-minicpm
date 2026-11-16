@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
+  Trash2,
   Download,
   FolderOpen,
   Plus,
@@ -26,6 +27,12 @@ type Props = {
   canNext?: boolean;
   onTag: (tag: string) => void;
   onAction: (label: string) => void;
+  /** 删除这一张：由 App 弹确认卡并真正调 delete_records。 */
+  onDelete: () => void;
+  /** 删除失败的一句话，显示在详情里，不静默。 */
+  deleteError?: string | null;
+  /** 删除进行中：禁用按钮，避免重复确认。 */
+  deleting?: boolean;
   origin?: { x: number; y: number; w: number; h: number } | null;
   /** 上一张/下一张的方向：1 向右翻（内容从右侧进），-1 反之 */
   step?: number;
@@ -41,13 +48,31 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
   );
 }
 
-export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTag, onAction, origin, closing = false, canNext, step = 0 }: Props) {
+export function Detail({
+  asset, dup, index, total, onClose, onPrev, onNext, onTag, onAction,
+  onDelete, deleteError = null, deleting = false,
+  origin, closing = false, canNext, step = 0,
+}: Props) {
   const [fullLoaded, setFullLoaded] = useState(false);
   const [fullFailed, setFullFailed] = useState(false);
   const isVideo = asset.kind === "video";
   const [externalError, setExternalError] = useState<string | null>(null);
   const fullRef = useRef<HTMLImageElement | null>(null);
   const dialogRef = useDialogFocus<HTMLDivElement>(onClose, { focusContainer: true });
+
+  // 删除键只是入口：先弹确认，绝不直接删。输入框里打字时不抢键。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Backspace" && event.key !== "Delete") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable=\"true\"]")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!deleting) onDelete();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [deleting, onDelete]);
 
   // 原图直接挂在可见的 img 上，但先不淡入：等 decode() 完成再显示。
   // 这样只有一次解码，且解码走异步路径，不会把 30-50ms 的活儿算进某一帧。
@@ -317,7 +342,19 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
               <FolderOpen size={13} strokeWidth={1.8} />外部播放器
             </button>
           )}
+          <button
+            type="button"
+            className="inspector-delete"
+            onClick={onDelete}
+            disabled={deleting}
+            title="删除这一张（Backspace / Delete）"
+          >
+            <Trash2 size={13} strokeWidth={1.8} />{deleting ? "删除中…" : "删除"}
+          </button>
         </div>
+        {deleteError && (
+          <p className="inspector-delete-error" role="alert">{deleteError}</p>
+        )}
       </aside>
     </div>
   );
