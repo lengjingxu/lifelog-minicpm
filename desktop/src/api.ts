@@ -637,6 +637,22 @@ export type DeleteResult = {
   events_rebuilt?: number;
 };
 
+/** 把删除失败原文（Tauri 抛的是字符串）转成能看懂的一句，授权问题带上该去哪儿开 */
+export function describeDeleteError(reason: unknown): string {
+  const raw = typeof reason === "string" ? reason : reason instanceof Error ? reason.message : String(reason);
+  if (/Operation not permitted|permission|权限|NSPOSIXErrorDomain Code=1/i.test(raw)) {
+    return "没有权限移动这些原图。请在「系统设置 → 隐私与安全性 → 文件与文件夹」里给拾光打开所在的磁盘，或打开「完全磁盘访问权限」后重启拾光。";
+  }
+  return raw.replace(/^Error:\s*/, "");
+}
+
+export type LibraryRoot = { root: string; exists: boolean; readable: boolean; assets: number };
+export type LibraryAccess = { roots: LibraryRoot[] };
+
+/** 库里照片所在的顶层目录能不能读：被 TCC 拒绝时这里就是 false。 */
+export const libraryAccess = () => invoke<LibraryAccess>("library_access");
+export const openPrivacySettings = () => invoke<void>("open_privacy_settings");
+
 export const deleteRecords = (ids: string[], withFiles = false) =>
   invoke<DeleteResult>("delete_records", { ids, withFiles });
 

@@ -42,6 +42,9 @@ import {
   bulkTag,
   exportAssets,
   deleteRecords,
+  describeDeleteError,
+  libraryAccess,
+  openPrivacySettings,
   revealInFinder,
   albumAdd,
 } from "./api";
@@ -56,6 +59,7 @@ import { Detail } from "./components/Detail";
 import { SelectionBar } from "./components/SelectionBar";
 import { ImportDialog, type ImportPlan, type ImportProgress } from "./components/ImportDialog";
 import { DeleteDialog } from "./components/DeleteDialog";
+import { AccessDialog } from "./components/AccessDialog";
 import { EmptyState } from "./components/EmptyState";
 import { OrganizeView } from "./components/OrganizeView";
 import { RecognitionDialog } from "./components/RecognitionDialog";
@@ -376,6 +380,8 @@ const route = useMemo(readRoute, []);
 
   const [exporting, setExporting] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  /** 库里照片所在目录读不了（授权没给）：启动检查一次，给张卡让人去开权限 */
+  const [blockedRoots, setBlockedRoots] = useState<string[] | null>(null);
   const [deleting, setDeleting] = useState(false);
   const handleExport = useCallback(async () => {
     if (exporting) return;
@@ -439,7 +445,7 @@ const route = useMemo(readRoute, []);
           : `已删除 ${result.removed.assets} 张，原图在废纸篓`,
       );
     } catch (err) {
-      showToast(`移除失败：${String(err)}`);
+      showToast(`移除失败：${describeDeleteError(err)}`);
     } finally {
       setDeleting(false);
     }
@@ -547,6 +553,17 @@ const route = useMemo(readRoute, []);
       alive = false;
     };
   }, []);
+
+  const checkAccess = useCallback(() => {
+    void libraryAccess()
+      .then((report) => {
+        const blocked = report.roots.filter((root) => root.exists && !root.readable).map((root) => root.root);
+        setBlockedRoots(blocked.length ? blocked : null);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(checkAccess, [checkAccess]);
 
   useEffect(() => {
     let alive = true;
@@ -1567,6 +1584,15 @@ const route = useMemo(readRoute, []);
           busy={deleting}
           onCancel={() => setDeleteOpen(false)}
           onConfirm={() => void confirmDelete()}
+        />
+      )}
+
+      {blockedRoots && (
+        <AccessDialog
+          roots={blockedRoots}
+          onOpenSettings={() => void openPrivacySettings()}
+          onRecheck={checkAccess}
+          onDismiss={() => setBlockedRoots(null)}
         />
       )}
 

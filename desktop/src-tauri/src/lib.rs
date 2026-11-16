@@ -974,11 +974,14 @@ async fn delete_records(
                 "failed": failed,
             });
             // 有文件没能移进废纸篓就整体停下：只删记录会把文件变成看不见的孤儿
-            if let Some(first) = failed.first() {
+            if !failed.is_empty() {
+                if let Some(hint) = permission_hint(&failed) {
+                    return Err(hint);
+                }
                 return Err(format!(
                     "有 {} 个文件无法移到废纸篓，已停止且未删除任何记录（{}）",
                     failed.len(),
-                    first
+                    failed[0]
                 ));
             }
         }
@@ -1394,6 +1397,8 @@ pub fn run() {
             export_assets,
             import_xiaomi,
             delete_records,
+            library_access,
+            open_privacy_settings,
             reveal_in_finder,
             facets,
             timeline_months,
@@ -1957,3 +1962,126 @@ mod dup_tests {
     }
 }
 
+
+/// 删除失败时把“没有权限”单独认出来：macOS 对没声明用途说明的目录（外置盘等）
+/// 不会弹授权框，只会返回 EPERM，得把它转成能照着做的提示。
+fn permission_hint(errors: &[String]) -> Option<String> {
+    const DENIED: [&str; 4] = [
+        "Operation not permitted",
+        "permission",
+        "Permission",
+        "NSPOSIXErrorDomain Code=1",
+    ];
+    let blocked = errors
+        .iter()
+        .filter(|e| DENIED.iter().any(|word| e.contains(word)))
+        .count();
+    if blocked == 0 {
+        return None;
+    }
+    Some(format!(
+        "没有权限移动这 {blocked} 个原图（文件在受保护的磁盘目录里）。请在「系统设置 → 隐私与安全性」里给拾光打开该磁盘的访问权限，或开启「完全磁盘访问权限」后重启拾光。"
+    ))
+}
+
+/// 库里记录的资产分布在哪些顶层目录（/Volumes/X、/Users/xxx）。
+/// 启动时用来检查授权：被 TCC 拒绝时 read_dir 直接报 EPERM。
+fn library_roots(conn: &Connection) -> Vec<String> {
+    let Ok(mut stmt) = conn.prepare("SELECT path FROM assets") else {
+        return Vec::new();
+    };
+    let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) else {
+        return Vec::new();
+    };
+    let mut roots: Vec<String> = Vec::new();
+    for path in rows.filter_map(Result::ok) {
+        let root = if let Some(rest) = path.strip_prefix("/Volumes/") {
+            match rest.split('/').next() {
+                Some(volume) if !volume.is_empty() => format!("/Volumes/{volume}"),
+                _ => continue,
+            }
+        } else if let Some(user) = path.strip_prefix("/Users/").and_then(|rest| rest.split('/').next())
+        {
+            match user {
+                "" => continue,
+                user => format!("/Users/{user}"),
+            }
+        } else {
+            continue;
+        };
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    roots
+}
+
+/// 能不能列出目录内容。读得到就说明这一层的授权通了。
+fn can_list_dir(path: &std::path::Path) -> bool {
+    std::fs::read_dir(path).is_ok()
+}
+
+#[derive(serde::Serialize)]
+pub struct AccessRoot {
+    root: String,
+    exists: bool,
+    readable: bool,
+    assets: usize,
+}
+
+fn access_report(conn: &Connection) -> Vec<AccessRoot> {
+    let mut count = std::collections::HashMap::<String, usize>::new();
+    for root in library_roots(conn) {
+        count.entry(root).or_default();
+    }
+    if let Ok(mut stmt) = conn.prepare("SELECT path FROM assets") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for path in rows.filter_map(Result::ok) {
+                for root in count.keys().cloned().collect::<Vec<_>>() {
+                    if path.starts_with(&root) {
+                        *count.get_mut(&root).unwrap() += 1;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    count
+        .into_iter()
+        .map(|(root, assets)| {
+            let path = std::path::PathBuf::from(&root);
+            let exists = path.exists();
+            AccessRoot {
+                root,
+                exists,
+                readable: exists && can_list_dir(&path),
+                assets,
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn library_access(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let guard = db.open()?;
+    let conn = guard.as_ref().unwrap();
+    Ok(serde_json::json!({ "roots": access_report(conn) }))
+}
+
+/// 打开「隐私与安全性 → 完全磁盘访问权限」，列表里能直接勾拾光。
+#[tauri::command]
+fn open_privacy_settings() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles")
+        .status()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// 命令行诊断入口用：按数据目录里的库算一份授权检查结果。
+pub fn access_report_for(data_dir: &Path) -> Vec<AccessRoot> {
+    match Connection::open(data_dir.join("lifelog.sqlite")) {
+        Ok(conn) => access_report(&conn),
+        Err(_) => Vec::new(),
+    }
+}
