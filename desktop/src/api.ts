@@ -274,12 +274,23 @@ export async function countAssets(filter: Filter): Promise<number> {
 /** 守卫：任何一次取图都不许超过 2000 条，避免再把整库塞进内存（10 万条约 40MB JSON）。 */
 export const MAX_PAGE_LIMIT = 2000;
 
+/** Tauri 的 invoke 会把 Rust Option<i64> 的 None 变成 null；这里统一成 number | null。 */
+function normalizeSize(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  return null;
+}
+
 export async function queryAssets(filter: Filter): Promise<Asset[]> {
   if ((filter.limit ?? 0) > MAX_PAGE_LIMIT) {
     throw new Error("queryAssets limit " + filter.limit + " 超过上限 " + MAX_PAGE_LIMIT + "，请改成分页");
   }
   if (!isTauri) return fixtureQuery(filter);
-  return invoke<Asset[]>("query_assets", { filter });
+  const rows = await invoke<Asset[]>("query_assets", { filter });
+  return rows.map((row) => ({ ...row, size: normalizeSize(row.size) }));
+
 }
 
 export type MonthSummary = { month: string; count: number; cover_id: string; cover_thumb: string };
