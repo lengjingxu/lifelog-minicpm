@@ -2098,10 +2098,13 @@ mod trash_tests {
             return;
         }
         std::fs::create_dir_all(root).unwrap();
-        let file = root.join(format!("trash-probe-{}.txt", std::process::id()));
+        let name = format!("trash-probe-{}.txt", std::process::id());
+        let file = root.join(&name);
         std::fs::write(&file, b"probe").unwrap();
         trash_with(&file).expect("外置盘文件移到废纸篓失败");
         assert!(!file.exists(), "原路径应已不存在");
+        // 自测不往真实废纸篓里留垃圾：移进去的文件按同名清掉。
+        let _ = std::fs::remove_file(std::path::Path::new("/Volumes/Leng/.Trashes/501").join(&name));
     }
 
     #[test]
