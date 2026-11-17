@@ -336,6 +336,44 @@ mod tests {
     }
 
     #[test]
+    fn copies_a_real_photo_into_tmp_target() {
+        // 与详情页「导出这一张」同一路径：export_rows 单行 + /private/tmp 目标。
+        let home = std::env::temp_dir().join(format!("sg-export-real-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(&home).unwrap();
+        let source = Path::new("/Users/leng/dev/lifelog-minicpm/data/photos/202611/mmexport1793718481146.jpg");
+        if !source.exists() {
+            eprintln!("skip: 测试照片不存在");
+            return;
+        }
+        let meta = fs::metadata(source).unwrap();
+        let rows = vec![Row {
+            id: "exportprobe0001".into(),
+            path: source.to_string_lossy().to_string(),
+            day: Some("2026-11-08".into()),
+            taken_at: Some("2026-11-08T03:06:07".into()),
+            caption: None,
+            scene: None,
+            people: None,
+            place: None,
+            activity: None,
+            mood: None,
+            tags: vec![],
+            ocr_text: None,
+        }];
+        let target = Path::new("/private/tmp/sg-export-check");
+        let _ = fs::remove_dir_all(target);
+        fs::create_dir_all(target).unwrap();
+        let summary = export_rows(&rows, &home, target).unwrap();
+        assert_eq!(summary.copied, 1);
+        let copied = target.join("mmexport1793718481146.jpg");
+        assert!(copied.exists());
+        assert_eq!(fs::metadata(&copied).unwrap().len(), meta.len());
+        let _ = fs::remove_dir_all(target);
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
     fn rejects_target_inside_library() {
         let home = tmpdir("home");
         let rows = seed_rows(&home, 1);

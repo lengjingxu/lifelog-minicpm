@@ -351,6 +351,50 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
     [applyQueue],
   );
 
+  // 键盘：方向键在网格里移动焦点，空格/回车切换待清理（双击/打开详情留给鼠标）。
+  const moveFocus = useCallback(
+    (delta: number, extend: boolean) => {
+      if (!rows.length) return;
+      const current = focusId ? rows.findIndex((asset) => asset.id === focusId) : -1;
+      const next = Math.max(0, Math.min(rows.length - 1, (current < 0 ? 0 : current) + delta));
+      const asset = rows[next];
+      if (!asset) return;
+      setFocusId(asset.id);
+      if (extend) {
+        toggleAssets([asset], !queueIds.has(asset.id));
+      }
+      requestAnimationFrame(() => {
+        gridRef.current
+          ?.querySelector<HTMLElement>(`[data-grid-id="${asset.id}"]`)
+          ?.scrollIntoView({ block: "nearest" });
+      });
+    },
+    [focusId, queueIds, rows, toggleAssets],
+  );
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " ", "Enter"].includes(event.key)) return;
+      event.preventDefault();
+      if (event.key === "ArrowLeft") moveFocus(-1, event.shiftKey);
+      else if (event.key === "ArrowRight") moveFocus(1, event.shiftKey);
+      else if (event.key === "ArrowUp") moveFocus(-columns, event.shiftKey);
+      else if (event.key === "ArrowDown") moveFocus(columns, event.shiftKey);
+      else {
+        const asset = rows.find((item) => item.id === focusId) ?? rows[0];
+        if (asset) {
+          setFocusId(asset.id);
+          toggleAssets([asset], !queueIds.has(asset.id));
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [columns, focusId, moveFocus, queueIds, rows, toggleAssets]);
+
   const handleCardClick = useCallback(
     (asset: Asset, event: React.MouseEvent) => {
       const group = groupIndex.get(asset.id) ?? null;
@@ -762,6 +806,7 @@ function SpaceCard({
     <button
       type="button"
       className={clsx("space-card", inQueue && "queued", focused && "focused")}
+      data-grid-id={asset.id}
       title={asset.path}
       aria-pressed={inQueue}
       aria-label={(isVideo ? "视频" : "照片") + " " + asset.path.split("/").pop() + " · " + formatBytes(asset.size ?? 0)}

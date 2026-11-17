@@ -2089,8 +2089,24 @@ mod trash_tests {
     use super::trash_with;
 
     /// 移到废纸篓后，原路径上就不该再有这个文件（内容还在废纸篓里）。
+    /// 与 delete_records 相同的移废纸篓实现：外部盘上的文件（/Volumes）也要能成功。
+    #[test]
+    fn moves_external_volume_file_into_trash() {
+        let root = std::path::Path::new("/Volumes/Leng/_sgcheck");
+        if !root.parent().map(|p| p.exists()).unwrap_or(false) {
+            eprintln!("skip: 外置盘 /Volumes/Leng 不存在");
+            return;
+        }
+        std::fs::create_dir_all(root).unwrap();
+        let file = root.join(format!("trash-probe-{}.txt", std::process::id()));
+        std::fs::write(&file, b"probe").unwrap();
+        trash_with(&file).expect("外置盘文件移到废纸篓失败");
+        assert!(!file.exists(), "原路径应已不存在");
+    }
+
     #[test]
     fn moves_file_into_trash() {
+
         let dir = std::env::temp_dir().join(format!("sg-trash-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("sample.txt");
