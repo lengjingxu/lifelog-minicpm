@@ -2461,3 +2461,41 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .space-bulk-copy { font-size: var(--font-10-5); color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .space-confirm { display: flex; align-items: center; gap: var(--space-8); }
 .space-confirm span { font-size: var(--font-9-5); color: var(--text-faint); }
+/* 渐进披露：默认只有网格；结算条悬浮，清单按需从右侧滑出 */
+.space-view.with-drawer .space-grid { padding-right: 320px; }
+.space-topbar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-10); }
+.space-topbar-right { display: flex; align-items: center; gap: var(--space-6); }
+.space-grid { position: relative; }
+.space-view > .space-settlement {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-18);
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-8) var(--space-10) var(--space-8) var(--space-14);
+  border-radius: var(--radius-999);
+  background: color-mix(in srgb, var(--bg) 88%, #fff);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, var(--alpha-0-35)), 0 0 0 1px var(--line-strong) inset;
+  z-index: 6;
+}
+.space-view > .space-settlement strong { font-size: var(--font-11-5); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.space-view > .space-settlement .space-link { padding: 0 var(--space-8); height: 26px; border-radius: var(--radius-999); }
+.space-view > .space-settlement .space-link:hover { background: var(--bg-hover); color: var(--text); }
+.space-queue {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-14);
+  background: color-mix(in srgb, var(--bg) 94%, #fff);
+  box-shadow: -14px 0 34px rgba(0, 0, 0, var(--alpha-0-28)), 0 0 0 1px var(--line) inset;
+  z-index: 7;
+}
+.space-queue-tools { display: flex; align-items: center; gap: var(--space-6); }
+.space-queue-list { overflow-y: auto; }
+.space-grid { padding-bottom: var(--space-56); }

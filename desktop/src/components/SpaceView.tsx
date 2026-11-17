@@ -3,15 +3,10 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
 import {
   Check,
-  ExternalLink,
-  Film,
-  Image as ImageIcon,
   ImageOff,
   Info,
   LoaderCircle,
-  Maximize2,
   Play,
-  Plus,
   Search,
   Trash2,
   Undo2,
@@ -24,9 +19,7 @@ import {
   cleanupList,
   cleanupRemove,
   dedupBuild,
-  openExternal as openExternalPath,
   queryAssets,
-  revealInFinder,
   spaceGroups,
   spaceVersions,
   spaceViews,
@@ -37,7 +30,7 @@ import {
   type SpaceViewKey,
   type SpaceViews,
 } from "../api";
-import { GAP, formatBytes, timeLabel } from "../utils";
+import { GAP, formatBytes } from "../utils";
 
 const PAGE_SIZE = 200;
 const CARD_MIN_WIDTH = 158;
@@ -51,12 +44,6 @@ const VIEWS: SpaceViewItem[] = [
   { key: "video", label: "视频", hint: "kind = video" },
   { key: "photo", label: "照片", hint: "kind = image" },
 ];
-
-function kindText(entry: CleanupEntry): string {
-  if (entry.kind === "video") return "视频";
-  if (entry.kind === "live" || entry.kind === "live_photo") return "实况";
-  return "照片";
-}
 
 /** 统计要区分「0 B」和「读不到」，不能用 — 表示空。 */
 function statBytes(bytes: number): string {
@@ -127,11 +114,11 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   const [busy, setBusy] = useState(false);
   const [filterInput, setFilterInput] = useState("");
   const [pathFilter, setPathFilter] = useState("");
-  const [lastClean, setLastClean] = useState<{ count: number; bytes: number } | null>(null);
   const [computing, setComputing] = useState(false);
   const [allBusy, setAllBusy] = useState(false);
   const [confirmAll, setConfirmAll] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(false);
   const [gridWidth, setGridWidth] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -527,305 +514,265 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   const cardHeight = Math.round(cardWidth * 0.625) + 8;
   const queueTotal = queue?.count ?? 0;
   const queueBytes = queue?.bytes ?? 0;
-  const focused = focusedId(rows, queue, focusId);
   const dupStat = views?.dup;
 
   return (
-    <div className="space-view">
-      <div className="space-view-pills" role="tablist" aria-label="清理视角">
-        {VIEWS.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            role="tab"
-            aria-selected={view === item.key}
-            className={clsx("space-pill", view === item.key && "active")}
-            title={item.hint}
-            onClick={() => {
-              if (item.key === view) return;
-              setView(item.key);
-            }}
-          >
-            <span>{item.label}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="space-columns">
-        {/* 左：网格 */}
-        <section className="space-pane space-rank" aria-label="文件网格">
-          <div className="space-pane-head">
-            <div className="space-rank-title">
-              <h2>{VIEWS.find((item) => item.key === view)?.label}</h2>
-              <p>{summaryLine}</p>
-            </div>
-            <div className="space-rank-tools">
-              <div className="space-filter">
-                <Search size={11} strokeWidth={1.8} />
-                <input
-                  value={filterInput}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setFilterInput(value);
-                    window.clearTimeout(filterTimer.current);
-                    filterTimer.current = window.setTimeout(() => setPathFilter(value.trim()), 150);
-                  }}
-                  placeholder="筛选路径"
-                  aria-label="按路径筛选文件网格"
-                />
-                {filterInput && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFilterInput("");
-                      setPathFilter("");
-                    }}
-                    aria-label="清除路径筛选"
-                  >
-                    <X size={11} strokeWidth={2} />
-                  </button>
-                )}
-              </div>
-              <button
-                type="button"
-                className={clsx("space-info", infoOpen && "on")}
-                onClick={() => setInfoOpen((open) => !open)}
-                aria-label="口径说明"
-                aria-expanded={infoOpen}
-              >
-                <Info size={12} strokeWidth={1.8} />
-              </button>
-            </div>
-          </div>
-
-          {infoOpen && <p className="space-info-pop">{views?.[view]?.rule ?? "按体积与指纹筛选"}</p>}
-
-          {view === "dup" && dupStat?.ready && groupsTotal > 0 && (
-            <div className="space-bulk-dup">
-              <span className="space-bulk-copy">
-                {groupsTotal.toLocaleString()} 组重复 · 可回收 {statBytes(dupStat.reclaim ?? 0)}
-              </span>
-              <button
-                type="button"
-                className="space-bulk-all"
-                onClick={() => setConfirmAll(true)}
-                disabled={allBusy}
-              >
-                {allBusy ? "正在加入…" : "自动保留每组最佳，其余加入待清理"}
-              </button>
-              {confirmAll && (
-                <div className="space-confirm">
-                  <span>keeper 不会加入。</span>
-                  <button type="button" className="ghost-button" onClick={() => setConfirmAll(false)}>
-                    取消
-                  </button>
-                  <button type="button" className="danger-btn" onClick={() => void addAllDup()}>
-                    确认
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {view === "screenshot" && groups.length > 0 && (
-            <div className="space-group-chips">
-              {groups.map((group) => {
-                const ids = group.ids ?? [];
-                const candidates = ids.filter((id) => id !== group.keep);
-                const inQueue = candidates.filter((id) => queueIds.has(id)).length;
-                return (
-                  <button
-                    key={group.key}
-                    type="button"
-                    className={clsx("space-group-chip", inQueue === candidates.length && candidates.length > 0 && "on")}
-                    onClick={() => {
-                      const add = candidates.some((id) => !queueIds.has(id));
-                      applyQueue(add ? candidates.filter((id) => !queueIds.has(id)) : candidates, add);
-                    }}
-                  >
-                    <strong>{group.label}</strong>
-                    <span>{ids.length} 张</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="space-grid" ref={scrollRef} role="grid" aria-label="文件缩略图" aria-multiselectable="true">
-            <div
-              ref={gridRef}
-              className="space-grid-inner"
-              style={{ height: Math.max(rowVirtualizer.getTotalSize(), cardHeight) + "px" }}
+    <div className={clsx("space-view", queueOpen && "with-drawer")}>
+      <div className="space-topbar">
+        <div className="space-view-pills" role="tablist" aria-label="清理视角">
+          {VIEWS.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              role="tab"
+              aria-selected={view === item.key}
+              className={clsx("space-pill", view === item.key && "active")}
+              title={item.hint}
+              onClick={() => {
+                if (item.key === view) return;
+                setView(item.key);
+              }}
             >
-              {gridWidth > 0 &&
-                rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                  const items = rows.slice(virtualRow.index * columns, virtualRow.index * columns + columns);
-                  return (
-                    <div
-                      key={virtualRow.key}
-                      className="space-grid-row"
-                      style={{
-                        height: cardHeight + "px",
-                        transform: "translateY(" + virtualRow.start + "px)",
-                        gridTemplateColumns: "repeat(" + columns + ", minmax(0, 1fr))",
-                        gap: GAP + "px",
-                      }}
-                    >
-                      {items.map((asset) => (
-                        <SpaceCard
-                          key={asset.id}
-                          asset={asset}
-                          inQueue={queueIds.has(asset.id)}
-                          focused={focusId === asset.id}
-                          dupCount={view === "dup" ? asset.dup_count ?? 0 : 0}
-                          keeper={view === "dup" && asset.keeper === true}
-                          onToggle={handleCardClick}
-                          onOpen={() => onOpenDetail(entryFromAsset(asset), rows)}
-                        />
-                      ))}
-                    </div>
-                  );
-                })}
-              {loading && rows.length === 0 && (
-                <div className="space-grid-loading">
-                  <LoaderCircle size={16} className="spin" />
-                  <span>正在读取…</span>
-                </div>
-              )}
-            </div>
-            <div ref={sentinelRef} className="space-sentinel">
-              {loadingMore ? (
-                <span><LoaderCircle size={12} className="spin" /> 载入中…</span>
-              ) : hasMore ? (
-                <span>继续下滑</span>
-              ) : rows.length > 0 ? (
-                <span>已到底</span>
-              ) : null}
-            </div>
-            {error && <div className="space-empty">读取失败：{error}</div>}
-            {!loading && !error && rows.length === 0 && (
-              <div className="space-empty">
-                {view === "dup" && dupStat?.ready === false ? (
-                  <>
-                    <LoaderCircle size={20} strokeWidth={1.5} className={computing ? "spin" : undefined} />
-                    <strong>{computing ? "正在计算指纹…" : "指纹还没算"}</strong>
-                    <button type="button" className="primary-btn" onClick={() => void computeDup()} disabled={computing}>
-                      {computing ? "计算中…" : "立即计算"}
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <ImageOff size={20} strokeWidth={1.5} />
-                    <strong>{pathFilter ? "没有匹配的文件" : "这里没有文件"}</strong>
-                  </>
-                )}
-              </div>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+        <div className="space-topbar-right">
+          <div className="space-filter">
+            <Search size={11} strokeWidth={1.8} />
+            <input
+              value={filterInput}
+              onChange={(event) => {
+                const value = event.target.value;
+                setFilterInput(value);
+                window.clearTimeout(filterTimer.current);
+                filterTimer.current = window.setTimeout(() => setPathFilter(value.trim()), 150);
+              }}
+              placeholder="筛选路径"
+              aria-label="按路径筛选文件网格"
+            />
+            {filterInput && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterInput("");
+                  setPathFilter("");
+                }}
+                aria-label="清除路径筛选"
+              >
+                <X size={11} strokeWidth={2} />
+              </button>
             )}
           </div>
-        </section>
+          <button
+            type="button"
+            className={clsx("space-info", infoOpen && "on")}
+            onClick={() => setInfoOpen((open) => !open)}
+            aria-label="口径与统计"
+            aria-expanded={infoOpen}
+          >
+            <Info size={12} strokeWidth={1.8} />
+          </button>
+        </div>
+      </div>
 
-        {/* 中：预览 */}
-        <section className="space-pane space-preview" aria-label="预览">
-          <div className="space-pane-head">
-            <div>
-              <h2>预览</h2>
-              <p>{focused ? kindText(focused) + " · " + formatBytes(focused.size ?? 0) : ""}</p>
-            </div>
-          </div>
-          {focused ? (
-            <PreviewBody
-              entry={focused}
-              inQueue={queueIds.has(focused.asset_id)}
-              busy={busy}
-              onOpenDetail={() => onOpenDetail(focused, rows)}
-              onReveal={() => {
-                void revealInFinder(focused.path).catch(() => onToast("在 Finder 中显示失败"));
-              }}
-              onAdd={() => applyQueue([focused.asset_id], true)}
-              onRemove={() => applyQueue([focused.asset_id], false)}
-            />
-          ) : (
-            <div className="space-preview-empty">
-              <ImageIcon size={26} strokeWidth={1.4} />
-              <span>点一个格子预览</span>
+      {infoOpen && (
+        <p className="space-info-pop">
+          {summaryLine}
+          {views?.[view]?.rule ? ` · ${views[view]?.rule}` : ""}
+        </p>
+      )}
+
+      {view === "dup" && dupStat?.ready && groupsTotal > 0 && (
+        <div className="space-bulk-dup">
+          <span className="space-bulk-copy">
+            发现 {groupsTotal.toLocaleString()} 组重复 · 可回收 {statBytes(dupStat.reclaim ?? 0)}
+          </span>
+          <button
+            type="button"
+            className="space-bulk-all"
+            onClick={() => setConfirmAll(true)}
+            disabled={allBusy}
+          >
+            {allBusy ? "正在加入…" : "自动保留每组最佳，其余加入待清理"}
+          </button>
+          {confirmAll && (
+            <span className="space-confirm">
+              <span>keeper 不会加入。</span>
+              <button type="button" className="ghost-button" onClick={() => setConfirmAll(false)}>
+                取消
+              </button>
+              <button type="button" className="danger-btn" onClick={() => void addAllDup()}>
+                确认
+              </button>
+            </span>
+          )}
+        </div>
+      )}
+
+      {view === "screenshot" && groups.length > 0 && (
+        <div className="space-group-chips">
+          {groups.map((group) => {
+            const ids = group.ids ?? [];
+            const candidates = ids.filter((id) => id !== group.keep);
+            const inQueue = candidates.filter((id) => queueIds.has(id)).length;
+            return (
+              <button
+                key={group.key}
+                type="button"
+                className={clsx("space-group-chip", inQueue === candidates.length && candidates.length > 0 && "on")}
+                onClick={() => {
+                  const add = candidates.some((id) => !queueIds.has(id));
+                  applyQueue(add ? candidates.filter((id) => !queueIds.has(id)) : candidates, add);
+                }}
+              >
+                <strong>{group.label}</strong>
+                <span>{ids.length} 张</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="space-grid" ref={scrollRef} role="grid" aria-label="文件缩略图" aria-multiselectable="true">
+        <div
+          ref={gridRef}
+          className="space-grid-inner"
+          style={{ height: Math.max(rowVirtualizer.getTotalSize(), cardHeight) + "px" }}
+        >
+          {gridWidth > 0 &&
+            rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const items = rows.slice(virtualRow.index * columns, virtualRow.index * columns + columns);
+              return (
+                <div
+                  key={virtualRow.key}
+                  className="space-grid-row"
+                  style={{
+                    height: cardHeight + "px",
+                    transform: "translateY(" + virtualRow.start + "px)",
+                    gridTemplateColumns: "repeat(" + columns + ", minmax(0, 1fr))",
+                    gap: GAP + "px",
+                  }}
+                >
+                  {items.map((asset) => (
+                    <SpaceCard
+                      key={asset.id}
+                      asset={asset}
+                      inQueue={queueIds.has(asset.id)}
+                      focused={focusId === asset.id}
+                      dupCount={view === "dup" ? asset.dup_count ?? 0 : 0}
+                      keeper={view === "dup" && asset.keeper === true}
+                      onToggle={handleCardClick}
+                      onOpen={() => onOpenDetail(entryFromAsset(asset), rows)}
+                    />
+                  ))}
+                </div>
+              );
+            })}
+          {loading && rows.length === 0 && (
+            <div className="space-grid-loading">
+              <LoaderCircle size={16} className="spin" />
+              <span>正在读取…</span>
             </div>
           )}
-        </section>
+        </div>
+        <div ref={sentinelRef} className="space-sentinel">
+          {loadingMore ? (
+            <span><LoaderCircle size={12} className="spin" /> 载入中…</span>
+          ) : hasMore ? (
+            <span>继续下滑</span>
+          ) : rows.length > 0 ? (
+            <span>已到底</span>
+          ) : null}
+        </div>
+        {error && <div className="space-empty">读取失败：{error}</div>}
+        {!loading && !error && rows.length === 0 && (
+          <div className="space-empty">
+            {view === "dup" && dupStat?.ready === false ? (
+              <>
+                <LoaderCircle size={20} strokeWidth={1.5} className={computing ? "spin" : undefined} />
+                <strong>{computing ? "正在计算指纹…" : "指纹还没算"}</strong>
+                <button type="button" className="primary-btn" onClick={() => void computeDup()} disabled={computing}>
+                  {computing ? "计算中…" : "立即计算"}
+                </button>
+              </>
+            ) : (
+              <>
+                <ImageOff size={20} strokeWidth={1.5} />
+                <strong>{pathFilter ? "没有匹配的文件" : "这里没有文件"}</strong>
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
-        {/* 右：待清理 */}
-        <section className="space-pane space-queue" aria-label="待清理">
+      {queueTotal > 0 && (
+        <div className="space-settlement">
+          <strong>{queueTotal} 个 · {statBytes(queueBytes)}</strong>
+          <button type="button" className="space-link" onClick={() => setQueueOpen(true)}>
+            查看清单
+          </button>
+          <button
+            type="button"
+            className="space-danger"
+            disabled={busy}
+            onClick={(event) => {
+              onClean(
+                (queue?.items ?? []).map((item) => item.asset_id),
+                event.currentTarget.getBoundingClientRect(),
+              );
+            }}
+          >
+            <Trash2 size={13} strokeWidth={2} /> 清理
+          </button>
+        </div>
+      )}
+
+      {queueOpen && queueTotal > 0 && (
+        <aside className="space-queue" role="dialog" aria-modal="false" aria-label="待清理清单">
           <div className="space-pane-head">
             <div>
               <h2>待清理</h2>
+              <p>{queueTotal} 个</p>
             </div>
-            {queueTotal > 0 && (
+            <div className="space-queue-tools">
               <button type="button" className="space-link" disabled={busy} onClick={() => void removeAll()}>
                 <Undo2 size={12} strokeWidth={1.9} /> 全部移出
               </button>
-            )}
-          </div>
-
-          <div className="space-queue-list" role="list">
-            {(queue?.items ?? []).length === 0 ? (
-              <div className="space-queue-empty">
-                <span>点一下左侧格子加入</span>
-              </div>
-            ) : (
-              (queue?.items ?? []).map((entry) => (
-                <div key={entry.asset_id} className="space-queue-item">
-                  <button
-                    type="button"
-                    className="space-queue-main"
-                    onClick={() => {
-                      setFocusId(entry.asset_id);
-                      onOpenDetail(entry, rows);
-                    }}
-                    title={entry.path}
-                  >
-                    <span className="space-queue-name">{entry.path.split("/").pop()}</span>
-                    <span className="space-queue-meta">{formatBytes(entry.size ?? 0)}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="space-queue-remove"
-                    onClick={() => applyQueue([entry.asset_id], false)}
-                    disabled={busy}
-                    aria-label="移出待清理"
-                  >
-                    <X size={13} strokeWidth={2} />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-
-          <div className="space-settlement">
-            <div className="space-settlement-copy">
-              <strong>{queueTotal} 个 · {statBytes(queueBytes)}</strong>
-              {lastClean && queueTotal === 0 && (
-                <em className="space-settlement-last">
-                  上次清理 {lastClean.count} 个 · {statBytes(lastClean.bytes)}
-                </em>
-              )}
-              <span>原图进废纸篓，可从那里找回</span>
+              <button type="button" className="space-info" onClick={() => setQueueOpen(false)} aria-label="关闭清单">
+                <X size={13} strokeWidth={2} />
+              </button>
             </div>
-            <button
-              type="button"
-              className="space-danger"
-              disabled={queueTotal === 0 || busy}
-              onClick={(event) => {
-                setLastClean({ count: queueTotal, bytes: queueBytes });
-                onClean(
-                  (queue?.items ?? []).map((item) => item.asset_id),
-                  event.currentTarget.getBoundingClientRect(),
-                );
-              }}
-            >
-              <Trash2 size={13} strokeWidth={2} /> 清理
-            </button>
           </div>
-        </section>
-      </div>
+          <div className="space-queue-list" role="list">
+            {(queue?.items ?? []).map((entry) => (
+              <div key={entry.asset_id} className="space-queue-item">
+                <button
+                  type="button"
+                  className="space-queue-main"
+                  onClick={() => {
+                    setFocusId(entry.asset_id);
+                    onOpenDetail(entry, rows);
+                  }}
+                  title={entry.path}
+                >
+                  <span className="space-queue-name">{entry.path.split("/").pop()}</span>
+                  <span className="space-queue-meta">{formatBytes(entry.size ?? 0)}</span>
+                </button>
+                <button
+                  type="button"
+                  className="space-queue-remove"
+                  onClick={() => applyQueue([entry.asset_id], false)}
+                  disabled={busy}
+                  aria-label="移出待清理"
+                >
+                  <X size={13} strokeWidth={2} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </aside>
+      )}
     </div>
   );
 }
@@ -838,13 +785,6 @@ function currentStatLine(views: SpaceViews | null, view: SpaceViewKey, loading: 
     return `${stat.count.toLocaleString()} 张`;
   }
   return `${stat.count.toLocaleString()} 个 · ${statBytes(stat.bytes)}`;
-}
-
-function focusedId(rows: Asset[], queue: CleanupList | null, id: string | null): CleanupEntry | null {
-  if (!id) return null;
-  const asset = rows.find((item) => item.id === id);
-  if (asset) return entryFromAsset(asset);
-  return queue?.items.find((entry) => entry.asset_id === id) ?? null;
 }
 
 function SpaceCard({
@@ -936,145 +876,6 @@ function SpaceCard({
         <span className="space-card-size">{formatBytes(asset.size ?? 0)}</span>
       </span>
     </button>
-  );
-}
-
-function PreviewBody({
-  entry,
-  inQueue,
-  onOpenDetail,
-  onReveal,
-  onAdd,
-  onRemove,
-  busy,
-}: {
-  entry: CleanupEntry;
-  inQueue: boolean;
-  onOpenDetail: () => void;
-  onReveal: () => void;
-  onAdd: () => void;
-  onRemove: () => void;
-  busy: boolean;
-}) {
-  const [useOriginal, setUseOriginal] = useState(false);
-  const [ready, setReady] = useState(false);
-  const [failed, setFailed] = useState(false);
-  // 视频先走助手的 loading，再走 error；两者都不来时用超时兜底，面板不能一直空着。
-  const [mediaTimeout, setMediaTimeout] = useState(false);
-  const [externalError, setExternalError] = useState<string | null>(null);
-  const isVideo = entry.kind === "video";
-
-  useEffect(() => {
-    // 换文件时把播放器/图片状态全部重置，避免上一段视频的错误落在下一张上。
-    setUseOriginal(false);
-    setReady(false);
-    setFailed(false);
-    setMediaTimeout(false);
-    setExternalError(null);
-  }, [entry.asset_id]);
-
-  useEffect(() => {
-    if (ready || failed) return;
-    const timer = window.setTimeout(() => setMediaTimeout(true), isVideo ? 8000 : 4000);
-    return () => window.clearTimeout(timer);
-  }, [entry.asset_id, failed, isVideo, ready]);
-
-  const broken = failed || mediaTimeout;
-
-  const thumb = assetSrc(entry.thumb || "");
-  const original = assetSrc(entry.path);
-
-  const openExternal = () => {
-    setExternalError(null);
-    openExternalPath(entry.path).catch((reason: unknown) => {
-      setExternalError("无法交给系统播放器：" + String(reason));
-    });
-  };
-
-  return (
-    <div className="space-preview-body">
-      <div
-        className={clsx("space-preview-stage", isVideo && "video", broken && "failed")}
-        onDoubleClick={onOpenDetail}
-        title="双击打开大图 / 播放"
-      >
-        {isVideo ? (
-          !broken && (
-            <video
-              key={entry.asset_id}
-              className={clsx("space-video", ready && "ready")}
-              src={original}
-              poster={thumb || undefined}
-              controls
-              playsInline
-              preload="metadata"
-              onLoadedMetadata={() => setReady(true)}
-              onCanPlay={() => setReady(true)}
-              onError={() => setFailed(true)}
-            />
-          )
-        ) : (
-          !broken && (
-            <img
-              key={entry.asset_id + (useOriginal ? "-original" : "-thumb")}
-              src={useOriginal ? original : thumb || original}
-              alt={entry.path.split("/").pop() ?? ""}
-              draggable={false}
-              className={clsx(ready && "ready")}
-              onLoad={() => setReady(true)}
-              onError={() => {
-                // 缩略图缺失就退回原图；原图也解不了才显示兜底。
-                if (!useOriginal) {
-                  setUseOriginal(true);
-                  return;
-                }
-                setFailed(true);
-              }}
-            />
-          )
-        )}
-        {!ready && !broken && <span className="skeleton" aria-hidden="true" />}
-        {broken && (
-          <div className="space-preview-fallback">
-            <Film size={22} strokeWidth={1.4} />
-            <strong>这个格式系统解不了</strong>
-            <span>{entry.path.split("/").pop()}</span>
-            <button type="button" className="space-fallback-open" onClick={openExternal}>
-              <ExternalLink size={12} strokeWidth={1.8} /> 在外部播放器打开
-            </button>
-            {externalError && <em className="space-fallback-error">{externalError}</em>}
-          </div>
-        )}
-      </div>
-
-      <div className="space-preview-info">
-        <strong title={entry.path}>{entry.path.split("/").pop()}</strong>
-        <span>{kindText(entry)} · {statBytes(entry.size ?? 0)}</span>
-        <span>{timeLabel(entry.taken_at)}</span>
-        <span className="space-preview-path" title={entry.path}>{entry.path}</span>
-      </div>
-
-      <div className="space-preview-actions">
-        {inQueue ? (
-          <button type="button" className="ghost-button" onClick={onRemove} disabled={busy}>
-            <Undo2 size={12} strokeWidth={1.9} /> 移出待清理
-          </button>
-        ) : (
-          <button type="button" className="ghost-button" onClick={onAdd} disabled={busy}>
-            <Plus size={12} strokeWidth={2} /> 加入待清理
-          </button>
-        )}
-        <button type="button" className="ghost-button" onClick={onOpenDetail}>
-          <Maximize2 size={12} strokeWidth={1.8} /> 大图
-        </button>
-        <button type="button" className="ghost-button" onClick={onReveal}>
-          在 Finder 中显示
-        </button>
-        <button type="button" className="ghost-button" onClick={openExternal}>
-          <ExternalLink size={12} strokeWidth={1.8} /> 外部播放器
-        </button>
-      </div>
-    </div>
   );
 }
 
