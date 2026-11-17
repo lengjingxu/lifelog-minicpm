@@ -226,7 +226,7 @@ export function SettingsView({ onToast }: { onToast: (message: string) => void }
             </div>
           </div>
           <div className="path-note">{settings.xiaomi.token_dir}</div>
-          <p className="settings-hint">仅显示状态；P2 不执行真实小米云导入。</p>
+          <p className="settings-hint">导入入口在「导入与识别」弹窗里：先扫描预演，再开始下载。</p>
         </section>
 
         <section className="settings-card wide shortcuts-card">

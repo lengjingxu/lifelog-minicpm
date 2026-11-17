@@ -126,6 +126,8 @@ struct AssetRow {
     score: Option<f64>,
     /// 文件字节数
     size: Option<i64>,
+    /// 同 size + 同 kind 的图片组：组内文件数（≥2 才有值）。
+    dup_count: Option<i64>,
 }
 
 #[derive(Deserialize, Default)]
@@ -146,6 +148,8 @@ struct Filter {
     /// 排序：taken_desc（默认）/ taken_asc / size_desc / size_asc。
     /// 按大小排时不走时间游标，退回 offset 分页。
     sort: Option<String>,
+    /// 图库清理视角：large（默认，按大小）/ dup（同 size 同 kind）/ screenshot / video / photo。
+    view: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -469,6 +473,20 @@ fn filter_where(filter: &Filter, has_asset_tags: bool) -> (String, Vec<rusqlite:
     push(filter.day_from.as_deref(), " AND a.day >= ?{n}", &mut args, &mut sql);
     push(filter.day_to.as_deref(), " AND a.day <= ?{n}", &mut args, &mut sql);
 
+    // 图库清理视角：都在服务端筛，前端只拿当前这一页。
+    // 重复图用「同 size 且同 kind」粗筛，不依赖 dhash（真实库还没有去重表）。
+    match filter.view.as_deref() {
+        Some("dup") => sql.push_str(
+            " AND a.kind = 'image' AND a.size IS NOT NULL AND a.size IN (                 SELECT size FROM assets WHERE kind = 'image' AND size IS NOT NULL                  GROUP BY size HAVING count(*) > 1)",
+        ),
+        Some("screenshot") => sql.push_str(
+            " AND ((a.path LIKE '%Screenshot%' OR a.path LIKE '%screenshot%'                     OR a.path LIKE '%截屏%' OR a.path LIKE '%屏幕%')                    OR c.scene LIKE '%屏幕%' OR c.scene LIKE '%截屏%'                    OR c.tags LIKE '%屏幕截图%' OR c.tags LIKE '%截屏%')",
+        ),
+        Some("video") => sql.push_str(" AND a.kind = 'video'"),
+        Some("photo") => sql.push_str(" AND (a.kind IS NULL OR a.kind != 'video')"),
+        _ => {}
+    }
+
     (sql, args)
 }
 
@@ -578,14 +596,15 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     } else {
         ""
     };
+    let dup_col = "(SELECT count(*) FROM assets d WHERE d.kind = a.kind AND d.size = a.size)";
     let mut sql = format!(
         "SELECT a.id, a.path, a.day, a.taken_at, a.kind, \
-                c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text{}, a.size \
+                c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text{}, a.size, {} \
          FROM assets a \
          LEFT JOIN captions c ON c.rowid = ( \
              SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1){} \
          {}",
-        score_col, score_join, where_sql
+        score_col, dup_col, score_join, where_sql
     );
 
 
@@ -634,6 +653,7 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
                 // 否则 size 永远读成 None（空间页整列显示成「—」）。
                 score: if score_mode { row.get(13).ok() } else { None },
                 size: if score_mode { row.get(14).ok() } else { row.get(13).ok() },
+                dup_count: row.get(15).ok(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -891,6 +911,16 @@ async fn export_assets(db: State<'_, Db>, args: ExportArgs) -> Result<serde_json
     .map_err(|e| e.to_string())?
 }
 
+/// 系统默认播放器 / 预览打开：视频格式 WebView 解不了时用它兜底。
+#[tauri::command]
+fn open_external(path: String) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(path)
+        .status()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn reveal_in_finder(path: String) -> Result<(), String> {
     std::process::Command::new("open")
@@ -917,6 +947,32 @@ fn trash_with(path: &std::path::Path) -> Result<(), trash::Error> {
 
 // 清单读写走 Python 侧（lifelog/space.py）：命令行、测试和桌面端同一份实现，
 // 也能保证 config.DB_PATH 与桌面端实际打开的库是同一个文件。
+
+#[tauri::command]
+async fn space_views(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || run_python_cli(&home, &["space-views".to_string()]))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn space_groups(db: State<'_, Db>, view: String) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        run_python_cli(&home, &["space-groups".to_string(), "--view".to_string(), view])
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn space_versions(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || run_python_cli(&home, &["space-versions".to_string()]))
+        .await
+        .map_err(|err| err.to_string())?
+}
 
 #[tauri::command]
 async fn cleanup_list(db: State<'_, Db>) -> Result<serde_json::Value, String> {
@@ -1471,6 +1527,7 @@ pub fn run() {
             library_access,
             open_privacy_settings,
             reveal_in_finder,
+            open_external,
             facets,
             timeline_months,
             album_groups,
@@ -1490,6 +1547,9 @@ pub fn run() {
             cleanup_add,
             cleanup_remove,
             space_summary,
+            space_views,
+            space_groups,
+            space_versions,
             live::live_health,
             live::live_start,
             live::live_state,
@@ -1576,6 +1636,7 @@ mod filter_tests {
             offset: None,
             cursor: None,
             sort: None,
+            view: None,
         }
     }
 
@@ -1607,6 +1668,42 @@ mod filter_tests {
         f.limit = Some(1);
         f.offset = Some(1);
         assert_eq!(list(&conn, &f), 1);
+    }
+
+    #[test]
+    fn view_filters_match_cleanup_views() {
+        let conn = seed();
+        conn.execute_batch("ALTER TABLE assets ADD COLUMN size INTEGER").unwrap();
+        conn.execute_batch("UPDATE assets SET size = 100 WHERE id = 'a1'").unwrap();
+        conn.execute_batch("UPDATE assets SET size = 900 WHERE id = 'a2'").unwrap();
+        conn.execute_batch("UPDATE assets SET size = 900 WHERE id = 'a3'").unwrap();
+        conn.execute_batch("INSERT INTO assets (id,path,day,taken_at,kind) VALUES ('v1','/p/v.mp4','2024-01-04','2024-01-04T10:00:00','video')").unwrap();
+        conn.execute_batch("UPDATE assets SET size = 5000 WHERE id = 'v1'").unwrap();
+        conn.execute_batch("INSERT INTO assets (id,path,day,taken_at,kind) VALUES ('s1','/p/Screenshot_1.png','2024-01-05','2024-01-05T10:00:00','image')").unwrap();
+        conn.execute_batch("UPDATE assets SET size = 700 WHERE id = 's1'").unwrap();
+        conn.execute_batch("INSERT INTO captions VALUES (4,'s1','手机截图','屏幕截图','无','手机','查看','平静','[\"屏幕截图\"]',NULL,'2024-01-05')").unwrap();
+
+        let count = |view: &str| -> i64 {
+            let mut f = filter();
+            f.view = Some(view.into());
+            let (where_sql, args) = filter_where(&f, true);
+            let sql = format!(
+                "SELECT count(*) FROM assets a \
+                 LEFT JOIN captions c ON c.rowid = ( \
+                     SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1) \
+                 {}",
+                where_sql
+            );
+            conn.query_row(&sql, params_from_iter(args.iter()), |row| row.get(0)).unwrap()
+        };
+
+        assert_eq!(count("large"), 5);
+        // 同 size 同 kind 的图片组：a2/a3（900）
+        assert_eq!(count("dup"), 2);
+        assert_eq!(count("video"), 1);
+        assert_eq!(count("photo"), 4);
+        // 路径命中 Screenshot + caption 的 scene/tags 命中，两层都算
+        assert_eq!(count("screenshot"), 1);
     }
 
     #[test]

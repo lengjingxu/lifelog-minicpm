@@ -18,6 +18,10 @@ export type StartOptions = {
   count?: number;
   concurrency?: number;
   speed?: number;
+  /** 真实识别只跑这些 id（详情页单张重识别）。 */
+  ids?: string[];
+  /** 已有描述也重跑。 */
+  force?: boolean;
 };
 
 export type LiveView = {
@@ -49,9 +53,19 @@ export type LiveController = {
   resume: () => Promise<void>;
   reset: () => Promise<void>;
   clearError: () => void;
+  errorMessage: string | null;
 };
 
 type Offsets = { done: number; total: number };
+
+/** 从事件流里取最近一条失败原因（真实识别的报错会出现在这里）。 */
+export function liveEventMessage(events: LiveEvent[]): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.type === "error" && event.message) return event.message;
+  }
+  return null;
+}
 
 export function useLiveController(): LiveController {
   const [raw, setRaw] = useState<LiveState | null>(null);
@@ -277,6 +291,10 @@ export function useLiveController(): LiveController {
   }, [recordOffsets]);
 
   const failed = useMemo(() => events.filter((event) => event.type === "error").length, [events]);
+  const errorMessage = useMemo(
+    () => events.find((event) => event.type === "error" && event.message)?.message ?? null,
+    [events],
+  );
 
   const view = useMemo<LiveView>(() => {
     const status = raw?.status ?? "idle";
@@ -310,6 +328,7 @@ export function useLiveController(): LiveController {
     resume,
     reset,
     clearError: () => setError(null),
+    errorMessage,
   };
 }
 

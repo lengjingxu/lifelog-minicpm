@@ -36,6 +36,10 @@ pub struct LiveStartArgs {
     pub count: Option<i64>,
     pub concurrency: Option<i64>,
     pub speed: Option<f64>,
+    /// 真实识别（mode=live）只看这些 id；详情页「重新识别这一张」用它。
+    pub ids: Option<Vec<String>>,
+    /// 已有描述也重跑。
+    pub force: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -232,6 +236,8 @@ impl LiveSidecar {
             "count": args.count.unwrap_or(24),
             "concurrency": args.concurrency.unwrap_or(4),
             "speed": args.speed.unwrap_or(2.0),
+            "ids": args.ids.unwrap_or_default(),
+            "force": args.force.unwrap_or(false),
         });
         self.call(reqwest::Method::POST, "/api/live/start", Some(payload))
     }

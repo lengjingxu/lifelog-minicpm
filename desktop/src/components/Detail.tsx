@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
+  Trash2,
   Download,
   FolderOpen,
   Plus,
@@ -25,7 +26,24 @@ type Props = {
   /** 已经加载到的列表里还有没有下一张；没传时按 total 推算。 */
   canNext?: boolean;
   onTag: (tag: string) => void;
-  onAction: (label: string) => void;
+  /** 详情页操作的真实回调；没有占位分支。 */
+  actions: {
+    onRecognize: () => void;
+    onAddToAlbum: () => void;
+    onExport: () => void;
+    onReveal: () => void;
+    onOpenExternal: () => void;
+  };
+  /** 删除这一张：由 App 弹确认卡并真正调 delete_records。 */
+  onDelete: () => void;
+  /** 导出这一张时禁用导出按钮。 */
+  exporting?: boolean;
+  /** 删除失败的一句话，显示在详情里，不静默。 */
+  deleteError?: string | null;
+  /** 删除进行中：禁用按钮，避免重复确认。 */
+  deleting?: boolean;
+  /** 正在后台重新识别这一张。 */
+  recognition?: boolean;
   origin?: { x: number; y: number; w: number; h: number } | null;
   /** 上一张/下一张的方向：1 向右翻（内容从右侧进），-1 反之 */
   step?: number;
@@ -41,17 +59,39 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
   );
 }
 
-export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTag, onAction, origin, closing = false, canNext, step = 0 }: Props) {
+export function Detail({
+  asset, dup, index, total, onClose, onPrev, onNext, onTag, actions, onDelete,
+  deleteError = null, deleting = false, recognition = false, exporting = false,
+  origin, closing = false, canNext, step = 0,
+}: Props) {
   const [fullLoaded, setFullLoaded] = useState(false);
   const [fullFailed, setFullFailed] = useState(false);
+  const isVideo = asset.kind === "video";
+  const [externalError, setExternalError] = useState<string | null>(null);
   const fullRef = useRef<HTMLImageElement | null>(null);
   const dialogRef = useDialogFocus<HTMLDivElement>(onClose, { focusContainer: true });
+
+  // 删除键只是入口：先弹确认，绝不直接删。输入框里打字时不抢键。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Backspace" && event.key !== "Delete") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable=\"true\"]")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!deleting) onDelete();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [deleting, onDelete]);
 
   // 原图直接挂在可见的 img 上，但先不淡入：等 decode() 完成再显示。
   // 这样只有一次解码，且解码走异步路径，不会把 30-50ms 的活儿算进某一帧。
   useEffect(() => {
     setFullLoaded(false);
     setFullFailed(false);
+    setExternalError(null);
+    if (isVideo) return;
 
     const el = fullRef.current;
     if (!el) return;
@@ -76,7 +116,7 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
     return () => {
       cancelled = true;
     };
-  }, [asset.id, asset.original]);
+  }, [asset.id, asset.original, isVideo]);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
 
@@ -187,7 +227,33 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
       <div className="stage" onClick={(event) => event.target === event.currentTarget && onClose()}>
         <div ref={stageRef} className={clsx("stage-image", fullLoaded && "full-ready")}>
           <img className="stage-thumb" src={thumb} alt="" aria-hidden="true" />
-          {!fullFailed && (
+          {isVideo ? (
+            <div className="stage-video">
+              {!fullFailed ? (
+                <video
+                  key={asset.id}
+                  className="stage-video-player"
+                  src={original}
+                  poster={thumb}
+                  controls
+                  autoPlay
+                  playsInline
+                  onLoadedData={() => setFullLoaded(true)}
+                  onError={() => setFullFailed(true)}
+                />
+              ) : (
+                <div className="stage-video-fallback">
+                  <strong>这个格式系统解不了</strong>
+                  <span>{asset.path.split("/").pop()}</span>
+                  <button type="button" onClick={() => actions.onOpenExternal()}>
+                    在外部播放器打开
+                  </button>
+                  {externalError && <em>{externalError}</em>}
+                </div>
+              )}
+              {!fullLoaded && !fullFailed && <span className="image-loading">载入视频…</span>}
+            </div>
+          ) : !fullFailed && (
             <img
               key={asset.id}
               className={clsx("stage-full", fullLoaded && "loaded")}
@@ -199,7 +265,7 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
               onError={() => setFullFailed(true)}
             />
           )}
-          {!fullLoaded && !fullFailed && <span className="image-loading">载入原图…</span>}
+          {!isVideo && !fullLoaded && !fullFailed && <span className="image-loading">载入原图…</span>}
         </div>
 
         <button
@@ -231,8 +297,12 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
         </button>
 
         <div className="inspector-kicker">{kindLabel(asset)} · 详情</div>
+        {recognition && (
+          <span className="status-pill muted inspector-recognition">识别中…</span>
+        )}
         <h2>{timeLabel(asset.taken_at)}</h2>
         <p className="file-name" title={asset.path}>{asset.path.split("/").pop()}</p>
+        <p className="file-path" title={asset.path}>{asset.path}</p>
         {dup && dup.count > 1 && (
           <p className="dup-note">
             {dup.keeperId === asset.id ? `同组 ${dup.count} 张 · 保留这张` : `同组 ${dup.count} 张 · 已折叠`}
@@ -269,19 +339,36 @@ export function Detail({ asset, dup, index, total, onClose, onPrev, onNext, onTa
         )}
 
         <div className="inspector-actions">
-          <button type="button" onClick={() => onAction("重新识别")}>
-            <RotateCcw size={13} strokeWidth={1.8} />重新识别
+          <button type="button" onClick={actions.onRecognize} disabled={recognition}>
+            <RotateCcw size={13} strokeWidth={1.8} />{recognition ? "识别中…" : "重新识别"}
           </button>
-          <button type="button" onClick={() => onAction("加入相册")}>
+          <button type="button" onClick={actions.onAddToAlbum}>
             <Plus size={13} strokeWidth={1.8} />加入相册
           </button>
-          <button type="button" onClick={() => onAction("导出")}>
-            <Download size={13} strokeWidth={1.8} />导出
+          <button type="button" onClick={actions.onExport} disabled={exporting}>
+            <Download size={13} strokeWidth={1.8} />{exporting ? "导出中…" : "导出"}
           </button>
-          <button type="button" onClick={() => onAction("在 Finder 中显示")}>
+          <button type="button" onClick={actions.onReveal}>
             <FolderOpen size={13} strokeWidth={1.8} />Finder 中显示
           </button>
+          {isVideo && (
+            <button type="button" onClick={actions.onOpenExternal}>
+              <FolderOpen size={13} strokeWidth={1.8} />外部播放器
+            </button>
+          )}
+          <button
+            type="button"
+            className="inspector-delete"
+            onClick={onDelete}
+            disabled={deleting}
+            title="删除这一张（Backspace / Delete）"
+          >
+            <Trash2 size={13} strokeWidth={1.8} />{deleting ? "删除中…" : "删除"}
+          </button>
         </div>
+        {deleteError && (
+          <p className="inspector-delete-error" role="alert">{deleteError}</p>
+        )}
       </aside>
     </div>
   );

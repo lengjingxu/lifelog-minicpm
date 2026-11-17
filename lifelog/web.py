@@ -242,6 +242,8 @@ class Handler(BaseHTTPRequestHandler):
                 count=int(payload.get("count") or 40),
                 concurrency=int(payload.get("concurrency") or 4),
                 speed=float(payload.get("speed") or 2.0),
+                ids=payload.get("ids") or None,
+                force=bool(payload.get("force")),
             )
             self._send(json.dumps(result, ensure_ascii=False), "application/json",
                        200 if result.get("ok") else 409)

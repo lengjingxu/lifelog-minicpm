@@ -1,6 +1,8 @@
 """待清理清单：只记 id，不动文件、不删 assets 行。"""
 from __future__ import annotations
 
+import hashlib
+import os
 import time
 
 from . import config, db
@@ -121,5 +123,155 @@ def summary() -> dict:
         "big_videos": {"count": big[0] or 0, "bytes": big[1] or 0},
         "queue_count": queue[0],
         "queue_bytes": queue[1],
+    }
+
+
+
+# ---------- 视角统计与分组（口径与 query_assets 的 view 过滤一致） ----------
+
+DUP_SQL = """
+SELECT count(*) FROM (
+    SELECT size FROM assets
+    WHERE kind = 'image' AND size IS NOT NULL
+    GROUP BY size HAVING count(*) > 1
+)"""
+
+SCREENSHOT_WHERE = """
+((a.path LIKE '%Screenshot%' OR a.path LIKE '%screenshot%'
+  OR a.path LIKE '%截屏%' OR a.path LIKE '%屏幕%')
+ OR c.scene LIKE '%屏幕%' OR c.scene LIKE '%截屏%'
+ OR c.tags LIKE '%屏幕截图%' OR c.tags LIKE '%截屏%')"""
+
+
+DUP_WHERE = (
+    "a.kind = 'image' AND a.size IS NOT NULL AND a.size IN ("
+    "    SELECT size FROM assets WHERE kind = 'image' AND size IS NOT NULL"
+    "    GROUP BY size HAVING count(*) > 1)"
+)
+
+
+def _filter_sql(view: str) -> str:
+    if view == "dup":
+        return DUP_WHERE
+    if view == "screenshot":
+        return SCREENSHOT_WHERE
+    if view == "video":
+        return "a.kind = 'video'"
+    if view == "photo":
+        return "(a.kind IS NULL OR a.kind != 'video')"
+    return "1=1"
+
+
+def _count(con, view: str) -> tuple[int, int]:
+    if view == "large":
+        row = con.execute("SELECT count(*), COALESCE(sum(size),0) FROM assets").fetchone()
+        return row[0] or 0, row[1] or 0
+    row = con.execute(
+        "SELECT count(*), COALESCE(sum(a.size),0) FROM assets a "
+        "LEFT JOIN captions c ON c.rowid = ("
+        "    SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1) "
+        f"WHERE {_filter_sql(view)}"
+    ).fetchone()
+    return row[0] or 0, row[1] or 0
+
+
+def views() -> dict:
+    """五个视角的数量与占用。口径与 Rust 的 query_assets(view) 保持一致。"""
+    con = db.connect()
+    try:
+        result = {}
+        for view in ("large", "video", "photo", "screenshot", "dup"):
+            count, total = _count(con, view)
+            result[view] = {"count": count, "bytes": total}
+        result["dup"]["groups"] = con.execute(DUP_SQL).fetchone()[0] or 0
+    finally:
+        con.close()
+    result["dup"]["rule"] = "同 size 同 kind"
+    result["screenshot"]["rule"] = "路径 + scene/tags"
+    return result
+
+
+def _dup_groups(con) -> list[dict]:
+    """重复图按 size 分组；组内把 size 最大的一张当 keeper（其实同组同 size，按时间稳定挑）。"""
+    rows = con.execute(
+        "SELECT size, count(*) AS n FROM assets "
+        "WHERE kind = 'image' AND size IS NOT NULL "
+        "GROUP BY size HAVING n > 1 ORDER BY n DESC, size DESC"
+    ).fetchall()
+    groups = []
+    for size, count in rows:
+        members = con.execute(
+            "SELECT id FROM assets WHERE kind = 'image' AND size = ? ORDER BY taken_at DESC, id"
+            " LIMIT 50",
+            (size,),
+        ).fetchall()
+        ids = [r[0] for r in members]
+        groups.append({
+            "key": f"dup:{size}",
+            "label": "同 %.1f MB" % (size / 1024 / 1024),
+            "count": count,
+            "ids": ids,
+            "keep": ids[0] if ids else None,
+        })
+    return groups
+
+
+def _screenshot_groups(con) -> list[dict]:
+    # 真实库里截图分散在 /Users/.../photos/YYYYMM/ 和 /Volumes/... 下：
+    # 先取 /photos/ 后面那一层，没有就退回父目录名，避免整盘都归成 "Volumes"。
+    rows = con.execute(
+        "SELECT a.path, a.size FROM assets a "
+        "LEFT JOIN captions c ON c.rowid = ("
+        "    SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1) "
+        f"WHERE {SCREENSHOT_WHERE} ORDER BY a.size DESC"
+    ).fetchall()
+    buckets: dict[str, list] = {}
+    for path, size in rows:
+        relative = path or ""
+        marker = relative.find("/photos/")
+        if marker >= 0:
+            relative = relative[marker + len("/photos/"):]
+        parts = [part for part in relative.split("/") if part]
+        if marker >= 0 and len(parts) > 1:
+            label = parts[0]
+        else:
+            label = os.path.basename(os.path.dirname(relative)) or "其他"
+        buckets.setdefault(label, []).append((path, size))
+    return [
+        {"key": f"screenshot:{label}", "label": label, "count": len(items),
+         "bytes": sum(size or 0 for _p, size in items)}
+        for label, items in sorted(buckets.items(), key=lambda kv: -len(kv[1]))
+    ]
+
+
+def groups(view: str) -> dict:
+    """视角分组：重复图按 size（组内 keeper 不勾），截屏按来源目录。"""
+    con = db.connect()
+    try:
+        if view == "dup":
+            items = _dup_groups(con)
+        elif view == "screenshot":
+            items = _screenshot_groups(con)
+        else:
+            items = []
+    finally:
+        con.close()
+    return {"view": view, "groups": items}
+
+
+def versions() -> dict:
+    """库内容指纹：前端的内存缓存（重复组、待清理缩略图）用它判断是否需要重拉。"""
+    con = db.connect()
+    try:
+        row = con.execute(
+            "SELECT count(*), COALESCE(sum(size),0), COALESCE(max(created_at), '') FROM assets"
+        ).fetchone()
+    finally:
+        con.close()
+    raw = "|".join(str(part) for part in row)
+    return {
+        "assets": row[0] or 0,
+        "bytes": row[1] or 0,
+        "version": hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16],
     }
 

@@ -29,7 +29,8 @@
         "enable": true,
         "scope": [
           "$HOME/Desktop/codepro/minicpm/lifelog-minicpm/data/**",
-          "$HOME/**"
+          "$HOME/**",
+          "/Volumes/**"
         ]
       }
     }

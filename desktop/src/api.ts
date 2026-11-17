@@ -20,6 +20,8 @@ export type Asset = {
   score?: number | null;
   /** 文件字节数 */
   size?: number | null;
+  /** 同 size + 同 kind 的图片组里有多少个文件（≥2 才有值）。 */
+  dup_count?: number | null;
 };
 
 export type Stats = {
@@ -64,6 +66,8 @@ export type Filter = {
   cursor?: string;
   /** 排序；按大小排时服务端不用时间游标，走 offset。 */
   sort?: SortKey;
+  /** 图库清理的视角：large（默认）/ dup / screenshot / video / photo。 */
+  view?: SpaceViewKey;
 };
 
 export type SortKey = "taken_desc" | "taken_asc" | "size_desc" | "size_asc";
@@ -229,6 +233,11 @@ async function fixtureQuery(filter: Filter): Promise<Asset[]> {
   const tag = filter.tag?.trim() ?? "";
   const scene = filter.scene?.trim() ?? "";
   const kind = filter.kind?.trim() ?? "";
+  // 与 Rust query_assets 的 view 过滤保持一致，浏览器 fixture 才能验证五个视角。
+  const dupSizes = new Map<number, number>();
+  for (const asset of assets) {
+    if (asset.kind === "image" && asset.size) dupSizes.set(asset.size, (dupSizes.get(asset.size) ?? 0) + 1);
+  }
   const filtered = assets.filter((asset) => {
     if (query && !matchesQuery(asset, query)) return false;
     if (tag && !asset.tags.includes(tag)) return false;
@@ -236,6 +245,10 @@ async function fixtureQuery(filter: Filter): Promise<Asset[]> {
     if (filter.person && !(asset.people ?? "").includes(filter.person)) return false;
     if (filter.place && !(asset.place ?? "").includes(filter.place)) return false;
     if (kind && asset.kind !== kind) return false;
+    if (filter.view === "dup" && (asset.kind !== "image" || !asset.size || (dupSizes.get(asset.size) ?? 0) < 2)) return false;
+    if (filter.view === "screenshot" && !isScreenshot(asset)) return false;
+    if (filter.view === "video" && asset.kind !== "video") return false;
+    if (filter.view === "photo" && asset.kind === "video") return false;
     if (filter.day_from && (!asset.day || asset.day < filter.day_from)) return false;
     if (filter.day_to && (!asset.day || asset.day > filter.day_to)) return false;
     return true;
@@ -502,12 +515,16 @@ async function mockStart(args: {
   count?: number;
   concurrency?: number;
   speed?: number;
+  ids?: string[];
 }): Promise<LiveStartResult> {
   if (mockSession?.status === "running") {
     return { ok: false, error: "会话进行中，请先暂停或等待完成" };
   }
   awaitFixtureAssets = await loadFixture();
-  const pool = awaitFixtureAssets.assets.filter((asset) => asset.kind === "image");
+  const wanted = new Set(args.ids ?? []);
+  const pool = awaitFixtureAssets.assets.filter(
+    (asset) => asset.kind === "image" && (wanted.size === 0 || wanted.has(asset.id)),
+  );
   const requested = Math.max(1, Math.min(args.count ?? 24, pool.length));
   const shuffled = [...pool].sort(() => Math.random() - 0.5).slice(0, requested);
   const photos = shuffled.map((asset) => ({ id: asset.id, thumb: `thumbs/${asset.id}.jpg` }));
@@ -551,6 +568,8 @@ export async function liveStart(args: {
   count?: number;
   concurrency?: number;
   speed?: number;
+  ids?: string[];
+  force?: boolean;
 }): Promise<LiveStartResult> {
   if (!isTauri) return mockStart(args);
   return invokeLive<LiveStartResult>("live_start", { args });
@@ -638,6 +657,9 @@ export const exportAssets = (payload: { ids?: string[]; filter?: Filter; target:
 
 export const revealInFinder = (path: string) => invoke<void>("reveal_in_finder", { path });
 
+/** 用系统默认播放器 / 预览打开：WebView 解不了的视频格式走这里。 */
+export const openExternal = (path: string) => invoke<void>("open_external", { path });
+
 /** 清理只把文件移进废纸篓，不给假的撤销；这里只是把废纸篓打开给人自己找。 */
 export const openTrash = () =>
   isTauri ? invoke<void>("reveal_in_finder", { path: "~/.Trash" }).catch(() => undefined) : Promise.resolve();
@@ -670,6 +692,31 @@ export const openPrivacySettings = () => invoke<void>("open_privacy_settings");
 
 export const deleteRecords = (ids: string[], withFiles = false) =>
   invoke<DeleteResult>("delete_records", { ids, withFiles });
+
+export type SpaceViewKey = "large" | "dup" | "screenshot" | "video" | "photo";
+
+export type SpaceViewStat = {
+  count: number;
+  bytes: number;
+  /** 仅重复图视角：组数 */
+  groups?: number;
+  /** 口径说明 */
+  rule?: string;
+};
+
+export type SpaceViews = Record<SpaceViewKey, SpaceViewStat>;
+
+export type SpaceGroup = {
+  key: string;
+  label: string;
+  count: number;
+  bytes?: number;
+  ids?: string[];
+  /** 重复图组内建议保留的那一张（不默认勾选） */
+  keep?: string | null;
+};
+
+export type SpaceGroups = { view: string; groups: SpaceGroup[] };
 
 export type CleanupEntry = {
   asset_id: string;
@@ -750,6 +797,101 @@ export async function cleanupRemove(ids: string[]): Promise<CleanupChange> {
     return { changed: ids.length, ...fixtureQueueList() };
   }
   return invoke<CleanupChange>("cleanup_remove", { ids });
+}
+
+export async function spaceViews(): Promise<SpaceViews> {
+  if (!isTauri) {
+    const { assets } = await loadFixture();
+    const stat = (list: Asset[]) => ({
+      count: list.length,
+      bytes: list.reduce((sum, asset) => sum + (asset.size ?? 0), 0),
+    });
+    const sizes = new Map<number, number>();
+    for (const asset of assets) {
+      if (asset.kind === "image" && asset.size) sizes.set(asset.size, (sizes.get(asset.size) ?? 0) + 1);
+    }
+    const dupSizes = [...sizes.values()].filter((n) => n > 1);
+    const dupCount = dupSizes.reduce((sum, n) => sum + n, 0);
+    const dupBytes = assets
+      .filter((asset) => asset.kind === "image" && asset.size && (sizes.get(asset.size) ?? 0) > 1)
+      .reduce((sum, asset) => sum + (asset.size ?? 0), 0);
+    const screenshot = assets.filter((asset) => isScreenshot(asset));
+    return {
+      large: stat(assets),
+      video: stat(assets.filter((asset) => asset.kind === "video")),
+      photo: stat(assets.filter((asset) => asset.kind !== "video")),
+      screenshot: { ...stat(screenshot), rule: "路径 + scene/tags" },
+      dup: { count: dupCount, groups: dupSizes.length, bytes: dupBytes, rule: "同 size 同 kind" },
+    };
+  }
+  return invoke<SpaceViews>("space_views");
+}
+
+function isScreenshot(asset: Asset): boolean {
+  const path = asset.path ?? "";
+  if (/Screenshot|screenshot|截屏|屏幕/.test(path)) return true;
+  const scene = asset.scene ?? "";
+  const tags = asset.tags.join(" ");
+  return /屏幕|截屏/.test(scene) || /屏幕截图|截屏/.test(tags);
+}
+
+export async function spaceGroups(view: SpaceViewKey): Promise<SpaceGroups> {
+  if (!isTauri) {
+    const { assets } = await loadFixture();
+    if (view === "dup") {
+      const bySize = new Map<number, Asset[]>();
+      for (const asset of assets) {
+        if (asset.kind !== "image" || !asset.size) continue;
+        bySize.set(asset.size, [...(bySize.get(asset.size) ?? []), asset]);
+      }
+      const groups: SpaceGroup[] = [...bySize.entries()]
+        .filter(([, list]) => list.length > 1)
+        .map(([size, list]) => ({
+          key: `dup:${size}`,
+          label: `同 ${(size / 1024 / 1024).toFixed(1)} MB`,
+          count: list.length,
+          ids: list.map((asset) => asset.id),
+          keep: list[0]?.id ?? null,
+        }));
+      return { view, groups };
+    }
+    if (view === "screenshot") {
+      const buckets = new Map<string, Asset[]>();
+      for (const asset of assets.filter(isScreenshot)) {
+        const marker = (asset.path ?? "").indexOf("/photos/");
+        const relative = marker >= 0 ? asset.path.slice(marker + 8) : asset.path;
+        const parts = relative.split("/").filter(Boolean);
+        const label = parts.length > 1 ? parts[0] : relative.split("/").slice(-2, -1)[0] ?? "其他";
+        buckets.set(label, [...(buckets.get(label) ?? []), asset]);
+      }
+      return {
+        view,
+        groups: [...buckets.entries()].map(([label, list]) => ({
+          key: `screenshot:${label}`,
+          label,
+          count: list.length,
+          bytes: list.reduce((sum, asset) => sum + (asset.size ?? 0), 0),
+          ids: list.map((asset) => asset.id),
+        })),
+      };
+    }
+    return { view, groups: [] };
+  }
+  return invoke<SpaceGroups>("space_groups", { view });
+}
+
+export type SpaceVersions = { assets: number; bytes: number; version: string };
+
+export async function spaceVersions(): Promise<SpaceVersions> {
+  if (!isTauri) {
+    const { assets } = await loadFixture();
+    return {
+      assets: assets.length,
+      bytes: assets.reduce((sum, asset) => sum + (asset.size ?? 0), 0),
+      version: "fixture",
+    };
+  }
+  return invoke<SpaceVersions>("space_versions");
 }
 
 export async function spaceSummary(): Promise<SpaceSummary> {

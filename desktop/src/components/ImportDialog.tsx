@@ -16,6 +16,19 @@ export type ImportProgress = {
   code?: string;
 };
 
+/** 进度文案：优先真实 message/done-total；还在只拿到 stage 时给出可读的阶段名。 */
+export function importProgressText(progress: ImportProgress): string {
+  if (progress.message) return progress.message;
+  const stage: Record<string, string> = {
+    thumbs: "正在生成缩略图…",
+    "ingest-done": "照片已入库，正在补缩略图…",
+    failed: "导入失败",
+  };
+  if (progress.stage && stage[progress.stage]) return stage[progress.stage];
+  if (progress.total) return `已完成 ${progress.done ?? 0} / ${progress.total} 张`;
+  return "正在下载…";
+}
+
 type Props = {
   origin?: GrowRect | null;
   plan: ImportPlan | null;
@@ -71,7 +84,7 @@ export function ImportDialog({
             </>
           ) : progress ? (
             <>
-              <p className="dialog-text">{progress.message ?? "正在下载…"}</p>
+              <p className="dialog-text">{importProgressText(progress)}</p>
               {progress.total ? (
                 <p className="dialog-text dim">
                   已完成 {progress.done ?? 0} / {progress.total} 张

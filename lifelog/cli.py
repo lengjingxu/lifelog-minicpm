@@ -25,7 +25,9 @@ def cmd_ingest(args) -> int:
 def cmd_caption(args) -> int:
     stats = caption.run_caption(args.model, limit=args.limit, since_day=args.since,
                                 until_day=args.until, sample=args.sample,
-                                concurrency=args.concurrency)
+                                concurrency=args.concurrency,
+                                ids=_ids(args.ids) if args.ids else None,
+                                force=args.force)
     print(json.dumps(stats, ensure_ascii=False))
     return 0
 
@@ -337,6 +339,24 @@ def cmd_space_summary(args) -> int:
     return 0
 
 
+def cmd_space_views(args) -> int:
+    from . import space
+    print(json.dumps(space.views(), ensure_ascii=False))
+    return 0
+
+
+def cmd_space_groups(args) -> int:
+    from . import space
+    print(json.dumps(space.groups(args.view), ensure_ascii=False))
+    return 0
+
+
+def cmd_space_versions(args) -> int:
+    from . import space
+    print(json.dumps(space.versions(), ensure_ascii=False))
+    return 0
+
+
 def cmd_album_list(args) -> int:
     from . import ops
     print(json.dumps(ops.list_albums(), ensure_ascii=False))
@@ -387,6 +407,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--concurrency", type=int, default=1, help="并发请求数（llama.cpp 多 slot）")
     p.add_argument("--since")
     p.add_argument("--until")
+    p.add_argument("--ids", help="逗号分隔的 asset id；只重跑这些")
+    p.add_argument("--force", action="store_true", help="已有描述也重跑（详情页单张重识别）")
     p.set_defaults(func=cmd_caption)
 
     p = sub.add_parser("ocr", help="用 MiniCPM-OCR 抽图内文字")
@@ -517,6 +539,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("space-summary", help="空间页统计：照片/视频/大视频的体积")
     p.set_defaults(func=cmd_space_summary)
+
+    p = sub.add_parser("space-views", help="图库清理五个视角的数量与占用")
+    p.set_defaults(func=cmd_space_views)
+
+    p = sub.add_parser("space-groups", help="图库清理分组：dup（同 size）/ screenshot（来源目录）")
+    p.add_argument("--view", required=True)
+    p.set_defaults(func=cmd_space_groups)
+
+    p = sub.add_parser("space-versions", help="库内容指纹，用来判断前端缓存是否过期")
+    p.set_defaults(func=cmd_space_versions)
 
     p = sub.add_parser("album-list", help="列出相册")
     p.set_defaults(func=cmd_album_list)
