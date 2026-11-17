@@ -702,6 +702,8 @@ export type SpaceViewStat = {
   groups?: number;
   /** 仅重复图视角：keeper 以外的可回收字节 */
   reclaim?: number;
+  /** 仅重复图视角：keeper 以外的张数（「全部加入」按钮用） */
+  reclaim_count?: number;
   /** 指纹是否已算完（dup_groups/dup_members 非空） */
   ready?: boolean;
   /** 口径说明 */
@@ -726,7 +728,12 @@ export type SpaceGroup = {
   keep?: string | null;
 };
 
-export type SpaceGroups = { view: string; groups: SpaceGroup[] };
+export type SpaceGroups = {
+  view: string;
+  groups: SpaceGroup[];
+  /** dup 视角：总组数（groups 默认只回最大的 30 组）。 */
+  total?: number | null;
+};
 
 export type CleanupEntry = {
   asset_id: string;
@@ -833,7 +840,7 @@ export async function spaceViews(): Promise<SpaceViews> {
       video: stat(assets.filter((asset) => asset.kind === "video")),
       photo: stat(assets.filter((asset) => asset.kind !== "video")),
       screenshot: { ...stat(screenshot), rule: "路径 + scene/tags" },
-      dup: { count: dupCount, groups: dupSizes.length, bytes: dupBytes, reclaim, ready: true, rule: "dhash 指纹（fixture 近似）" },
+      dup: { count: dupCount, groups: dupSizes.length, bytes: dupBytes, reclaim: dupAssets.filter((asset) => (sizes.get(asset.size ?? 0) ?? 0) > 1).slice(0, reclaim).reduce((sum, asset) => sum + (asset.size ?? 0), 0), reclaim_count: reclaim, ready: true, rule: "dhash 指纹（fixture 近似）" },
     };
   }
   return invoke<SpaceViews>("space_views");
@@ -847,13 +854,36 @@ function isScreenshot(asset: Asset): boolean {
   return /屏幕|截屏/.test(scene) || /屏幕截图|截屏/.test(tags);
 }
 
+/** 把所有重复组的非 keeper 一次性加入待清理。 */
+export async function cleanupAddAllDup(): Promise<CleanupChange> {
+  if (!isTauri) {
+    const { assets } = await loadFixture();
+    const bySize = new Map<number, Asset[]>();
+    for (const asset of assets) {
+      if (asset.kind !== "image" || !asset.size) continue;
+      bySize.set(asset.size, [...(bySize.get(asset.size) ?? []), asset]);
+    }
+    const ids: string[] = [];
+    for (const list of bySize.values()) {
+      if (list.length < 2) continue;
+      const sorted = [...list].sort((a, b) => (a.taken_at ?? "").localeCompare(b.taken_at ?? ""));
+      ids.push(...sorted.slice(1).map((asset) => asset.id));
+    }
+    return cleanupAdd(ids);
+  }
+  return invoke<CleanupChange>("cleanup_add_all_dup");
+}
+
 /** 触发一次 dedup --build（真实算 dhash 并重建分组）。 */
 export async function dedupBuild(): Promise<unknown> {
   if (!isTauri) throw new Error("浏览器预览里不能计算指纹，请在桌面端使用");
   return invoke<unknown>("dedup_build");
 }
 
-export async function spaceGroups(view: SpaceViewKey): Promise<SpaceGroups> {
+export async function spaceGroups(
+  view: SpaceViewKey,
+  options: { limit?: number; offset?: number; group?: string } = {},
+): Promise<SpaceGroups> {
   if (!isTauri) {
     const { assets } = await loadFixture();
     if (view === "dup") {
@@ -880,7 +910,7 @@ export async function spaceGroups(view: SpaceViewKey): Promise<SpaceGroups> {
             keep: keeper.id,
           };
         });
-      return { view, groups };
+      return { view, groups, total: groups.length };
     }
     if (view === "screenshot") {
       const buckets = new Map<string, Asset[]>();
@@ -904,7 +934,12 @@ export async function spaceGroups(view: SpaceViewKey): Promise<SpaceGroups> {
     }
     return { view, groups: [] };
   }
-  return invoke<SpaceGroups>("space_groups", { view });
+  return invoke<SpaceGroups>("space_groups", {
+    view,
+    limit: options.limit,
+    offset: options.offset,
+    group: options.group,
+  });
 }
 
 export type SpaceVersions = { assets: number; bytes: number; version: string };

@@ -612,7 +612,7 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     } else {
         ""
     };
-    let dup_col = "(SELECT count(*) FROM assets d WHERE d.kind = a.kind AND d.size = a.size)";
+    let dup_col = if has_dup { "(SELECT count(*) FROM dup_members dm WHERE dm.group_id = (SELECT dm2.group_id FROM dup_members dm2 WHERE dm2.asset_id = a.id LIMIT 1))".to_string() } else { "0".to_string() };
     let mut sql = format!(
         "SELECT a.id, a.path, a.day, a.taken_at, a.kind, \
                 c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text{}, a.size, {} \
@@ -977,10 +977,29 @@ async fn space_views(db: State<'_, Db>) -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn space_groups(db: State<'_, Db>, view: String) -> Result<serde_json::Value, String> {
+async fn space_groups(
+    db: State<'_, Db>,
+    view: String,
+    limit: Option<i64>,
+    offset: Option<i64>,
+    group: Option<String>,
+) -> Result<serde_json::Value, String> {
     let home = db.data_dir.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        run_python_cli(&home, &["space-groups".to_string(), "--view".to_string(), view])
+        let mut args = vec!["space-groups".to_string(), "--view".to_string(), view];
+        if let Some(limit) = limit {
+            args.push("--limit".to_string());
+            args.push(limit.to_string());
+        }
+        if let Some(offset) = offset.filter(|value| *value > 0) {
+            args.push("--offset".to_string());
+            args.push(offset.to_string());
+        }
+        if let Some(group) = group.filter(|value| !value.trim().is_empty()) {
+            args.push("--group".to_string());
+            args.push(group);
+        }
+        run_python_cli(&home, &args)
     })
     .await
     .map_err(|err| err.to_string())?
@@ -1333,6 +1352,17 @@ fn python_db_path(home: &Path) -> PathBuf {
         .unwrap_or_else(|_| home.join("lifelog.sqlite"))
 }
 
+/// 重复图视角：把所有组的非 keeper 一次性加入待清理（服务端 INSERT…SELECT）。
+#[tauri::command]
+async fn cleanup_add_all_dup(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        run_python_cli(&home, &["cleanup-add-all-dup".to_string()])
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
 /// 从界面「立即计算指纹」触发：跑一次 lifelog dedup --build。
 #[tauri::command]
 async fn dedup_build(db: State<'_, Db>) -> Result<serde_json::Value, String> {
@@ -1573,6 +1603,7 @@ pub fn run() {
             open_external,
             python_report,
             dedup_build,
+            cleanup_add_all_dup,
             facets,
             timeline_months,
             album_groups,

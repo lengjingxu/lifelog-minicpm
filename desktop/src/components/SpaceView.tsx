@@ -20,6 +20,7 @@ import {
 import {
   assetSrc,
   cleanupAdd,
+  cleanupAddAllDup,
   cleanupList,
   cleanupRemove,
   dedupBuild,
@@ -128,6 +129,11 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   const [pathFilter, setPathFilter] = useState("");
   const [lastClean, setLastClean] = useState<{ count: number; bytes: number } | null>(null);
   const [computing, setComputing] = useState(false);
+  const [showAllGroups, setShowAllGroups] = useState(false);
+  const [groupsTotal, setGroupsTotal] = useState(0);
+  const [allBusy, setAllBusy] = useState(false);
+  const [confirmAll, setConfirmAll] = useState(false);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -141,6 +147,14 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   const queueIds = useMemo(() => new Set((queue?.items ?? []).map((item) => item.asset_id)), [queue]);
   const rowById = useMemo(() => new Map(rows.map((asset) => [asset.id, asset])), [rows]);
   const columns = Math.max(2, Math.min(6, Math.floor((gridWidth + GAP) / (CARD_MIN_WIDTH + GAP))));
+
+  // 重复图组表很大（真实库 5,251 组）：默认只画前 30 组 chip，点「显示全部」后才整列虚拟滚动。
+  // 每组的 ids 不在 chip payload 里，点某组时才按需拉。
+  const [groupIds, setGroupIds] = useState<Record<string, string[]>>({});
+  const visibleGroups = useMemo(() => {
+    if (view !== "dup") return groups;
+    return showAllGroups ? groups : groups.slice(0, 30);
+  }, [groups, showAllGroups, view]);
 
   // 分组表可能很大（真实库 401 组），用 id → 组 的索引，渲染时不做 O(n) 查找。
   const groupIndex = useMemo(() => {
@@ -206,12 +220,16 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   useEffect(() => {
     if (view !== "dup" && view !== "screenshot") {
       setGroups([]);
+      setGroupsTotal(0);
       return;
     }
     let alive = true;
-    spaceGroups(view)
+    // dup 默认只要最大的 30 组（轻量字段）；screenshot 组数很小，照旧全量。
+    spaceGroups(view, view === "dup" ? { limit: 30 } : {})
       .then((result) => {
-        if (alive) setGroups(result.groups);
+        if (!alive) return;
+        setGroups(result.groups);
+        setGroupsTotal(result.total ?? result.groups.length);
       })
       .catch(() => {
         if (alive) setGroups([]);
@@ -220,6 +238,26 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
       alive = false;
     };
   }, [view, version]);
+
+  // 点「显示全部」：按 300 组分页把剩余组补进来（每次请求只带轻量字段）。
+  const loadAllGroups = useCallback(async () => {
+    if (view !== "dup") return;
+    setShowAllGroups(true);
+    if (groups.length >= groupsTotal) return;
+    try {
+      let offset = groups.length;
+      let collected = groups;
+      while (offset < groupsTotal) {
+        const page = await spaceGroups("dup", { limit: 300, offset });
+        if (!page.groups.length) break;
+        collected = [...collected, ...page.groups];
+        offset += page.groups.length;
+        setGroups(collected);
+      }
+    } catch (reason) {
+      onToast("加载全部重复组失败：" + String(reason));
+    }
+  }, [groups, groupsTotal, onToast, view]);
 
   const fetchPage = useCallback(async (offset: number) => {
     if (offset === 0) setLoading(true);
@@ -458,6 +496,53 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
     [groupIndex, queueIds, rows, toggleAssets, toggleGroup, view],
   );
 
+  // 按需拉某一组的 ids（chip payload 里不带，避免 1.2MB JSON）。
+  const fetchGroupIds = useCallback(
+    async (group: SpaceGroup) => {
+      const known = groupIds[group.key];
+      if (known) return known;
+      const result = await spaceGroups("dup", { group: group.key });
+      const ids = result.groups[0]?.ids ?? [];
+      setGroupIds((previous) => ({ ...previous, [group.key]: ids }));
+      return ids;
+    },
+    [groupIds],
+  );
+
+  const toggleDupGroup = useCallback(
+    async (group: SpaceGroup) => {
+      setBusyKey(group.key);
+      try {
+        const ids = (await fetchGroupIds(group)).filter((id) => id !== group.keep);
+        if (!ids.length) return;
+        const add = ids.some((id) => !queueIds.has(id));
+        applyQueue(add ? ids.filter((id) => !queueIds.has(id)) : ids, add);
+      } catch (reason) {
+        onToast("读取这一组失败：" + String(reason));
+      } finally {
+        setBusyKey(null);
+      }
+    },
+    [applyQueue, fetchGroupIds, onToast, queueIds],
+  );
+
+  // 「全部加入待清理」：服务端一条 INSERT…SELECT 完成，不发 5,251 个请求。
+  const addAllDup = useCallback(async () => {
+    if (allBusy) return;
+    setAllBusy(true);
+    setConfirmAll(false);
+    try {
+      const change = await cleanupAddAllDup();
+      await refreshQueue();
+      void refreshStats();
+      onToast("已加入待清理 " + change.changed + " 个重复项（keeper 未加入）");
+    } catch (reason) {
+      onToast("全部加入失败：" + String(reason));
+    } finally {
+      setAllBusy(false);
+    }
+  }, [allBusy, onToast, refreshQueue, refreshStats]);
+
   // 重复图视角：每组的非 keeper 成员默认勾上待清理。
   // 真实库有几千组，不能一次全塞进清单：只处理「已经载入到网格的组」，每组只默认一次，
   // 滚动加载到新组时再补勾；用户之后手动取消过的组不会被重新勾上。
@@ -579,37 +664,94 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
             </div>
           </div>
 
-          {(view === "screenshot" || view === "dup") && groups.length > 0 && (
-            <div className="space-group-chips">
-              {groups.map((group) => {
-                const ids = group.ids ?? [];
-                const candidates = ids.filter((id) => id !== group.keep);
-                const inQueue = candidates.filter((id) => queueIds.has(id)).length;
-                return (
-                  <button
-                    key={group.key}
-                    type="button"
-                    className={clsx("space-group-chip", inQueue === candidates.length && candidates.length > 0 && "on")}
-                    title={group.reason ? `reason: ${group.reason}` : addLabel(inQueue, ids.length)}
-                    onClick={() => {
-                      const add = candidates.some((id) => !queueIds.has(id));
-                      // keeper 永不进待清理：新建组/全选本组都把它排除。
-                      applyQueue(add ? candidates.filter((id) => !queueIds.has(id)) : candidates, add);
-                    }}
-                  >
-                    <strong>{group.label}</strong>
-                    <span>{ids.length} 张（保留 1）· 可回收 {statBytes(group.reclaim_bytes ?? 0)}</span>
-                    <em>{inQueue === candidates.length && candidates.length > 0 ? "全部已勾选" : "全选本组待清理"}</em>
-                  </button>
-                );
-              })}
+          {(view === "screenshot" || view === "dup") && visibleGroups.length > 0 && (
+            <div className={view === "dup" ? "space-group-chips dup" : "space-group-chips"}>
+              {view === "dup" ? (
+                <DupChipList
+                  groups={visibleGroups}
+                  queueIds={queueIds}
+                  knownIds={groupIds}
+                  busyKey={busyKey}
+                  onToggle={(group) => void toggleDupGroup(group)}
+                />
+              ) : (
+                visibleGroups.map((group) => {
+                  const ids = group.ids ?? [];
+                  const candidates = ids.filter((id) => id !== group.keep);
+                  const inQueue = candidates.filter((id) => queueIds.has(id)).length;
+                  return (
+                    <button
+                      key={group.key}
+                      type="button"
+                      className={clsx(
+                        "space-group-chip",
+                        inQueue === candidates.length && candidates.length > 0 && "on",
+                      )}
+                      onClick={() => {
+                        const add = candidates.some((id) => !queueIds.has(id));
+                        applyQueue(add ? candidates.filter((id) => !queueIds.has(id)) : candidates, add);
+                      }}
+                    >
+                      <strong>{group.label}</strong>
+                      <span>
+                        {ids.length} 张（保留 1）· 可回收 {statBytes(group.reclaim_bytes ?? 0)}
+                      </span>
+                      <em>{inQueue === candidates.length && candidates.length > 0 ? "全部已勾选" : "全选本组待清理"}</em>
+                    </button>
+                  );
+                })
+              )}
             </div>
+          )}
+
+          {view === "dup" && groupsTotal > groups.length && (
+            <button
+              type="button"
+              className="space-show-all-groups"
+              onClick={() => void loadAllGroups()}
+            >
+              显示全部 {groupsTotal.toLocaleString()} 组 →
+            </button>
           )}
 
           {view === "dup" && groups.length > 0 && (
             <p className="space-view-note">
               {groups.length} 组真实指纹 · 组内保留 1 张（标「保留」），其余默认勾上待清理；点组内任意一张切换整组，keeper 永不进待清理。
             </p>
+          )}
+
+          {view === "dup" && groupsTotal > 0 && (
+            <div className="space-bulk-dup">
+              <button
+                type="button"
+                className="space-bulk-all"
+                onClick={() => setConfirmAll(true)}
+                disabled={allBusy || !dupReady}
+              >
+                {allBusy
+                  ? "正在加入待清理…"
+                  : "把这 " + groupsTotal.toLocaleString() + " 组的重复项全部加入待清理（" +
+                    (currentStat?.reclaim_count ?? 0).toLocaleString() + " 张 · " +
+                    statBytes(currentStat?.reclaim ?? 0) + "）"}
+              </button>
+              {confirmAll && (
+                <div className="space-confirm">
+                  <div>
+                    <strong>确认全部加入？</strong>
+                    <span>
+                      会把所有重复组里 keeper 以外的
+                      重复项加入待清理；keeper 不会被加入。这一步只写清单，不动文件。
+                    </span>
+                  </div>
+                  <button type="button" className="ghost-button" onClick={() => setConfirmAll(false)}>
+                    取消
+                  </button>
+                  <button type="button" className="danger-btn" onClick={() => void addAllDup()}>
+                    确认加入
+                  </button>
+                </div>
+              )}
+            </div>
           )}
 
           <div
@@ -733,13 +875,17 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
                 className="space-link"
                 disabled={busy}
                 onClick={async () => {
+                  // 用清单里保存的全部 id：items 只是渲染列表，真实条数以 count 为准。
                   const ids = (queue?.items ?? []).map((item) => item.asset_id);
-                  if (!ids.length) return;
                   const previous = queue;
                   setQueue({ items: [], count: 0, bytes: 0 });
                   setBusy(true);
                   try {
-                    const change = await cleanupRemove(ids);
+                    // 后端单次最多 2000 个：重复图「全部加入」会有几千条，必须分批移出。
+                    let change = { changed: 0, count: ids.length, bytes: 0 };
+                    for (let start = 0; start < ids.length; start += 2000) {
+                      change = await cleanupRemove(ids.slice(start, start + 2000));
+                    }
                     setQueue({ items: [], count: change.count, bytes: change.bytes });
                     void refreshStats();
                   } catch (reason) {
@@ -824,10 +970,6 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
       </div>
     </div>
   );
-}
-
-function addLabel(inQueue: number, total: number): string {
-  return inQueue === total ? "本组已全部在待清理，点一下移出" : "把本组全部加入待清理";
 }
 
 function focusedId(rows: Asset[], queue: CleanupList | null, id: string | null): CleanupEntry | null {
@@ -1064,6 +1206,64 @@ function PreviewBody({
         <button type="button" className="ghost-button" onClick={openExternal}>
           <ExternalLink size={12} strokeWidth={1.8} /> 外部播放器
         </button>
+      </div>
+    </div>
+  );
+}
+
+
+/** 重复图组 chip：横向虚拟滚动，只挂可视范围内的按钮。 */
+function DupChipList({
+  groups,
+  queueIds,
+  knownIds,
+  busyKey,
+  onToggle,
+}: {
+  groups: SpaceGroup[];
+  queueIds: Set<string>;
+  knownIds: Record<string, string[]>;
+  busyKey: string | null;
+  onToggle: (group: SpaceGroup) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const virtualizer = useVirtualizer({
+    horizontal: true,
+    count: groups.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 188,
+    overscan: 4,
+  });
+
+  return (
+    <div ref={scrollRef} className="space-chip-strip" role="list" aria-label="重复组">
+      <div style={{ width: virtualizer.getTotalSize() + "px", position: "relative", height: "58px" }}>
+        {virtualizer.getVirtualItems().map((item) => {
+          const group = groups[item.index];
+          if (!group) return null;
+          const ids = knownIds[group.key];
+          const candidates = (ids ?? []).filter((id) => id !== group.keep);
+          const inQueue = candidates.filter((id) => queueIds.has(id)).length;
+          const allQueued = candidates.length > 0 && inQueue === candidates.length;
+          return (
+            <button
+              key={group.key}
+              type="button"
+              role="listitem"
+              className={clsx("space-group-chip", allQueued && "on")}
+              style={{ position: "absolute", left: item.start + "px", top: 0, width: item.size - 8 + "px" }}
+              title={group.reason ? "reason: " + group.reason : undefined}
+              disabled={busyKey === group.key}
+              onClick={() => onToggle(group)}
+            >
+              <strong>{group.label}</strong>
+              <span>
+                {group.count} 张（保留 1）· 可回收 {statBytes(group.reclaim_bytes ?? 0)}
+              </span>
+              <em>{allQueued ? "全部已勾选" : busyKey === group.key ? "读取中…" : "整组切换"}</em>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

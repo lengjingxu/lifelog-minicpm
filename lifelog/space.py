@@ -91,6 +91,30 @@ def remove_from_queue(ids: list[str]) -> dict:
     return {"changed": changed, "count": count, "bytes": total}
 
 
+def add_all_dup_candidates(source: str = "space") -> dict:
+    """把所有重复组里 keeper 以外的 id 一次性写进 cleanup_queue。
+
+    单条 INSERT…SELECT 完成，不经过前端逐组请求；返回写后总数。
+    """
+    con = db.connect()
+    try:
+        _ensure(con)
+        cur = con.execute(
+            "INSERT OR IGNORE INTO cleanup_queue (asset_id, added_at, source) "
+            "SELECT m.asset_id, ?, ? FROM dup_groups g "
+            "JOIN dup_members m ON m.group_id = g.id "
+            "JOIN assets a ON a.id = m.asset_id "
+            "WHERE m.asset_id != g.keeper_id",
+            [_now(), source or "space"],
+        )
+        con.commit()
+        changed = cur.rowcount
+        count, total = _totals(con)
+    finally:
+        con.close()
+    return {"changed": changed, "count": count, "bytes": total}
+
+
 def drop_ids(ids: list[str]) -> int:
     """真实清理后同步移除清单行；只动 cleanup_queue。"""
     return remove_from_queue(ids)["changed"]
@@ -185,6 +209,10 @@ def views() -> dict:
             result[view] = {"count": count, "bytes": total}
         result["dup"]["groups"] = con.execute("SELECT count(*) FROM dup_groups").fetchone()[0] or 0
         # 可回收：组内 keeper 以外的成员体积合计。
+        result["dup"]["reclaim_count"] = con.execute(
+            "SELECT count(*) FROM dup_groups g JOIN dup_members m ON m.group_id = g.id "
+            "WHERE m.asset_id != g.keeper_id"
+        ).fetchone()[0] or 0
         result["dup"]["reclaim"] = con.execute(
             "SELECT COALESCE(sum(a.size),0) FROM dup_groups g "
             "JOIN dup_members m ON m.group_id = g.id "
@@ -223,38 +251,64 @@ def _dup_truth(con) -> bool:
     return groups > 0 and members > 0
 
 
-def _dup_groups(con) -> list[dict]:
-    """真实去重组：组内 keeper_id 是保留那张，其余是待清理候选。"""
-    rows = con.execute(
-        "SELECT g.id, g.reason, g.keeper_id, count(m.asset_id) AS n "
-        "FROM dup_groups g JOIN dup_members m ON m.group_id = g.id "
+def _dup_groups(con, limit: int | None = None, offset: int = 0) -> list[dict]:
+    """真实去重组。
+
+    只返回 chip 需要的轻量字段：ids 数组有 12k 个，一次全给会让 JSON 涨到 1.2MB。
+    真正要整组加入时走 dup_group_ids() 或 dup_all_candidates()。
+    """
+    sql = (
+        "SELECT g.id, g.reason, g.keeper_id, "
+        "       count(m.asset_id) AS n, "
+        "       COALESCE(sum(a.size),0) AS bytes, "
+        "       COALESCE(sum(CASE WHEN m.asset_id != g.keeper_id THEN a.size ELSE 0 END),0) AS reclaim "
+        "FROM dup_groups g "
+        "JOIN dup_members m ON m.group_id = g.id "
+        "JOIN assets a ON a.id = m.asset_id "
         "GROUP BY g.id ORDER BY n DESC, g.id"
-    ).fetchall()
+    )
+    params: list = []
+    if limit:
+        sql += " LIMIT ? OFFSET ?"
+        params.extend([int(limit), max(0, int(offset))])
+    rows = con.execute(sql, params).fetchall()
     groups = []
-    for group_id, reason, keeper, count in rows:
-        members = con.execute(
-            "SELECT m.asset_id, m.distance, a.path, a.size, a.kind, a.day, a.taken_at "
-            "FROM dup_members m JOIN assets a ON a.id = m.asset_id "
-            "WHERE m.group_id = ? ORDER BY m.asset_id = ?, m.distance IS NULL, m.distance, m.asset_id",
-            (group_id, keeper or ""),
-        ).fetchall()
-        ids = [row[0] for row in members]
-        if not ids:
-            continue
-        keeper_id = keeper if keeper in ids else ids[0]
+    for group_id, reason, keeper, count, total_bytes, reclaim in rows:
         tiers = _reason_tiers(reason or "")
         groups.append({
             "key": f"dup:{group_id}",
             "label": "/".join(REASON_LABELS[tier] for tier in tiers) or (reason or "重复"),
             "reason": reason or "",
             "reasons": tiers,
-            "count": count or len(ids),
-            "bytes": sum((row[3] or 0) for row in members),
-            "reclaim_bytes": sum((row[3] or 0) for row in members if row[0] != keeper_id),
-            "keeper": keeper_id,
-            "ids": ids,
+            "count": count or 0,
+            "bytes": total_bytes or 0,
+            "reclaim_bytes": reclaim or 0,
+            "keeper": keeper or None,
         })
     return groups
+
+
+def dup_group_ids(con, group_id: int) -> list[str]:
+    """按需取一组的成员（keeper 排第一）。"""
+    row = con.execute("SELECT keeper_id FROM dup_groups WHERE id = ?", (group_id,)).fetchone()
+    if not row:
+        return []
+    keeper = row[0] or ""
+    members = con.execute(
+        "SELECT asset_id FROM dup_members WHERE group_id = ? "
+        "ORDER BY asset_id = ? DESC, distance IS NULL, distance, asset_id",
+        (group_id, keeper),
+    ).fetchall()
+    return [member[0] for member in members]
+
+
+def dup_all_candidates(con) -> list[str]:
+    """所有重复组里 keeper 以外的 asset_id（「全部加入待清理」用）。"""
+    rows = con.execute(
+        "SELECT m.asset_id FROM dup_groups g JOIN dup_members m ON m.group_id = g.id "
+        "WHERE m.asset_id != g.keeper_id ORDER BY m.asset_id"
+    ).fetchall()
+    return [row[0] for row in rows]
 
 
 def _screenshot_groups(con) -> list[dict]:
@@ -285,19 +339,49 @@ def _screenshot_groups(con) -> list[dict]:
     ]
 
 
-def groups(view: str) -> dict:
-    """视角分组：重复图按 size（组内 keeper 不勾），截屏按来源目录。"""
+DUP_CHIP_LIMIT = 30
+
+
+def groups(view: str, limit: int | None = None, offset: int = 0,
+           group_id: int | None = None) -> dict:
+    """视角分组。
+
+    dup 默认只返回每组的轻量字段（不带 ids）；给了 group_id 就只返回这一组并带上 ids。
+    screenshot 按来源目录分组。
+    """
     con = db.connect()
+    total = None
     try:
         if view == "dup":
-            items = _dup_groups(con)
+            total = con.execute("SELECT count(*) FROM dup_groups").fetchone()[0] or 0
+            if group_id is not None:
+                ids = dup_group_ids(con, group_id)
+                items = []
+                if ids:
+                    row = con.execute(
+                        "SELECT reason, keeper_id FROM dup_groups WHERE id = ?", (group_id,),
+                    ).fetchone()
+                    reason = (row[0] if row else "") or ""
+                    keeper = (row[1] if row else "") or ""
+                    tiers = _reason_tiers(reason)
+                    items = [{
+                        "key": f"dup:{group_id}",
+                        "label": "/".join(REASON_LABELS[t] for t in tiers) or (reason or "重复"),
+                        "reason": reason,
+                        "reasons": tiers,
+                        "count": len(ids),
+                        "keeper": keeper or ids[0],
+                        "ids": ids,
+                    }]
+            else:
+                items = _dup_groups(con, limit=limit or DUP_CHIP_LIMIT, offset=offset)
         elif view == "screenshot":
             items = _screenshot_groups(con)
         else:
             items = []
     finally:
         con.close()
-    return {"view": view, "groups": items}
+    return {"view": view, "groups": items, "total": total}
 
 
 def versions() -> dict:

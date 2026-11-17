@@ -141,8 +141,15 @@ class DedupGroupTests(unittest.TestCase):
         self.assertEqual(group["count"], 3)
         self.assertEqual(group["reasons"], ["burst", "l1"])
         self.assertEqual(group["reclaim_bytes"], 500)
-        # solo 不在 dup_members 里，不进重复组。
-        self.assertNotIn("solo", group["ids"])
+        # chip payload 不再带 ids（5,251 组会把 JSON 撑到 1MB+）；按需单独拉。
+        self.assertNotIn("ids", group)
+        con = db.connect()
+        try:
+            ids = space.dup_group_ids(con, 7)
+        finally:
+            con.close()
+        self.assertEqual(ids[0], "keep1")
+        self.assertNotIn("solo", ids)
 
     def test_views_dup_reads_dedup_tables(self):
         report = space.views()["dup"]

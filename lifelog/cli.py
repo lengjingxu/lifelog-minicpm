@@ -347,7 +347,28 @@ def cmd_space_views(args) -> int:
 
 def cmd_space_groups(args) -> int:
     from . import space
-    print(json.dumps(space.groups(args.view), ensure_ascii=False))
+    group_id = None
+    if getattr(args, "group", None):
+        raw = args.group.split(":")[-1]
+        try:
+            group_id = int(raw)
+        except ValueError:
+            raise SystemExit(f"无效的 group：{args.group}")
+    print(json.dumps(
+        space.groups(
+            args.view,
+            limit=getattr(args, "limit", None),
+            offset=getattr(args, "offset", 0) or 0,
+            group_id=group_id,
+        ),
+        ensure_ascii=False,
+    ))
+    return 0
+
+
+def cmd_cleanup_add_all_dup(args) -> int:
+    from . import space
+    print(json.dumps(space.add_all_dup_candidates(source=args.source), ensure_ascii=False))
     return 0
 
 
@@ -543,9 +564,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("space-views", help="图库清理五个视角的数量与占用")
     p.set_defaults(func=cmd_space_views)
 
-    p = sub.add_parser("space-groups", help="图库清理分组：dup（同 size）/ screenshot（来源目录）")
+    p = sub.add_parser("space-groups", help="图库清理分组：dup（真实重复）/ screenshot（来源目录）")
     p.add_argument("--view", required=True)
+    p.add_argument("--limit", type=int, help="dup 视角最多返回多少组（默认 30，只带轻量字段）")
+    p.add_argument("--offset", type=int, default=0, help="dup 视角跳过多少组（配合 --limit 加载更多）")
+    p.add_argument("--group", help="dup 视角只看一组，例如 --group dup:80（会带上 ids）")
     p.set_defaults(func=cmd_space_groups)
+
+    p = sub.add_parser("cleanup-add-all-dup", help="把所有重复组的非 keeper 一次加入待清理")
+    p.add_argument("--source", default="space")
+    p.set_defaults(func=cmd_cleanup_add_all_dup)
 
     p = sub.add_parser("space-versions", help="库内容指纹，用来判断前端缓存是否过期")
     p.set_defaults(func=cmd_space_versions)
