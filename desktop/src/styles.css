@@ -2499,3 +2499,60 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .space-queue-tools { display: flex; align-items: center; gap: var(--space-6); }
 .space-queue-list { overflow-y: auto; }
 .space-grid { padding-bottom: var(--space-56); }
+
+/* 卡片消失：替身层贴在网格滚动容器上，不参与布局、不吃点击 */
+.space-fly-root { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.space-fly { position: absolute; pointer-events: none; overflow: hidden; border-radius: var(--radius-10); }
+.space-fly img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.space-fly-glow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 62%;
+  pointer-events: none;
+  background: radial-gradient(120% 100% at 50% 100%, var(--accent) 0%, rgba(255, 74, 74, 0) 70%);
+  opacity: 0;
+  mix-blend-mode: screen;
+}
+[data-theme="dark"] .space-fly-glow { opacity: 0.2; }
+
+/* toast 分类：status 3s / action 5s+环形 / sticky 常驻 / progress 原地变结果 */
+@keyframes toast-drop-in {
+  from { opacity: 0; transform: translate(-50%, -10px); filter: blur(8px); }
+  to { opacity: 1; transform: translate(-50%, 0); filter: blur(0); }
+}
+.toast { animation: toast-drop-in 500ms cubic-bezier(.25,.1,.25,1) both; }
+.toast-sticky {
+  align-items: flex-start;
+  max-width: min(520px, calc(100vw - 48px));
+  padding-right: var(--space-8);
+  box-shadow: 0 10px 30px rgba(0,0,0,var(--alpha-0-35)), 0 0 0 1px var(--accent-line) inset;
+}
+.toast-sticky span { line-height: 1.5; }
+.toast-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-6);
+  color: var(--text-faint);
+}
+.toast-close:hover { color: var(--text); background: var(--bg-hover); }
+.toast-progress { gap: var(--space-8); }
+.toast-ring {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) 0turn, rgba(255,255,255,var(--alpha-0-14)) 0turn);
+  -webkit-mask: radial-gradient(circle, transparent 55%, #000 56%);
+  mask: radial-gradient(circle, transparent 55%, #000 56%);
+  animation: toast-ring 5s linear forwards;
+}
+@keyframes toast-ring { from { background: conic-gradient(var(--accent) 1turn, rgba(255,255,255,var(--alpha-0-14)) 1turn); } to { background: conic-gradient(var(--accent) 0turn, rgba(255,255,255,var(--alpha-0-14)) 0turn); } }
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+  .toast-ring { animation: none; }
+}

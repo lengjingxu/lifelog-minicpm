@@ -139,7 +139,19 @@ function extractMessage(err: unknown): string {
 
 export default function App() {
   type ToastAction = { label: string; run: () => void };
-type ToastState = { text: string; action?: ToastAction };
+  // Status：成功，3 秒；Action：可撤销，5 秒 + 环形倒计时；
+  // Sticky：失败/需要处理，永不自动消失；Progress：进度，完成后原地变结果。
+  type ToastKind = "status" | "action" | "sticky" | "progress";
+  type ToastState = {
+    text: string;
+    kind: ToastKind;
+    action?: ToastAction;
+    /** 环形倒计时的总时长（ms），只对 action 有效。 */
+    duration?: number;
+    shownAt?: number;
+    /** progress 完成后替换成的结果文案与按钮。 */
+    result?: { text: string; action?: ToastAction };
+  };
 
 const route = useMemo(readRoute, []);
   const [view, setView] = useState<View>(route.query ? "library" : route.view);
@@ -186,6 +198,7 @@ const route = useMemo(readRoute, []);
   const [detailClosing, setDetailClosing] = useState(false);
   // 空间页的清理删的是待清理清单，不是网格里的选择；单独存一份，确认卡复用 DeleteDialog。
   const [spaceClean, setSpaceClean] = useState<{ ids: string[]; bytes: number } | null>(null);
+  const [spaceQueueSignal, setSpaceQueueSignal] = useState(0);
   // 详情页单张删除：独立的确认卡与错误，不和网格选择混在一起。
   const [detailDelete, setDetailDelete] = useState<{ id: string; origin: DOMRect | null } | null>(null);
   const [detailDeleteError, setDetailDeleteError] = useState<string | null>(null);
@@ -250,10 +263,38 @@ const route = useMemo(readRoute, []);
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const showToast = useCallback((message: string, action?: ToastAction) => {
-    setToast({ text: message, action });
+  /** 成功/可撤销：自动消失；失败/需要处理：常驻，等用户关。 */
+  const showToast = useCallback((message: string, options?: ToastAction | { kind?: ToastKind; action?: ToastAction }) => {
+    const opts = options && ("run" in options ? { action: options as ToastAction } : options);
+    const kind: ToastKind = opts?.kind ?? (opts?.action ? "action" : "status");
+    const duration = kind === "action" ? 5000 : kind === "status" ? 3000 : undefined;
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), action ? 6000 : 3600);
+    setToast({ text: message, kind, action: opts?.action, duration, shownAt: Date.now() });
+    if (duration) {
+      toastTimer.current = window.setTimeout(() => setToast(null), duration);
+    }
+  }, []);
+
+  /** 失败提示：不自动消失，用户手动关。 */
+  const showError = useCallback((message: string) => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    setToast({ text: message, kind: "sticky", shownAt: Date.now() });
+  }, []);
+
+  /** 进度：先显示进度，结束后在同一位置变成结果。 */
+  const showProgress = useCallback((message: string) => {
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    setToast({ text: message, kind: "progress", shownAt: Date.now() });
+  }, []);
+
+  const settleProgress = useCallback((result: { text: string; action?: ToastAction }) => {
+    setToast((previous) =>
+      previous?.kind === "progress"
+        ? { ...previous, kind: result.action ? "action" : "status", text: result.text, result: undefined, action: result.action, duration: result.action ? 5000 : 3000, shownAt: Date.now() }
+        : previous,
+    );
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), result.action ? 5000 : 3000);
   }, []);
 
   const refreshData = useCallback(() => {
@@ -358,19 +399,22 @@ const route = useMemo(readRoute, []);
             ? `已从 ${ids.length} 张移除标签「${value}」`
             : `已从相册「${value}」移出 ${ids.length} 张`;
         showToast(message, {
-          label: "撤销",
-          run: () => {
-            const undo = pendingUndo.current;
-            pendingUndo.current = null;
-            if (!undo) return;
-            void undo.revert().then(
-              () => showToast("已撤销"),
-              (err: unknown) => showToast(`撤销失败：${String(err)}`),
-            );
+          kind: "action",
+          action: {
+            label: "撤销",
+            run: () => {
+              const undo = pendingUndo.current;
+              pendingUndo.current = null;
+              if (!undo) return;
+              void undo.revert().then(
+                () => showToast("已撤销"),
+                (err: unknown) => showError(`撤销失败：${String(err)}`),
+              );
+            },
           },
         });
       } catch (err) {
-        showToast(`移除失败：${String(err)}`);
+        showError(`移除失败：${String(err)}`);
       } finally {
         setBulkBusy(false);
       }
@@ -405,7 +449,7 @@ const route = useMemo(readRoute, []);
       setSelection([]);
       refreshData();
     } catch (err) {
-      showToast(`批量操作失败：${String(err)}`);
+      showError(`批量操作失败：${String(err)}`);
     } finally {
       setBulkBusy(false);
     }
@@ -420,7 +464,7 @@ const route = useMemo(readRoute, []);
     if (exporting) return;
     // 全库一键导出必须是明确行为：没有选中、也没有任何筛选时拒绝，避免误触。
     if (!selection.length && !active) {
-      showToast("先选中照片或套用筛选条件，再导出");
+      showError("先选中照片或套用筛选条件，再导出");
       return;
     }
     const remembered = window.localStorage.getItem("sg-export-dir") ?? undefined;
@@ -447,17 +491,17 @@ const route = useMemo(readRoute, []);
       const text = `导出完成：成功 ${result.copied} / 跳过 ${result.skipped} / 失败 ${result.failed}`;
       if (result.copied === 0 && result.skipped > 0) {
         showToast(`${text}（全部为已存在且一致的文件）`, {
-          label: "在 Finder 中显示",
-          run: () => void revealInFinder(result.manifest),
+          kind: "action",
+          action: { label: "在 Finder 中显示", run: () => void revealInFinder(result.manifest) },
         });
       } else {
         showToast(text, {
-          label: "在 Finder 中显示",
-          run: () => void revealInFinder(result.manifest),
+          kind: "action",
+          action: { label: "在 Finder 中显示", run: () => void revealInFinder(result.manifest) },
         });
       }
     } catch (err) {
-      showToast(`导出失败：${String(err)}`);
+      showError(`导出失败：${String(err)}`);
     } finally {
       setExporting(false);
     }
@@ -478,7 +522,7 @@ const route = useMemo(readRoute, []);
           : `已删除 ${result.removed.assets} 张，原图在废纸篓`,
       );
     } catch (err) {
-      showToast(`移除失败：${describeDeleteError(err)}`);
+      showError(`移除失败：${describeDeleteError(err)}`);
     } finally {
       setDeleting(false);
     }
@@ -517,9 +561,9 @@ const route = useMemo(readRoute, []);
       const result = await deleteRecords(spaceClean.ids, true);
       setSpaceClean(null);
       refreshData();
-      showToast("已清理 " + result.removed.assets + " 个，原图在废纸篓 · 清单已同步移除", { label: "打开废纸篓", run: () => void openTrash() });
+      showToast("已清理 " + result.removed.assets + " 个，原图在废纸篓", { kind: "action", action: { label: "打开废纸篓", run: () => void openTrash() } });
     } catch (err) {
-      showToast("清理失败：" + describeDeleteError(err));
+      showError("清理失败：" + describeDeleteError(err));
     } finally {
       setDeleting(false);
     }
@@ -633,7 +677,7 @@ const route = useMemo(readRoute, []);
         setBlockedRoots(blocked.length ? blocked : null);
       })
       .catch((reason: unknown) => {
-        showToast(`检查照片目录权限失败：${String(reason)}`);
+        showError(`检查照片目录权限失败：${String(reason)}`);
       });
   }, [showToast]);
 
@@ -908,7 +952,7 @@ const route = useMemo(readRoute, []);
     } catch (err) {
       const message = describeDeleteError(err);
       setDetailDeleteError(message);
-      showToast("删除失败：" + message);
+      showError("删除失败：" + message);
       setDetailDelete(null);
     } finally {
       setDeleting(false);
@@ -929,7 +973,7 @@ const route = useMemo(readRoute, []);
         { label: "在 Finder 中显示", run: () => void revealInFinder(result.manifest) },
       );
     } catch (err) {
-      showToast(`导出失败：${extractMessage(err)}`);
+      showError(`导出失败：${extractMessage(err)}`);
     } finally {
       setDetailExporting(false);
     }
@@ -945,7 +989,7 @@ const route = useMemo(readRoute, []);
     const stopped = live.events.some((event) => event.type === "session_done" || event.type === "session_stopped");
     if (failure) {
       setDetailDeleteError(`重新识别失败：${failure}`);
-      showToast(`重新识别失败：${failure}`);
+      showError(`重新识别失败：${failure}`);
       setRecognizing(false);
       return;
     }
@@ -1534,6 +1578,15 @@ const route = useMemo(readRoute, []);
           onOpenDetail={(entry, list) => openSpacePreview(entry, list)}
           onClean={openSpaceClean}
           onToast={showToast}
+          onError={showError}
+          onProgress={showProgress}
+          onProgressDone={settleProgress}
+          onOpenQueue={() => {
+            // 批量加入后从 toast 打开清单：切到图库清理并展开抽屉。
+            setView("space");
+            setSpaceQueueSignal((value) => value + 1);
+          }}
+          openQueueSignal={spaceQueueSignal}
           dataVersion={dataVersion}
           onRows={setSpacePreviewList}
         />
@@ -1747,12 +1800,12 @@ const route = useMemo(readRoute, []);
             onExport: () => void exportOne(detailAsset),
             onReveal: () => {
               void revealInFinder(detailAsset.path).catch((err: unknown) =>
-                showToast(`在 Finder 中显示失败：${extractMessage(err)}`),
+                showError(`在 Finder 中显示失败：${extractMessage(err)}`),
               );
             },
             onOpenExternal: () =>
               void openExternal(detailAsset.path).catch((err: unknown) =>
-                showToast(`外部播放器打不开：${extractMessage(err)}`),
+                showError(`外部播放器打不开：${extractMessage(err)}`),
               ),
           }}
           onDelete={() =>
@@ -1891,7 +1944,16 @@ const route = useMemo(readRoute, []);
       />
 
       {toast && (
-        <div className={clsx("toast glass-surface", selection.length > 0 && "raised")} role="status">
+        <div
+          className={clsx(
+            "toast glass-surface",
+            `toast-${toast.kind}`,
+            selection.length > 0 && "raised",
+          )}
+          role={toast.kind === "sticky" ? "alert" : "status"}
+          data-kind={toast.kind}
+        >
+          {toast.kind === "progress" && <LoaderCircle size={13} className="spin" />}
           <span>{toast.text}</span>
           {toast.action && (
             <button
@@ -1906,6 +1968,14 @@ const route = useMemo(readRoute, []);
               {toast.action.label}
             </button>
           )}
+          {toast.kind === "sticky" && (
+            <button type="button" className="toast-close" onClick={() => setToast(null)} aria-label="关闭提示">
+              <X size={12} strokeWidth={2} />
+            </button>
+          )}
+          {toast.kind === "action" && toast.duration ? (
+            <span className="toast-ring" aria-hidden="true" />
+          ) : null}
         </div>
       )}
     </div>

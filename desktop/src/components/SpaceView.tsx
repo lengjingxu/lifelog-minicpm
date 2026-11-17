@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
 import {
@@ -31,6 +31,7 @@ import {
   type SpaceViews,
 } from "../api";
 import { GAP, formatBytes } from "../utils";
+import { reducedMotion } from "../motion";
 
 const PAGE_SIZE = 200;
 const CARD_MIN_WIDTH = 158;
@@ -91,14 +92,27 @@ type Props = {
   onOpenDetail: (entry: CleanupEntry, list: Asset[]) => void;
   /** 交给 App 统一渲染删除确认（DeleteDialog）。 */
   onClean: (ids: string[], rect: DOMRect) => void;
-  onToast: (text: string, action?: { label: string; run: () => void }) => void;
+  /** 成功/可撤销提示（App 的 showToast 分类）。 */
+  onToast: (
+    text: string,
+    options?: { label: string; run: () => void } | { kind?: "status" | "action" | "sticky" | "progress"; action?: { label: string; run: () => void } },
+  ) => void;
+  /** 失败提示：常驻，等用户手动关。 */
+  onError: (text: string) => void;
+  /** 进度提示：完成后在同一位置变成结果。 */
+  onProgress: (text: string) => void;
+  onProgressDone: (result: { text: string; action?: { label: string; run: () => void } }) => void;
+  /** 打开清单抽屉。 */
+  onOpenQueue: () => void;
+  /** App 层递增：从 toast 里点「查看清单」时用它打开抽屉。 */
+  openQueueSignal?: number;
   /** 真实清理成功后 App 会加一，用来重新拉清单和统计。 */
   dataVersion: number;
   /** 已载入的这一页同步给 App，预览翻页就在这一页里走。 */
   onRows: (rows: Asset[]) => void;
 };
 
-export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows }: Props) {
+export function SpaceView({ onOpenDetail, onClean, onToast, onError, onProgress, onProgressDone, onOpenQueue, openQueueSignal = 0, dataVersion, onRows }: Props) {
   const [view, setView] = useState<SpaceViewKey>("large");
   const [views, setViews] = useState<SpaceViews | null>(null);
   const [groups, setGroups] = useState<SpaceGroup[]>([]);
@@ -119,6 +133,9 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   const [confirmAll, setConfirmAll] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
+  useEffect(() => {
+    if (openQueueSignal > 0) setQueueOpen(true);
+  }, [openQueueSignal]);
   const [gridWidth, setGridWidth] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -130,10 +147,29 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   const anchorRef = useRef<string | null>(null);
   // 重复图组里「点任意一张 = 整组切换」需要成员 id；按组缓存，不放进 chip payload。
   const groupIdsRef = useRef<Record<string, string[]>>({});
+  // FLIP：记住上一帧每张卡的位置，删除/移出后只补间 transform。
+  const prevRects = useRef<Map<string, DOMRect>>(new Map());
+  const thumbById = useRef<Map<string, { thumb: string; size: number | null }>>(new Map());
+  const flyRootRef = useRef<HTMLDivElement | null>(null);
+  const flyingRef = useRef(0);
+  // 正在播「离开」的卡片数：>0 时补位延后到 640ms。
+  const vanishRef = useRef(0);
 
   const queueIds = useMemo(() => new Set((queue?.items ?? []).map((item) => item.asset_id)), [queue]);
   const rowById = useMemo(() => new Map(rows.map((asset) => [asset.id, asset])), [rows]);
+  useEffect(() => {
+    // 卡片消失后替身层要用它的缩略图，先按 id 留住。
+    const map = new Map(thumbById.current);
+    for (const asset of rows) map.set(asset.id, { thumb: asset.thumb, size: asset.size ?? null });
+    thumbById.current = map;
+  }, [rows]);
   const columns = Math.max(2, Math.min(6, Math.floor((gridWidth + GAP) / (CARD_MIN_WIDTH + GAP))));
+
+  // 进待清理的卡片离开网格，剩下的补位；移出时再回来。
+  const visibleRows = useMemo(
+    () => rows.filter((asset) => !queueIds.has(asset.id)),
+    [rows, queueIds],
+  );
 
   // 一屏只出现一次的数字：面板头用这一句，胶囊只留名字。
   const summaryLine = currentStatLine(views, view, loading);
@@ -142,7 +178,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
     try {
       setQueue(await cleanupList());
     } catch (reason) {
-      onToast("读取待清理清单失败：" + String(reason));
+      onError("读取待清理清单失败：" + String(reason));
     }
   }, [onToast]);
 
@@ -202,7 +238,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
       );
       void refreshStats();
     } catch (reason) {
-      onToast("计算指纹失败：" + String(reason));
+      onError("计算指纹失败：" + String(reason));
     } finally {
       setComputing(false);
     }
@@ -273,6 +309,8 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   }, [loadMore]);
 
   // 乐观更新：点一下立刻变勾；请求失败回滚。
+  const applyQueueRef = useRef<(ids: string[], add: boolean) => void>(() => {});
+
   const applyQueue = useCallback(
     (ids: string[], add: boolean) => {
       const unique = Array.from(new Set(ids));
@@ -336,6 +374,9 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
           Promise.resolve({ changed: 0, count: 0, bytes: 0 }),
         )
         .then((change) => {
+          if (add && unique.length === 1) {
+            onToast("已加入待清理", { kind: "action", action: { label: "移出", run: () => applyQueueRef.current(unique, false) } });
+          }
           setQueue((previous) =>
             previous ? { ...previous, count: change.count, bytes: change.bytes } : previous,
           );
@@ -344,12 +385,61 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
         })
         .catch((reason) => {
           setQueue(snapshot);
-          onToast((add ? "加入待清理失败：" : "移出待清理失败：") + String(reason));
+          onError((add ? "加入待清理失败：" : "移出待清理失败：") + String(reason));
         })
         .finally(() => setBusy(false));
     },
     [onToast, queue, refreshQueue, refreshStats, rowById],
   );
+
+  /** 卡片消失：底部升起一团 accent 柔光把它带走，1400ms。 */
+  const playVanish = useCallback((rect: DOMRect, thumb: string) => {
+    const root = flyRootRef.current;
+    if (!root) return;
+    const el = document.createElement("div");
+    el.className = "space-fly";
+    const box = root.getBoundingClientRect();
+    el.style.left = `${rect.left - box.left}px`;
+    el.style.top = `${rect.top - box.top}px`;
+    el.style.width = `${rect.width}px`;
+    el.style.height = `${rect.height}px`;
+    const img = document.createElement("img");
+    img.src = assetSrc(thumb);
+    img.alt = "";
+    el.appendChild(img);
+    const glow = document.createElement("span");
+    glow.className = "space-fly-glow";
+    el.appendChild(glow);
+    root.appendChild(el);
+    const done = () => el.remove();
+    if (reducedMotion() || flyingRef.current >= 3) {
+      // 减少动效 / 同时超过 3 张：直接淡出，不排队。
+      el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 150, fill: "forwards" }).finished.then(done, done);
+      return;
+    }
+    flyingRef.current += 1;
+    glow.animate(
+      [
+        { opacity: 0, transform: "translateY(40%) scaleY(0.4)" },
+        { opacity: 0.2, transform: "translateY(0) scaleY(1)", offset: 0.45 },
+        { opacity: 0.32, transform: "translateY(-12%) scaleY(1.08)", offset: 0.7 },
+        { opacity: 0, transform: "translateY(-60%) scaleY(1.2)" },
+      ],
+      { duration: 1400, easing: "cubic-bezier(.25,.1,.25,1)", fill: "forwards" },
+    );
+    el.animate(
+      [
+        { opacity: 1, transform: "none" },
+        { opacity: 0.92, transform: "none", offset: 0.55 },
+        { opacity: 0, transform: "translateY(-6px) scale(0.98)" },
+      ],
+      { duration: 1400, easing: "cubic-bezier(.25,.1,.25,1)", fill: "forwards" },
+    ).finished.then(done, done).finally(() => {
+      flyingRef.current = Math.max(0, flyingRef.current - 1);
+    });
+  }, []);
+
+  applyQueueRef.current = applyQueue;
 
   const toggleAssets = useCallback(
     (assets: Asset[], add: boolean) => {
@@ -389,7 +479,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
         const add = candidates.some((id) => !queueIds.has(id));
         applyQueue(add ? candidates.filter((id) => !queueIds.has(id)) : candidates, add);
       } catch (reason) {
-        onToast("读取这一组失败：" + String(reason));
+        onError("读取这一组失败：" + String(reason));
       }
     },
     [applyQueue, groupIdsOf, onToast, queueIds, rowById],
@@ -416,10 +506,20 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
         return;
       }
 
+      if (!inQueue) {
+        // 离开网格前先量位置、留缩略图：替身层挂在滚动容器那一级。
+        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+        vanishRef.current += 1;
+        playVanish(rect, asset.thumb);
+        flipPending.current = true;
+        window.setTimeout(() => {
+          vanishRef.current = Math.max(0, vanishRef.current - 1);
+        }, 1400);
+      }
       toggleAssets([asset], !inQueue);
       anchorRef.current = asset.id;
     },
-    [queueIds, rows, toggleAssets, toggleDupByAsset, view],
+    [playVanish, queueIds, rows, toggleAssets, toggleDupByAsset, view],
   );
 
   // 键盘：方向键移焦点，空格/回车切换待清理。
@@ -469,13 +569,17 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
     if (allBusy) return;
     setAllBusy(true);
     setConfirmAll(false);
+    onProgress("正在把重复项加入待清理…");
     try {
       const change = await cleanupAddAllDup();
       await refreshQueue();
       void refreshStats();
-      onToast("已加入 " + change.changed + " 个重复项（keeper 未加入）");
+      onProgressDone({
+        text: "已加入 " + change.changed + " 个重复项",
+        action: { label: "查看清单", run: onOpenQueue },
+      });
     } catch (reason) {
-      onToast("全部加入失败：" + String(reason));
+      onError("全部加入失败：" + String(reason));
     } finally {
       setAllBusy(false);
     }
@@ -497,14 +601,51 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
       void refreshStats();
     } catch (reason) {
       setQueue(previous);
-      onToast("移出待清理失败：" + String(reason));
+      onError("移出待清理失败：" + String(reason));
     } finally {
       setBusy(false);
     }
   }, [busy, onToast, queue, refreshStats]);
 
+  // 网格 FLIP：可见卡片变化前记位置，变化后只补间 transform（不动高度）。
+  const flipPending = useRef(false);
+  useLayoutEffect(() => {
+    const container = gridRef.current;
+    if (!container) return;
+    const next = new Map<string, DOMRect>();
+    container.querySelectorAll<HTMLElement>("[data-grid-id]").forEach((el) => {
+      next.set(el.dataset.gridId ?? "", el.getBoundingClientRect());
+    });
+    const previous = prevRects.current;
+    prevRects.current = next;
+    if (!flipPending.current || previous.size === 0) return;
+    flipPending.current = false;
+    if (reducedMotion()) return;
+    const delay = vanishRef.current > 0 ? 640 : 0;
+    next.forEach((rect, id) => {
+      const prev = previous.get(id);
+      if (!prev) return;
+      const dx = prev.left - rect.left;
+      const dy = prev.top - rect.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      const el = container.querySelector<HTMLElement>(`[data-grid-id="${id}"]`);
+      if (!el) return;
+      const frames: Keyframe[] = [];
+      for (let step = 0; step <= 16; step += 1) {
+        const t = step / 16;
+        const progress = 1 - Math.exp(-7 * t) * Math.cos(6 * t);
+        frames.push({
+          transform: `translate(${(dx * (1 - progress)).toFixed(2)}px, ${(dy * (1 - progress)).toFixed(2)}px)`,
+          offset: t,
+        });
+      }
+      frames.push({ transform: "translate(0, 0)", offset: 1 });
+      el.animate(frames, { duration: 520, delay, easing: "linear", fill: "backwards" });
+    });
+  }, [visibleRows, columns]);
+
   const rowVirtualizer = useVirtualizer({
-    count: Math.ceil(rows.length / columns),
+    count: Math.ceil(visibleRows.length / columns),
     getScrollElement: () => scrollRef.current,
     estimateSize: () => Math.round(((gridWidth - GAP * (columns - 1)) / columns) * 0.625) + 8 + GAP,
     overscan: 2,
@@ -635,6 +776,8 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
       )}
 
       <div className="space-grid" ref={scrollRef} role="grid" aria-label="文件缩略图" aria-multiselectable="true">
+        {/* 替身层挂在这里：卡片从列表里移除后它还在，且不参与网格布局。 */}
+        <div ref={flyRootRef} className="space-fly-root" aria-hidden="true" />
         <div
           ref={gridRef}
           className="space-grid-inner"
@@ -642,7 +785,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
         >
           {gridWidth > 0 &&
             rowVirtualizer.getVirtualItems().map((virtualRow) => {
-              const items = rows.slice(virtualRow.index * columns, virtualRow.index * columns + columns);
+              const items = visibleRows.slice(virtualRow.index * columns, virtualRow.index * columns + columns);
               return (
                 <div
                   key={virtualRow.key}
