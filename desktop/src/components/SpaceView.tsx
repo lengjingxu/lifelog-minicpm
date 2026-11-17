@@ -589,8 +589,11 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   const queueBytes = queue?.bytes ?? 0;
   const focused = focusedId(rows, queue, focusId);
 
+  // 与胶囊同一口径：重复图的 bytes 含 keeper，展示可回收；其它视角 bytes 就是占用。
   const summaryLine = currentStat
-    ? `${currentStat.count.toLocaleString()} 个 · ${statBytes(currentStat.bytes)}`
+    ? view === "dup"
+      ? `${currentStat.count.toLocaleString()} 个 · 可回收 ${statBytes(currentStat.reclaim ?? 0)}`
+      : `${currentStat.count.toLocaleString()} 个 · ${statBytes(currentStat.bytes)}`
     : loading
       ? "读取中…"
       : "";
@@ -615,8 +618,13 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
             >
               <span>{item.label}</span>
               <em>
-                {stat ? `${stat.count.toLocaleString()} · ${statBytes(stat.bytes)}` : "…"}
-                {item.key === "dup" && stat?.groups ? ` · ${stat.groups} 组` : ""}
+                {/* 重复图：bytes 是成员总大小（含 keeper），能腾出的是 reclaim；其它视角 bytes 就是占用。 */}
+                {stat
+                  ? item.key === "dup"
+                    ? `${stat.count.toLocaleString()} · 可回收 ${statBytes(stat.reclaim ?? 0)}`
+                    : `${stat.count.toLocaleString()} · ${statBytes(stat.bytes)}`
+                  : "…"}
+                {item.key === "dup" && stat?.groups ? ` · ${stat.groups.toLocaleString()} 组` : ""}
               </em>
             </button>
           );
