@@ -99,7 +99,14 @@ impl LiveSidecar {
 
         let port = free_port()?;
         let code = format!("from lifelog.web import serve; serve({port}, '127.0.0.1')");
-        let mut command = Command::new("python3");
+        let python = match crate::py::resolve(&self.inner.home) {
+            Ok(path) => path,
+            Err(err) => {
+                self.record_failure();
+                return Err(format!("识别服务未启动：{err}"));
+            }
+        };
+        let mut command = Command::new(python);
         command
             .args(["-c", &code])
             .current_dir(&self.inner.root)
@@ -113,7 +120,7 @@ impl LiveSidecar {
             Err(err) => {
                 self.record_failure();
                 return Err(format!(
-                    "识别服务未启动：无法运行 python3（{err}）。请确认 Python 已安装并包含 lifelog 依赖。"
+                    "识别服务未启动：无法运行 Python（{err}）。请检查 LIFELOG_PYTHON 指向的解释器。"
                 ));
             }
         };

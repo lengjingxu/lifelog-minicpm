@@ -2440,3 +2440,4 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .album-picker-new input { flex: 1; min-width: 0; height: 32px; padding: 0 var(--space-10); border: 0; outline: none; border-radius: var(--radius-10); background: rgba(255,255,255,var(--alpha-0-045)); box-shadow: 0 0 0 1px var(--line) inset; color: var(--text); font-size: var(--font-11-5); }
 .album-picker-new .primary-btn { display: inline-flex; align-items: center; gap: var(--space-4); height: 32px; padding: 0 var(--space-10); border-radius: var(--radius-10); font-size: var(--font-11); }
 .album-picker-error { margin: var(--space-8) 0 0; font-size: var(--font-10); color: var(--accent); }
+.space-card-keeper { position: absolute; left: var(--space-6); top: var(--space-6); padding: 1px var(--space-6); border-radius: var(--radius-6); font-size: var(--font-9-5); font-weight: 600; color: #fff; background: rgba(20, 122, 74, 0.86); }

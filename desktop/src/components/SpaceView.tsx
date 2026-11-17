@@ -22,6 +22,7 @@ import {
   cleanupAdd,
   cleanupList,
   cleanupRemove,
+  dedupBuild,
   openExternal as openExternalPath,
   queryAssets,
   revealInFinder,
@@ -126,6 +127,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   const [filterInput, setFilterInput] = useState("");
   const [pathFilter, setPathFilter] = useState("");
   const [lastClean, setLastClean] = useState<{ count: number; bytes: number } | null>(null);
+  const [computing, setComputing] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -166,6 +168,26 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
       // 统计失败不挡列表
     }
   }, []);
+
+  // 重复图视角：指纹没算完时给一个「立即计算」，真跑 lifelog dedup --build。
+  const computeDup = useCallback(async () => {
+    if (computing) return;
+    setComputing(true);
+    try {
+      const result = (await dedupBuild()) as { errors?: number } | null;
+      if (result && typeof result.errors === "number" && result.errors > 0) {
+        onToast("指纹计算完成，但仍有 " + result.errors + " 张失败，详情见设置页日志");
+      } else {
+        onToast("指纹已计算完成");
+      }
+      void refreshStats();
+      void refreshQueue();
+    } catch (reason) {
+      onToast("计算指纹失败：" + String(reason));
+    } finally {
+      setComputing(false);
+    }
+  }, [computing, onToast, refreshQueue, refreshStats]);
 
   useEffect(() => {
     void refreshQueue();
@@ -313,7 +335,18 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
         };
       });
       setBusy(true);
-      (add ? cleanupAdd(unique) : cleanupRemove(unique))
+      // 后端单次最多 2000 个 id：大组/整页默认勾选时分批，避免静默截断。
+      const chunks: string[][] = [];
+      for (let start = 0; start < unique.length; start += 2000) {
+        chunks.push(unique.slice(start, start + 2000));
+      }
+      chunks
+        .reduce<Promise<{ changed?: number; count: number; bytes: number }>>((pending, chunk) =>
+          pending.then((last) =>
+            (add ? cleanupAdd(chunk) : cleanupRemove(chunk)).then((next) => ({ ...next, changed: (last.changed ?? 0) + (next.changed ?? 0) })),
+          ),
+          Promise.resolve({ changed: 0, count: 0, bytes: 0 }),
+        )
         .then((change) => {
           // 以服务端返回的总数/字节为准；未知行（比如整组）：拉一次清单把缩略图补齐。
           setQueue((previous) =>
@@ -425,16 +458,29 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
     [groupIndex, queueIds, rows, toggleAssets, toggleGroup, view],
   );
 
-  // 重复图视角：每组保留 1 张，其余默认勾上待清理（只做一次，不覆盖用户后来的取消）。
-  const autoDupRef = useRef("");
+  // 重复图视角：每组的非 keeper 成员默认勾上待清理。
+  // 真实库有几千组，不能一次全塞进清单：只处理「已经载入到网格的组」，每组只默认一次，
+  // 滚动加载到新组时再补勾；用户之后手动取消过的组不会被重新勾上。
+  const autoDupRef = useRef<Set<string>>(new Set());
+  const autoDupVersion = useRef("");
   useEffect(() => {
-    if (view !== "dup" || !groups.length || !version) return;
-    const token = version + ":" + groups.length;
-    if (autoDupRef.current === token) return;
-    autoDupRef.current = token;
-    const ids = groups.flatMap((group) => (group.ids ?? []).filter((id) => id !== group.keep));
-    if (ids.length) applyQueue(ids, true);
-  }, [groups, version, view, applyQueue]);
+    if (view !== "dup" || !groups.length) return;
+    if (autoDupVersion.current !== version) {
+      // 库内容变了（重新算过指纹/删过图）：旧记忆作废，重新给一次默认。
+      autoDupVersion.current = version;
+      autoDupRef.current = new Set();
+    }
+    if (!rowById.size) return;
+    const fresh: string[] = [];
+    for (const group of groups) {
+      if (autoDupRef.current.has(group.key)) continue;
+      const loaded = (group.ids ?? []).filter((id) => rowById.has(id));
+      if (!loaded.length) continue;
+      autoDupRef.current.add(group.key);
+      fresh.push(...loaded.filter((id) => id !== group.keep));
+    }
+    if (fresh.length) applyQueue(Array.from(new Set(fresh)), true);
+  }, [applyQueue, groups, rowById, version, view]);
 
   // 网格按行虚拟化：行高由列宽算出（16:10 卡片 + 间距），滚动时不重排。
   const cardWidth = gridWidth > 0 ? (gridWidth - GAP * (columns - 1)) / columns : CARD_MIN_WIDTH;
@@ -452,6 +498,8 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   }, [cardHeight, columns, virtualizer]);
 
   const currentStat = views?.[view];
+  // 后端 space-views 会带 ready；缺省时按「有没有组」判断。
+  const dupReady = views?.dup ? views.dup.ready !== false : false;
   const queueTotal = queue?.count ?? 0;
   const queueBytes = queue?.bytes ?? 0;
   const focused = focusedId(rows, queue, focusId);
@@ -531,25 +579,27 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
             </div>
           </div>
 
-          {view === "screenshot" && groups.length > 0 && (
+          {(view === "screenshot" || view === "dup") && groups.length > 0 && (
             <div className="space-group-chips">
               {groups.map((group) => {
                 const ids = group.ids ?? [];
-                const inQueue = ids.filter((id) => queueIds.has(id)).length;
+                const candidates = ids.filter((id) => id !== group.keep);
+                const inQueue = candidates.filter((id) => queueIds.has(id)).length;
                 return (
                   <button
                     key={group.key}
                     type="button"
-                    className={clsx("space-group-chip", inQueue === ids.length && "on")}
+                    className={clsx("space-group-chip", inQueue === candidates.length && candidates.length > 0 && "on")}
+                    title={group.reason ? `reason: ${group.reason}` : addLabel(inQueue, ids.length)}
                     onClick={() => {
-                      const add = inQueue < ids.length;
-                      applyQueue(add ? ids.filter((id) => !queueIds.has(id)) : ids, add);
+                      const add = candidates.some((id) => !queueIds.has(id));
+                      // keeper 永不进待清理：新建组/全选本组都把它排除。
+                      applyQueue(add ? candidates.filter((id) => !queueIds.has(id)) : candidates, add);
                     }}
-                    title={addLabel(inQueue, ids.length)}
                   >
                     <strong>{group.label}</strong>
-                    <span>{ids.length} 张 · {statBytes(group.bytes ?? 0)}</span>
-                    <em>{inQueue === ids.length ? "全部已勾选" : "全选本组待清理"}</em>
+                    <span>{ids.length} 张（保留 1）· 可回收 {statBytes(group.reclaim_bytes ?? 0)}</span>
+                    <em>{inQueue === candidates.length && candidates.length > 0 ? "全部已勾选" : "全选本组待清理"}</em>
                   </button>
                 );
               })}
@@ -558,7 +608,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
 
           {view === "dup" && groups.length > 0 && (
             <p className="space-view-note">
-              {groups.length} 组 · 同 size 同 kind 的图片。每组保留 1 张，其余默认勾上待清理；点组内任意一张切换整组。
+              {groups.length} 组真实指纹 · 组内保留 1 张（标「保留」），其余默认勾上待清理；点组内任意一张切换整组，keeper 永不进待清理。
             </p>
           )}
 
@@ -593,6 +643,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
                             inQueue={queueIds.has(asset.id)}
                             focused={focusId === asset.id}
                             dupCount={group?.count ?? asset.dup_count ?? 0}
+                            keeper={group?.keep === asset.id}
                             onToggle={handleCardClick}
                             onOpen={() => onOpenDetail(entryFromAsset(asset), rows)}
                           />
@@ -620,10 +671,24 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
             {error && <div className="space-empty">读取失败：{error}</div>}
             {!loading && !error && rows.length === 0 && (
               <div className="space-empty">
-                <ImageOff size={20} strokeWidth={1.5} />
-                <strong>{pathFilter ? "没有匹配「" + pathFilter + "」的文件" : view === "dup" ? "没有同 size 同 kind 的图片组" : "这个视角下还没有文件"}</strong>
-                {view === "dup" && <span>重复图只按「同 size 同 kind」粗筛；按像素比对的 dhash 去重还没做，所以不会出现在这里。</span>}
-                {view === "screenshot" && <span>截屏按路径含 Screenshot/截屏/屏幕，或识别结果里的 scene/tags 命中「屏幕截图」两层一起筛。</span>}
+                {view === "dup" && !dupReady ? (
+                  <>
+                    <LoaderCircle size={20} strokeWidth={1.5} className={computing ? "spin" : undefined} />
+                    <strong>{computing ? "正在为照片计算指纹…" : "照片指纹还没算"}</strong>
+                    <span>
+                      去重需要先对每张图算 dhash（l0 字节 / l1 像素 / burst 连拍）。算完后这里会出现真实分组。
+                    </span>
+                    <button type="button" className="primary-btn" onClick={() => void computeDup()} disabled={computing}>
+                      {computing ? "计算中…" : "立即计算"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <ImageOff size={20} strokeWidth={1.5} />
+                    <strong>{pathFilter ? "没有匹配「" + pathFilter + "」的文件" : "这个视角下还没有文件"}</strong>
+                    {view === "screenshot" && <span>截屏按路径含 Screenshot/截屏/屏幕，或识别结果里的 scene/tags 命中「屏幕截图」两层一起筛。</span>}
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -778,6 +843,7 @@ function SpaceCard({
   inQueue,
   focused,
   dupCount,
+  keeper = false,
   onToggle,
   onOpen,
 }: {
@@ -785,6 +851,7 @@ function SpaceCard({
   inQueue: boolean;
   focused: boolean;
   dupCount: number;
+  keeper?: boolean;
   onToggle: (asset: Asset, event: React.MouseEvent) => void;
   onOpen: () => void;
 }) {
@@ -849,7 +916,11 @@ function SpaceCard({
             <Play size={11} fill="currentColor" strokeWidth={0} />
           </span>
         )}
-        {dupCount > 1 && <span className="space-card-dup">×{dupCount}</span>}
+        {keeper ? (
+          <span className="space-card-keeper">保留</span>
+        ) : (
+          dupCount > 1 && <span className="space-card-dup">×{dupCount}</span>
+        )}
         <span className="space-card-check" aria-hidden="true">
           {inQueue && <Check size={11} strokeWidth={2.6} />}
         </span>

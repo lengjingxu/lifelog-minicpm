@@ -3,6 +3,17 @@
 
 fn main() {
     // 诊断入口：只打印库里照片所在目录的授权检查结果，不开窗口。
+    // 诊断：打印当前会使用的 Python 解释器（含 Pillow），不启动界面。
+    if std::env::args().any(|arg| arg == "--python-report") {
+        let home = std::env::var("LIFELOG_HOME").unwrap_or_else(|_| {
+            format!(
+                "{}/dev/lifelog-minicpm/data",
+                std::env::var("HOME").unwrap_or_default()
+            )
+        });
+        println!("{}", shiguang_mac_lib::python_report_for(&std::path::PathBuf::from(home)));
+        return;
+    }
     if std::env::args().any(|arg| arg == "--access-report") {
         let home = std::env::var("LIFELOG_HOME").unwrap_or_else(|_| {
             format!(

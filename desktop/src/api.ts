@@ -700,6 +700,10 @@ export type SpaceViewStat = {
   bytes: number;
   /** 仅重复图视角：组数 */
   groups?: number;
+  /** 仅重复图视角：keeper 以外的可回收字节 */
+  reclaim?: number;
+  /** 指纹是否已算完（dup_groups/dup_members 非空） */
+  ready?: boolean;
   /** 口径说明 */
   rule?: string;
 };
@@ -712,7 +716,13 @@ export type SpaceGroup = {
   count: number;
   bytes?: number;
   ids?: string[];
-  /** 重复图组内建议保留的那一张（不默认勾选） */
+  /** 仅重复图：keeper 以外的成员体积合计（可回收） */
+  reclaim_bytes?: number;
+  /** 原始 reason，例如 burst+l1 */
+  reason?: string;
+  /** 拆开的判定：burst / l0 / l1 */
+  reasons?: string[];
+  /** 重复图组内保留的那一张（不默认勾选、永不进待清理） */
   keep?: string | null;
 };
 
@@ -812,16 +822,18 @@ export async function spaceViews(): Promise<SpaceViews> {
     }
     const dupSizes = [...sizes.values()].filter((n) => n > 1);
     const dupCount = dupSizes.reduce((sum, n) => sum + n, 0);
-    const dupBytes = assets
-      .filter((asset) => asset.kind === "image" && asset.size && (sizes.get(asset.size) ?? 0) > 1)
-      .reduce((sum, asset) => sum + (asset.size ?? 0), 0);
+    const dupAssets = assets.filter(
+      (asset) => asset.kind === "image" && asset.size && (sizes.get(asset.size) ?? 0) > 1,
+    );
+    const dupBytes = dupAssets.reduce((sum, asset) => sum + (asset.size ?? 0), 0);
+    const reclaim = dupSizes.reduce((sum, n) => sum + (n - 1), 0);
     const screenshot = assets.filter((asset) => isScreenshot(asset));
     return {
       large: stat(assets),
       video: stat(assets.filter((asset) => asset.kind === "video")),
       photo: stat(assets.filter((asset) => asset.kind !== "video")),
       screenshot: { ...stat(screenshot), rule: "路径 + scene/tags" },
-      dup: { count: dupCount, groups: dupSizes.length, bytes: dupBytes, rule: "同 size 同 kind" },
+      dup: { count: dupCount, groups: dupSizes.length, bytes: dupBytes, reclaim, ready: true, rule: "dhash 指纹（fixture 近似）" },
     };
   }
   return invoke<SpaceViews>("space_views");
@@ -835,10 +847,17 @@ function isScreenshot(asset: Asset): boolean {
   return /屏幕|截屏/.test(scene) || /屏幕截图|截屏/.test(tags);
 }
 
+/** 触发一次 dedup --build（真实算 dhash 并重建分组）。 */
+export async function dedupBuild(): Promise<unknown> {
+  if (!isTauri) throw new Error("浏览器预览里不能计算指纹，请在桌面端使用");
+  return invoke<unknown>("dedup_build");
+}
+
 export async function spaceGroups(view: SpaceViewKey): Promise<SpaceGroups> {
   if (!isTauri) {
     const { assets } = await loadFixture();
     if (view === "dup") {
+      // 浏览器 fixture 没有 dhash：用「同 size 同 kind」近似真实组，保持结构一致（keeper + 其余）。
       const bySize = new Map<number, Asset[]>();
       for (const asset of assets) {
         if (asset.kind !== "image" || !asset.size) continue;
@@ -846,13 +865,21 @@ export async function spaceGroups(view: SpaceViewKey): Promise<SpaceGroups> {
       }
       const groups: SpaceGroup[] = [...bySize.entries()]
         .filter(([, list]) => list.length > 1)
-        .map(([size, list]) => ({
-          key: `dup:${size}`,
-          label: `同 ${(size / 1024 / 1024).toFixed(1)} MB`,
-          count: list.length,
-          ids: list.map((asset) => asset.id),
-          keep: list[0]?.id ?? null,
-        }));
+        .map(([size, list]) => {
+          const sorted = [...list].sort((a, b) => (a.taken_at ?? "").localeCompare(b.taken_at ?? ""));
+          const keeper = sorted[0];
+          return {
+            key: `dup:${size}`,
+            label: "像素近似",
+            reason: "l1",
+            reasons: ["l1"],
+            count: sorted.length,
+            bytes: sorted.reduce((sum, asset) => sum + (asset.size ?? 0), 0),
+            reclaim_bytes: sorted.slice(1).reduce((sum, asset) => sum + (asset.size ?? 0), 0),
+            ids: sorted.map((asset) => asset.id),
+            keep: keeper.id,
+          };
+        });
       return { view, groups };
     }
     if (view === "screenshot") {

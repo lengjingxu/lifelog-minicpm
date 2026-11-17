@@ -94,6 +94,74 @@ class SpaceQueueTests(unittest.TestCase):
         self.assertEqual(space.list_queue()["count"], 1)
 
 
+class DedupGroupTests(unittest.TestCase):
+    """space.groups('dup') 必须读真实去重表，而不是「同 size」影子分组。"""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="space-dup-"))
+        self._paths = (config.DATA_DIR, config.DB_PATH)
+        config.DATA_DIR = self.root
+        config.DB_PATH = self.root / "lifelog.sqlite"
+        db.init_db()
+        con = db.connect()
+        con.executescript(
+            "CREATE TABLE IF NOT EXISTS dup_groups (id INTEGER PRIMARY KEY, keeper_id TEXT, reason TEXT, created_at TEXT);"
+            "CREATE TABLE IF NOT EXISTS dup_members (group_id INTEGER, asset_id TEXT, distance INTEGER,"
+            "                          PRIMARY KEY (group_id, asset_id));"
+        )
+        rows = [
+            ("keep1", 900),
+            ("dup1", 300),
+            ("dup2", 200),
+            ("solo", 50),
+        ]
+        con.executemany(
+            "INSERT INTO assets (id, path, size, kind, day, taken_at) VALUES (?, ?, ?, 'image', '2024-01-01', '2024-01-01T10:00:00')",
+            [(asset_id, f"/tmp/{asset_id}.jpg", size) for asset_id, size in rows],
+        )
+        con.execute("INSERT INTO dup_groups VALUES (7, 'keep1', 'burst+l1', '2024-01-01')")
+        con.executemany(
+            "INSERT INTO dup_members VALUES (7, ?, ?)",
+            [("keep1", None), ("dup1", 3), ("dup2", 5)],
+        )
+        con.commit()
+        con.close()
+
+    def tearDown(self):
+        config.DATA_DIR, config.DB_PATH = self._paths
+        for path in self.root.iterdir():
+            path.unlink(missing_ok=True)
+        self.root.rmdir()
+
+    def test_groups_come_from_dedup_tables(self):
+        result = space.groups("dup")["groups"]
+        self.assertEqual(len(result), 1)
+        group = result[0]
+        self.assertEqual(group["keeper"], "keep1")
+        self.assertEqual(group["count"], 3)
+        self.assertEqual(group["reasons"], ["burst", "l1"])
+        self.assertEqual(group["reclaim_bytes"], 500)
+        # solo 不在 dup_members 里，不进重复组。
+        self.assertNotIn("solo", group["ids"])
+
+    def test_views_dup_reads_dedup_tables(self):
+        report = space.views()["dup"]
+        self.assertEqual(report["count"], 3)
+        self.assertEqual(report["groups"], 1)
+        self.assertEqual(report["reclaim"], 500)
+        self.assertTrue(report["ready"])
+
+    def test_views_dup_not_ready_without_tables(self):
+        con = db.connect()
+        con.execute("DELETE FROM dup_members")
+        con.execute("DELETE FROM dup_groups")
+        con.commit()
+        con.close()
+        report = space.views()["dup"]
+        self.assertEqual(report["count"], 0)
+        self.assertFalse(report["ready"])
+
+
 if __name__ == "__main__":
     unittest.main()
 

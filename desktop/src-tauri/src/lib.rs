@@ -9,6 +9,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 mod export;
 
+mod py;
+
 mod live;
 
 use live::LiveSidecar;
@@ -430,7 +432,11 @@ fn has_table(conn: &rusqlite::Connection, name: &str) -> bool {
     .is_ok()
 }
 
-fn filter_where(filter: &Filter, has_asset_tags: bool) -> (String, Vec<rusqlite::types::Value>) {
+fn filter_where(
+    filter: &Filter,
+    has_asset_tags: bool,
+    has_dup_tables: bool,
+) -> (String, Vec<rusqlite::types::Value>) {
     let mut sql = String::from(" WHERE 1=1");
     let mut args: Vec<rusqlite::types::Value> = Vec::new();
 
@@ -474,11 +480,19 @@ fn filter_where(filter: &Filter, has_asset_tags: bool) -> (String, Vec<rusqlite:
     push(filter.day_to.as_deref(), " AND a.day <= ?{n}", &mut args, &mut sql);
 
     // 图库清理视角：都在服务端筛，前端只拿当前这一页。
-    // 重复图用「同 size 且同 kind」粗筛，不依赖 dhash（真实库还没有去重表）。
+    // 重复图读真实去重表（dhash 跑完后由 lifelog dedup --build 写入）。
     match filter.view.as_deref() {
-        Some("dup") => sql.push_str(
-            " AND a.kind = 'image' AND a.size IS NOT NULL AND a.size IN (                 SELECT size FROM assets WHERE kind = 'image' AND size IS NOT NULL                  GROUP BY size HAVING count(*) > 1)",
-        ),
+        Some("dup") => {
+            // 真实去重表：只列 dup_members 里的成员；keeper 也列出来（标「保留」），但不进待清理。
+            if has_dup_tables {
+                sql.push_str(
+                    " AND a.id IN (SELECT asset_id FROM dup_members)",
+                );
+            } else {
+                // 还没跑 dhash：不拿「同 size」冒充重复，前端会显示「正在计算指纹」。
+                sql.push_str(" AND 0");
+            }
+        }
         Some("screenshot") => sql.push_str(
             " AND ((a.path LIKE '%Screenshot%' OR a.path LIKE '%screenshot%'                     OR a.path LIKE '%截屏%' OR a.path LIKE '%屏幕%')                    OR c.scene LIKE '%屏幕%' OR c.scene LIKE '%截屏%'                    OR c.tags LIKE '%屏幕截图%' OR c.tags LIKE '%截屏%')",
         ),
@@ -494,7 +508,8 @@ fn filter_where(filter: &Filter, has_asset_tags: bool) -> (String, Vec<rusqlite:
 fn count_assets(db: State<'_, Db>, filter: Filter) -> Result<i64, String> {
     let guard = db.open()?;
     let conn = guard.as_ref().unwrap();
-    let (where_sql, args) = filter_where(&filter, has_table(conn, "asset_tags"));
+    let has_dup = has_table(conn, "dup_groups") && has_table(conn, "dup_members");
+    let (where_sql, args) = filter_where(&filter, has_table(conn, "asset_tags"), has_dup);
     let sql = format!(
         "SELECT count(*) FROM assets a \
          LEFT JOIN captions c ON c.rowid = ( \
@@ -569,7 +584,8 @@ fn apply_score_cursor(
 fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, String> {
     let guard = db.open()?;
     let conn = guard.as_ref().unwrap();
-    let (mut where_sql, mut args) = filter_where(&filter, has_table(conn, "asset_tags"));
+    let has_dup = has_table(conn, "dup_groups") && has_table(conn, "dup_members");
+    let (mut where_sql, mut args) = filter_where(&filter, has_table(conn, "asset_tags"), has_dup);
     let has_sort = has_column(conn, "assets", "taken_sort");
     if filter.cursor.as_deref().map(str::trim).is_some_and(|c| !c.is_empty()) && !has_sort {
         return Err("数据库缺少 taken_sort 列，请先运行一次 lifelog CLI 升级索引".to_string());
@@ -855,7 +871,11 @@ fn load_export_rows(conn: &Connection, args: &ExportArgs) -> Result<Vec<export::
                 .collect();
             (format!(" WHERE a.id IN ({placeholders})"), values)
         }
-        (_, Some(filter)) => filter_where(filter, has_table(conn, "asset_tags")),
+        (_, Some(filter)) => filter_where(
+            filter,
+            has_table(conn, "asset_tags"),
+            has_table(conn, "dup_groups") && has_table(conn, "dup_members"),
+        ),
         _ => (String::from(" WHERE 1=1"), Vec::new()),
     };
     let sql = format!(
@@ -1138,7 +1158,8 @@ async fn import_xiaomi(app: AppHandle, db: State<'_, Db>, dry_run: bool) -> Resu
         } else {
             args.push("--json".to_string());
         }
-        let output = Command::new("python3")
+        let python = py::resolve(&home)?;
+        let output = Command::new(python)
             .current_dir(&repo)
             .args(&args)
             .env("LIFELOG_HOME", &home)
@@ -1272,7 +1293,8 @@ async fn generate_thumbs(
         if !script.exists() {
             return Err(format!("找不到缩略图脚本：{}", script.display()));
         }
-        let mut command = std::process::Command::new("python3");
+        let python = py::resolve(&home)?;
+        let mut command = std::process::Command::new(python);
         command
             .arg(&script)
             .arg("--json")
@@ -1311,10 +1333,28 @@ fn python_db_path(home: &Path) -> PathBuf {
         .unwrap_or_else(|_| home.join("lifelog.sqlite"))
 }
 
+/// 从界面「立即计算指纹」触发：跑一次 lifelog dedup --build。
+#[tauri::command]
+async fn dedup_build(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        run_python_cli(&home, &["dedup".to_string(), "--build".to_string()])
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+/// 诊断用：返回当前会使用的 Python 解释器（含 Pillow）。
+#[tauri::command]
+fn python_report(db: State<'_, Db>) -> serde_json::Value {
+    py::report(&db.data_dir)
+}
+
 fn run_python_cli(home: &Path, args: &[String]) -> Result<serde_json::Value, String> {
     // lifelog 包在仓库根目录，不在 desktop/ 下；用 desktop_root 会 ModuleNotFoundError
     let root = repo_root();
-    let output = std::process::Command::new("python3")
+    let python = py::resolve(home)?;
+    let output = std::process::Command::new(python)
         .arg("-c")
         .arg("from lifelog.cli import main; main()")
         .args(args)
@@ -1404,7 +1444,8 @@ async fn import_folder(
     tauri::async_runtime::spawn_blocking(move || {
         let root = repo_root();
         let _ = app.emit("import-progress", serde_json::json!({"stage": "ingest", "message": "正在扫描文件夹"}));
-        let output = std::process::Command::new("python3")
+        let python = py::resolve(&home)?;
+        let output = std::process::Command::new(python)
             .arg("-c")
             .arg("from lifelog.cli import main; main()")
             .arg("ingest")
@@ -1427,7 +1468,8 @@ async fn import_folder(
         let script = root.join("scripts/gen_thumbs.py");
         if script.exists() {
             let _ = app.emit("import-progress", serde_json::json!({"stage": "thumbs", "message": "正在生成缩略图"}));
-            if let Ok(mut child) = std::process::Command::new("python3")
+            let python = py::resolve(&home)?;
+            if let Ok(mut child) = std::process::Command::new(python)
                 .arg(&script)
                 .arg("--json")
                 .arg("--jobs")
@@ -1463,7 +1505,8 @@ async fn rebuild_thumbs(db: State<'_, Db>) -> Result<serde_json::Value, String> 
         if !script.exists() {
             return Err(format!("找不到缩略图脚本：{}", script.display()));
         }
-        let output = std::process::Command::new("python3")
+        let python = py::resolve(&home)?;
+        let output = std::process::Command::new(python)
             .arg(&script)
             .arg("--force")
             .current_dir(&root)
@@ -1528,6 +1571,8 @@ pub fn run() {
             open_privacy_settings,
             reveal_in_finder,
             open_external,
+            python_report,
+            dedup_build,
             facets,
             timeline_months,
             album_groups,
@@ -1593,7 +1638,7 @@ mod filter_tests {
     }
 
     fn count(conn: &rusqlite::Connection, filter: &Filter) -> i64 {
-        let (where_sql, args) = filter_where(filter, true);
+        let (where_sql, args) = filter_where(filter, true, false);
         let sql = format!(
             "SELECT count(*) FROM assets a \
              LEFT JOIN captions c ON c.rowid = ( \
@@ -1605,7 +1650,7 @@ mod filter_tests {
     }
 
     fn list(conn: &rusqlite::Connection, filter: &Filter) -> usize {
-        let (where_sql, mut args) = filter_where(filter, true);
+        let (where_sql, mut args) = filter_where(filter, true, false);
         let mut sql = format!(
             "SELECT a.id FROM assets a \
              LEFT JOIN captions c ON c.rowid = ( \
@@ -1683,10 +1728,20 @@ mod filter_tests {
         conn.execute_batch("UPDATE assets SET size = 700 WHERE id = 's1'").unwrap();
         conn.execute_batch("INSERT INTO captions VALUES (4,'s1','手机截图','屏幕截图','无','手机','查看','平静','[\"屏幕截图\"]',NULL,'2024-01-05')").unwrap();
 
+        // 真实去重表：dup 视角从 dup_members 取，keeper 也在里面。
+        conn.execute_batch(
+            "CREATE TABLE dup_groups (id INTEGER PRIMARY KEY, keeper_id TEXT, reason TEXT, created_at TEXT);
+             CREATE TABLE dup_members (group_id INTEGER, asset_id TEXT, distance INTEGER, PRIMARY KEY (group_id, asset_id));
+             INSERT INTO dup_groups VALUES (1, 'a2', 'l1', '2024-01-01');
+             INSERT INTO dup_members VALUES (1, 'a2', 0);
+             INSERT INTO dup_members VALUES (1, 'a3', 3);",
+        )
+        .unwrap();
+
         let count = |view: &str| -> i64 {
             let mut f = filter();
             f.view = Some(view.into());
-            let (where_sql, args) = filter_where(&f, true);
+            let (where_sql, args) = filter_where(&f, true, true);
             let sql = format!(
                 "SELECT count(*) FROM assets a \
                  LEFT JOIN captions c ON c.rowid = ( \
@@ -1698,8 +1753,21 @@ mod filter_tests {
         };
 
         assert_eq!(count("large"), 5);
-        // 同 size 同 kind 的图片组：a2/a3（900）
+        // 真实去重表：keeper a2 + 成员 a3
         assert_eq!(count("dup"), 2);
+        // 没有 dup 表时不能拿「同 size」冒充重复，应返回 0（前端显示「正在计算指纹」）。
+        let missing = {
+            let mut f = filter();
+            f.view = Some("dup".into());
+            let (where_sql, args) = filter_where(&f, true, false);
+            conn.query_row(
+                &format!("SELECT count(*) FROM assets a {where_sql}"),
+                params_from_iter(args.iter()),
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(missing, 0);
         assert_eq!(count("video"), 1);
         assert_eq!(count("photo"), 4);
         // 路径命中 Screenshot + caption 的 scene/tags 命中，两层都算
@@ -1792,7 +1860,7 @@ mod filter_tests {
         loop {
             let mut f = filter();
             f.limit = Some(page);
-            let (mut where_sql, mut args) = filter_where(&f, true);
+            let (mut where_sql, mut args) = filter_where(&f, true, false);
             let keyset = apply_cursor(&mut where_sql, &mut args, cursor.as_deref(), "a.taken_at");
             assert!(keyset || pages == 0, "第一页之后必须走游标");
             let sql = format!(
@@ -1877,7 +1945,7 @@ mod filter_tests {
         let mut seen: Vec<String> = Vec::new();
         let mut cursor: Option<String> = None;
         for _ in 0..4 {
-            let (mut where_sql, mut args) = filter_where(&f, true);
+            let (mut where_sql, mut args) = filter_where(&f, true, false);
             if cursor.is_some() {
                 assert!(apply_score_cursor(&mut where_sql, &mut args, cursor.as_deref()));
             }
@@ -1934,7 +2002,7 @@ mod filter_tests {
             f.limit = Some(page);
             f.day_from = Some("2024-01-01".to_string());
             f.day_to = Some("2024-01-31".to_string());
-            let (mut where_sql, mut args) = filter_where(&f, true);
+            let (mut where_sql, mut args) = filter_where(&f, true, false);
             apply_cursor(&mut where_sql, &mut args, cursor.as_deref(), "a.taken_at");
             let sql = format!(
                 "SELECT a.id, a.taken_at, a.day FROM assets a {}                  ORDER BY a.taken_at DESC, a.day DESC, a.id DESC LIMIT ?",
@@ -1988,7 +2056,7 @@ mod filter_tests {
         loop {
             let mut f = filter();
             f.limit = Some(page);
-            let (mut where_sql, mut args) = filter_where(&f, true);
+            let (mut where_sql, mut args) = filter_where(&f, true, false);
             apply_cursor(&mut where_sql, &mut args, cursor.as_deref(), "a.taken_at");
             let sql = format!(
                 "SELECT a.id, a.taken_at FROM assets a {}                  ORDER BY COALESCE(a.taken_at, '') DESC, a.id DESC LIMIT ?",
@@ -2049,7 +2117,7 @@ mod filter_tests {
         loop {
             let mut f = filter();
             f.limit = Some(page);
-            let (mut where_sql, mut args) = filter_where(&f, true);
+            let (mut where_sql, mut args) = filter_where(&f, true, false);
             apply_cursor(&mut where_sql, &mut args, cursor.as_deref(), "a.taken_sort");
             let sql = format!(
                 "SELECT a.id, a.taken_sort FROM assets a {}                  ORDER BY a.taken_sort DESC, a.id DESC LIMIT ?",
@@ -2291,6 +2359,11 @@ fn open_privacy_settings() -> Result<(), String> {
         .status()
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+/// 命令行诊断入口：返回当前会使用的 Python 解释器。
+pub fn python_report_for(home: &Path) -> String {
+    py::report_string(home)
 }
 
 /// 命令行诊断入口用：按数据目录里的库算一份授权检查结果。

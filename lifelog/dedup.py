@@ -199,8 +199,20 @@ def backfill_sha256(con) -> int:
     return done
 
 
+def _require_pillow() -> None:
+    """没有 Pillow 时不能悄悄把整批图记成 error——那会让去重结果看起来「跑完了」。"""
+    try:
+        from PIL import Image  # noqa: F401
+    except Exception as exc:  # noqa: BLE001 - 要把缺依赖的原因原样报出来
+        raise SystemExit(
+            f"dedup 需要 Pillow：{exc}。请用带 Pillow 的解释器（例如 .venv/bin/python），"
+            "或设置 LIFELOG_PYTHON 指向它。"
+        ) from exc
+
+
 def build(con, limit: int | None = None, progress=None) -> dict:
     """增量算哈希：只处理没有 asset_hash 行的 asset，分批提交，可中断续跑。"""
+    _require_pillow()
     started = _now_iso()
     run_id = con.execute(
         "INSERT INTO runs (stage, model, started_at, stats) VALUES ('dedup', 'dhash', ?, ?)",
@@ -239,9 +251,13 @@ def build(con, limit: int | None = None, progress=None) -> dict:
         else:
             try:
                 info = scan_image(asset_path(path))
-            except Exception:
-                batch.append((asset_id, digest, None, None, None, None, _now_iso(), "error", None, None))
+            except Exception as exc:
+                # 具体原因写进 runs.stats，否则只剩一个 status=error 的空行，没法判断是坏图还是环境问题。
                 stats["errors"] += 1
+                sample = stats.setdefault("error_samples", [])
+                if len(sample) < 20:
+                    sample.append(f"{asset_id}: {type(exc).__name__}: {exc}")
+                batch.append((asset_id, digest, None, None, None, None, _now_iso(), "error", None, None))
             else:
                 batch.append(
                     (
