@@ -20,8 +20,10 @@ export type Asset = {
   score?: number | null;
   /** 文件字节数 */
   size?: number | null;
-  /** 同 size + 同 kind 的图片组里有多少个文件（≥2 才有值）。 */
+  /** 所在重复组的成员数（≥2 才有值）。 */
   dup_count?: number | null;
+  /** 所在重复组的 keeper（保留那张）。 */
+  keeper?: boolean | null;
 };
 
 export type Stats = {

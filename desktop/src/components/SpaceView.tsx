@@ -3,11 +3,11 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
 import {
   Check,
-  CheckSquare,
   ExternalLink,
   Film,
   Image as ImageIcon,
   ImageOff,
+  Info,
   LoaderCircle,
   Maximize2,
   Play,
@@ -44,10 +44,9 @@ const CARD_MIN_WIDTH = 158;
 
 type SpaceViewItem = { key: SpaceViewKey; label: string; hint: string };
 
-// 五个视角。同一时间只有一个生效；口径写在这里，界面上也能看到。
 const VIEWS: SpaceViewItem[] = [
   { key: "large", label: "全部大文件", hint: "按文件体积从大到小" },
-  { key: "dup", label: "重复图", hint: "同 size 同 kind 的图片粗筛" },
+  { key: "dup", label: "重复图", hint: "按 dhash 指纹分组的重复照片" },
   { key: "screenshot", label: "屏幕截图", hint: "路径 + scene/tags 两层筛选" },
   { key: "video", label: "视频", hint: "kind = video" },
   { key: "photo", label: "照片", hint: "kind = image" },
@@ -59,7 +58,7 @@ function kindText(entry: CleanupEntry): string {
   return "照片";
 }
 
-/** 空间页统计要区分「0 B」和「读不到」，不能用 — 表示空。 */
+/** 统计要区分「0 B」和「读不到」，不能用 — 表示空。 */
 function statBytes(bytes: number): string {
   return bytes > 0 ? formatBytes(bytes) : "0 B";
 }
@@ -116,7 +115,8 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   const [view, setView] = useState<SpaceViewKey>("large");
   const [views, setViews] = useState<SpaceViews | null>(null);
   const [groups, setGroups] = useState<SpaceGroup[]>([]);
-  const [version, setVersion] = useState<string>("");
+  const [groupsTotal, setGroupsTotal] = useState(0);
+  const [version, setVersion] = useState("");
   const [rows, setRows] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -129,11 +129,10 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   const [pathFilter, setPathFilter] = useState("");
   const [lastClean, setLastClean] = useState<{ count: number; bytes: number } | null>(null);
   const [computing, setComputing] = useState(false);
-  const [showAllGroups, setShowAllGroups] = useState(false);
-  const [groupsTotal, setGroupsTotal] = useState(0);
   const [allBusy, setAllBusy] = useState(false);
   const [confirmAll, setConfirmAll] = useState(false);
-  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [gridWidth, setGridWidth] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -142,28 +141,15 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   const filterTimer = useRef<number | undefined>(undefined);
   const cleanedVersion = useRef(dataVersion);
   const anchorRef = useRef<string | null>(null);
-  const [gridWidth, setGridWidth] = useState(0);
+  // 重复图组里「点任意一张 = 整组切换」需要成员 id；按组缓存，不放进 chip payload。
+  const groupIdsRef = useRef<Record<string, string[]>>({});
 
   const queueIds = useMemo(() => new Set((queue?.items ?? []).map((item) => item.asset_id)), [queue]);
   const rowById = useMemo(() => new Map(rows.map((asset) => [asset.id, asset])), [rows]);
   const columns = Math.max(2, Math.min(6, Math.floor((gridWidth + GAP) / (CARD_MIN_WIDTH + GAP))));
 
-  // 重复图组表很大（真实库 5,251 组）：默认只画前 30 组 chip，点「显示全部」后才整列虚拟滚动。
-  // 每组的 ids 不在 chip payload 里，点某组时才按需拉。
-  const [groupIds, setGroupIds] = useState<Record<string, string[]>>({});
-  const visibleGroups = useMemo(() => {
-    if (view !== "dup") return groups;
-    return showAllGroups ? groups : groups.slice(0, 30);
-  }, [groups, showAllGroups, view]);
-
-  // 分组表可能很大（真实库 401 组），用 id → 组 的索引，渲染时不做 O(n) 查找。
-  const groupIndex = useMemo(() => {
-    const index = new Map<string, SpaceGroup>();
-    for (const group of groups) {
-      for (const id of group.ids ?? []) index.set(id, group);
-    }
-    return index;
-  }, [groups]);
+  // 一屏只出现一次的数字：面板头用这一句，胶囊只留名字。
+  const summaryLine = currentStatLine(views, view, loading);
 
   const refreshQueue = useCallback(async () => {
     try {
@@ -183,32 +169,11 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
     }
   }, []);
 
-  // 重复图视角：指纹没算完时给一个「立即计算」，真跑 lifelog dedup --build。
-  const computeDup = useCallback(async () => {
-    if (computing) return;
-    setComputing(true);
-    try {
-      const result = (await dedupBuild()) as { errors?: number } | null;
-      if (result && typeof result.errors === "number" && result.errors > 0) {
-        onToast("指纹计算完成，但仍有 " + result.errors + " 张失败，详情见设置页日志");
-      } else {
-        onToast("指纹已计算完成");
-      }
-      void refreshStats();
-      void refreshQueue();
-    } catch (reason) {
-      onToast("计算指纹失败：" + String(reason));
-    } finally {
-      setComputing(false);
-    }
-  }, [computing, onToast, refreshQueue, refreshStats]);
-
   useEffect(() => {
     void refreshQueue();
     void refreshStats();
   }, [refreshQueue, refreshStats, dataVersion]);
 
-  // 清单在别处被改（比如真实清理）时重新对齐。
   useEffect(() => {
     if (dataVersion === cleanedVersion.current) return;
     cleanedVersion.current = dataVersion;
@@ -216,7 +181,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
     void refreshStats();
   }, [dataVersion, refreshQueue, refreshStats]);
 
-  // 分组只跟「视角 + 库内容指纹」有关：切视角不用重新扫库，库变了才重拉。
+  // 分组只跟「视角 + 库内容指纹」有关；重复图只需要总数与可回收体积。
   useEffect(() => {
     if (view !== "dup" && view !== "screenshot") {
       setGroups([]);
@@ -224,8 +189,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
       return;
     }
     let alive = true;
-    // dup 默认只要最大的 30 组（轻量字段）；screenshot 组数很小，照旧全量。
-    spaceGroups(view, view === "dup" ? { limit: 30 } : {})
+    spaceGroups(view, view === "dup" ? { limit: 1 } : {})
       .then((result) => {
         if (!alive) return;
         setGroups(result.groups);
@@ -239,32 +203,29 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
     };
   }, [view, version]);
 
-  // 点「显示全部」：按 300 组分页把剩余组补进来（每次请求只带轻量字段）。
-  const loadAllGroups = useCallback(async () => {
-    if (view !== "dup") return;
-    setShowAllGroups(true);
-    if (groups.length >= groupsTotal) return;
+  const computeDup = useCallback(async () => {
+    if (computing) return;
+    setComputing(true);
     try {
-      let offset = groups.length;
-      let collected = groups;
-      while (offset < groupsTotal) {
-        const page = await spaceGroups("dup", { limit: 300, offset });
-        if (!page.groups.length) break;
-        collected = [...collected, ...page.groups];
-        offset += page.groups.length;
-        setGroups(collected);
-      }
+      const result = (await dedupBuild()) as { errors?: number } | null;
+      onToast(
+        result && typeof result.errors === "number" && result.errors > 0
+          ? "指纹已计算，仍有 " + result.errors + " 张失败"
+          : "指纹已计算完成",
+      );
+      void refreshStats();
     } catch (reason) {
-      onToast("加载全部重复组失败：" + String(reason));
+      onToast("计算指纹失败：" + String(reason));
+    } finally {
+      setComputing(false);
     }
-  }, [groups, groupsTotal, onToast, view]);
+  }, [computing, onToast, refreshStats]);
 
   const fetchPage = useCallback(async (offset: number) => {
     if (offset === 0) setLoading(true);
     else setLoadingMore(true);
     const ticket = ++requestId.current;
     try {
-      // 首屏 200 个；滚动到底再按 offset 取下一页。视角过滤在服务端做。
       const page = await queryAssets({
         limit: PAGE_SIZE,
         offset,
@@ -333,8 +294,6 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
         .map((id) => rowById.get(id))
         .filter((asset): asset is Asset => Boolean(asset));
       const snapshot = queue;
-      // 不在这一页里的 id（比如「同一 size 的第 51 张」）没有 size 可算，先用 0 占位，
-      // 等服务端返回总数/字节后再校正；不能把它们从清单里漏掉。
       const unknown = unique.filter((id) => !rowById.has(id));
       setQueue((previous) => {
         const base = previous ?? { items: [], count: 0, bytes: 0 };
@@ -379,14 +338,17 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
         chunks.push(unique.slice(start, start + 2000));
       }
       chunks
-        .reduce<Promise<{ changed?: number; count: number; bytes: number }>>((pending, chunk) =>
-          pending.then((last) =>
-            (add ? cleanupAdd(chunk) : cleanupRemove(chunk)).then((next) => ({ ...next, changed: (last.changed ?? 0) + (next.changed ?? 0) })),
-          ),
+        .reduce<Promise<{ changed?: number; count: number; bytes: number }>>(
+          (pending, chunk) =>
+            pending.then((last) =>
+              (add ? cleanupAdd(chunk) : cleanupRemove(chunk)).then((next) => ({
+                ...next,
+                changed: (last.changed ?? 0) + (next.changed ?? 0),
+              })),
+            ),
           Promise.resolve({ changed: 0, count: 0, bytes: 0 }),
         )
         .then((change) => {
-          // 以服务端返回的总数/字节为准；未知行（比如整组）：拉一次清单把缩略图补齐。
           setQueue((previous) =>
             previous ? { ...previous, count: change.count, bytes: change.bytes } : previous,
           );
@@ -410,19 +372,70 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
     [applyQueue],
   );
 
-  const toggleGroup = useCallback(
-    (group: SpaceGroup, add: boolean) => {
-      const ids = group.ids ?? [];
-      if (!ids.length) return;
-      // 重复图整组切换时，keeper 不参与「加入」：点组内任意一张 = 整组移入/移出。
-      const target = add ? ids.filter((id) => id !== group.keep) : ids;
-      if (!target.length) return;
-      applyQueue(target, add);
+  /** 某张图所在重复组的成员（含 keeper），带缓存。 */
+  const groupIdsOf = useCallback(async (assetId: string) => {
+    const cached = Object.entries(groupIdsRef.current).find(([, ids]) => ids.includes(assetId));
+    if (cached) return cached[1];
+    let offset = 0;
+    for (;;) {
+      const page = await spaceGroups("dup", { limit: 500, offset });
+      if (!page.groups.length) break;
+      for (const group of page.groups) {
+        if (groupIdsRef.current[group.key]) continue;
+        const ids = (await spaceGroups("dup", { group: group.key })).groups[0]?.ids ?? [];
+        groupIdsRef.current[group.key] = ids;
+        if (ids.includes(assetId)) return ids;
+      }
+      offset += page.groups.length;
+    }
+    return [] as string[];
+  }, []);
+
+  /** 重复图：点任意一张 = 整组切换，keeper 永远不进待清理。 */
+  const toggleDupByAsset = useCallback(
+    async (assetId: string) => {
+      try {
+        const ids = await groupIdsOf(assetId);
+        const keeper = ids.find((id) => rowById.get(id)?.keeper) ?? null;
+        const candidates = ids.filter((id) => id !== keeper);
+        if (!candidates.length) return;
+        const add = candidates.some((id) => !queueIds.has(id));
+        applyQueue(add ? candidates.filter((id) => !queueIds.has(id)) : candidates, add);
+      } catch (reason) {
+        onToast("读取这一组失败：" + String(reason));
+      }
     },
-    [applyQueue],
+    [applyQueue, groupIdsOf, onToast, queueIds, rowById],
   );
 
-  // 键盘：方向键在网格里移动焦点，空格/回车切换待清理（双击/打开详情留给鼠标）。
+  const handleCardClick = useCallback(
+    (asset: Asset, event: React.MouseEvent) => {
+      const inQueue = queueIds.has(asset.id);
+      setFocusId(asset.id);
+
+      if (event.shiftKey && anchorRef.current) {
+        const from = rows.findIndex((item) => item.id === anchorRef.current);
+        const to = rows.findIndex((item) => item.id === asset.id);
+        if (from >= 0 && to >= 0) {
+          const [start, end] = from <= to ? [from, to] : [to, from];
+          toggleAssets(rows.slice(start, end + 1), !inQueue);
+          return;
+        }
+      }
+
+      if (view === "dup") {
+        void toggleDupByAsset(asset.id);
+        anchorRef.current = asset.id;
+        return;
+      }
+
+      toggleAssets([asset], !inQueue);
+      anchorRef.current = asset.id;
+    },
+    [queueIds, rows, toggleAssets, toggleDupByAsset, view],
+  );
+
+  // 键盘：方向键移焦点，空格/回车切换待清理。
   const moveFocus = useCallback(
     (delta: number, extend: boolean) => {
       if (!rows.length) return;
@@ -431,9 +444,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
       const asset = rows[next];
       if (!asset) return;
       setFocusId(asset.id);
-      if (extend) {
-        toggleAssets([asset], !queueIds.has(asset.id));
-      }
+      if (extend) toggleAssets([asset], !queueIds.has(asset.id));
       requestAnimationFrame(() => {
         gridRef.current
           ?.querySelector<HTMLElement>(`[data-grid-id="${asset.id}"]`)
@@ -458,75 +469,15 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
         const asset = rows.find((item) => item.id === focusId) ?? rows[0];
         if (asset) {
           setFocusId(asset.id);
-          toggleAssets([asset], !queueIds.has(asset.id));
+          if (view === "dup") void toggleDupByAsset(asset.id);
+          else toggleAssets([asset], !queueIds.has(asset.id));
         }
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [columns, focusId, moveFocus, queueIds, rows, toggleAssets]);
+  }, [columns, focusId, moveFocus, queueIds, rows, toggleAssets, toggleDupByAsset, view]);
 
-  const handleCardClick = useCallback(
-    (asset: Asset, event: React.MouseEvent) => {
-      const group = groupIndex.get(asset.id) ?? null;
-      const inQueue = queueIds.has(asset.id);
-      setFocusId(asset.id);
-
-      if (event.shiftKey && anchorRef.current) {
-        const from = rows.findIndex((item) => item.id === anchorRef.current);
-        const to = rows.findIndex((item) => item.id === asset.id);
-        if (from >= 0 && to >= 0) {
-          const [start, end] = from <= to ? [from, to] : [to, from];
-          const range = rows.slice(start, end + 1);
-          toggleAssets(range, !inQueue);
-          return;
-        }
-      }
-
-      // 重复图：点组内任意一张，整组一起切（保留的那张不参与加入）。
-      if (group && view === "dup") {
-        toggleGroup(group, !inQueue);
-        anchorRef.current = asset.id;
-        return;
-      }
-
-      toggleAssets([asset], !inQueue);
-      anchorRef.current = asset.id;
-    },
-    [groupIndex, queueIds, rows, toggleAssets, toggleGroup, view],
-  );
-
-  // 按需拉某一组的 ids（chip payload 里不带，避免 1.2MB JSON）。
-  const fetchGroupIds = useCallback(
-    async (group: SpaceGroup) => {
-      const known = groupIds[group.key];
-      if (known) return known;
-      const result = await spaceGroups("dup", { group: group.key });
-      const ids = result.groups[0]?.ids ?? [];
-      setGroupIds((previous) => ({ ...previous, [group.key]: ids }));
-      return ids;
-    },
-    [groupIds],
-  );
-
-  const toggleDupGroup = useCallback(
-    async (group: SpaceGroup) => {
-      setBusyKey(group.key);
-      try {
-        const ids = (await fetchGroupIds(group)).filter((id) => id !== group.keep);
-        if (!ids.length) return;
-        const add = ids.some((id) => !queueIds.has(id));
-        applyQueue(add ? ids.filter((id) => !queueIds.has(id)) : ids, add);
-      } catch (reason) {
-        onToast("读取这一组失败：" + String(reason));
-      } finally {
-        setBusyKey(null);
-      }
-    },
-    [applyQueue, fetchGroupIds, onToast, queueIds],
-  );
-
-  // 「全部加入待清理」：服务端一条 INSERT…SELECT 完成，不发 5,251 个请求。
   const addAllDup = useCallback(async () => {
     if (allBusy) return;
     setAllBusy(true);
@@ -535,7 +486,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
       const change = await cleanupAddAllDup();
       await refreshQueue();
       void refreshStats();
-      onToast("已加入待清理 " + change.changed + " 个重复项（keeper 未加入）");
+      onToast("已加入 " + change.changed + " 个重复项（keeper 未加入）");
     } catch (reason) {
       onToast("全部加入失败：" + String(reason));
     } finally {
@@ -543,104 +494,70 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
     }
   }, [allBusy, onToast, refreshQueue, refreshStats]);
 
-  // 重复图视角：每组的非 keeper 成员默认勾上待清理。
-  // 真实库有几千组，不能一次全塞进清单：只处理「已经载入到网格的组」，每组只默认一次，
-  // 滚动加载到新组时再补勾；用户之后手动取消过的组不会被重新勾上。
-  const autoDupRef = useRef<Set<string>>(new Set());
-  const autoDupVersion = useRef("");
-  useEffect(() => {
-    if (view !== "dup" || !groups.length) return;
-    if (autoDupVersion.current !== version) {
-      // 库内容变了（重新算过指纹/删过图）：旧记忆作废，重新给一次默认。
-      autoDupVersion.current = version;
-      autoDupRef.current = new Set();
+  const removeAll = useCallback(async () => {
+    const ids = (queue?.items ?? []).map((item) => item.asset_id);
+    if (!ids.length) return;
+    const previous = queue;
+    setQueue({ items: [], count: 0, bytes: 0 });
+    setBusy(true);
+    try {
+      // 后端单次最多 2000 个：重复图一次加入几千条时必须分批。
+      let change = { changed: 0, count: ids.length, bytes: 0 };
+      for (let start = 0; start < ids.length; start += 2000) {
+        change = await cleanupRemove(ids.slice(start, start + 2000));
+      }
+      setQueue({ items: [], count: change.count, bytes: change.bytes });
+      void refreshStats();
+    } catch (reason) {
+      setQueue(previous);
+      onToast("移出待清理失败：" + String(reason));
+    } finally {
+      setBusy(false);
     }
-    if (!rowById.size) return;
-    const fresh: string[] = [];
-    for (const group of groups) {
-      if (autoDupRef.current.has(group.key)) continue;
-      const loaded = (group.ids ?? []).filter((id) => rowById.has(id));
-      if (!loaded.length) continue;
-      autoDupRef.current.add(group.key);
-      fresh.push(...loaded.filter((id) => id !== group.keep));
-    }
-    if (fresh.length) applyQueue(Array.from(new Set(fresh)), true);
-  }, [applyQueue, groups, rowById, version, view]);
+  }, [busy, onToast, queue, refreshStats]);
 
-  // 网格按行虚拟化：行高由列宽算出（16:10 卡片 + 间距），滚动时不重排。
-  const cardWidth = gridWidth > 0 ? (gridWidth - GAP * (columns - 1)) / columns : CARD_MIN_WIDTH;
-  const cardHeight = Math.round(cardWidth * 0.625) + 8;
-  const rowCount = Math.ceil(rows.length / columns);
-  const virtualizer = useVirtualizer({
-    count: rowCount,
+  const rowVirtualizer = useVirtualizer({
+    count: Math.ceil(rows.length / columns),
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => cardHeight + GAP,
+    estimateSize: () => Math.round(((gridWidth - GAP * (columns - 1)) / columns) * 0.625) + 8 + GAP,
     overscan: 2,
   });
 
-  useEffect(() => {
-    virtualizer.measure();
-  }, [cardHeight, columns, virtualizer]);
-
-  const currentStat = views?.[view];
-  // 后端 space-views 会带 ready；缺省时按「有没有组」判断。
-  const dupReady = views?.dup ? views.dup.ready !== false : false;
+  const cardWidth = gridWidth > 0 ? (gridWidth - GAP * (columns - 1)) / columns : CARD_MIN_WIDTH;
+  const cardHeight = Math.round(cardWidth * 0.625) + 8;
   const queueTotal = queue?.count ?? 0;
   const queueBytes = queue?.bytes ?? 0;
   const focused = focusedId(rows, queue, focusId);
-
-  // 与胶囊同一口径：重复图的 bytes 含 keeper，展示可回收；其它视角 bytes 就是占用。
-  const summaryLine = currentStat
-    ? view === "dup"
-      ? `${currentStat.count.toLocaleString()} 个 · 可回收 ${statBytes(currentStat.reclaim ?? 0)}`
-      : `${currentStat.count.toLocaleString()} 个 · ${statBytes(currentStat.bytes)}`
-    : loading
-      ? "读取中…"
-      : "";
+  const dupStat = views?.dup;
 
   return (
     <div className="space-view">
       <div className="space-view-pills" role="tablist" aria-label="清理视角">
-        {VIEWS.map((item) => {
-          const stat = views?.[item.key];
-          return (
-            <button
-              key={item.key}
-              type="button"
-              role="tab"
-              aria-selected={view === item.key}
-              className={clsx("space-pill", view === item.key && "active")}
-              title={item.hint}
-              onClick={() => {
-                if (item.key === view) return;
-                setView(item.key);
-              }}
-            >
-              <span>{item.label}</span>
-              <em>
-                {/* 重复图：bytes 是成员总大小（含 keeper），能腾出的是 reclaim；其它视角 bytes 就是占用。 */}
-                {stat
-                  ? item.key === "dup"
-                    ? `${stat.count.toLocaleString()} · 可回收 ${statBytes(stat.reclaim ?? 0)}`
-                    : `${stat.count.toLocaleString()} · ${statBytes(stat.bytes)}`
-                  : "…"}
-                {item.key === "dup" && stat?.groups ? ` · ${stat.groups.toLocaleString()} 组` : ""}
-              </em>
-            </button>
-          );
-        })}
+        {VIEWS.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            role="tab"
+            aria-selected={view === item.key}
+            className={clsx("space-pill", view === item.key && "active")}
+            title={item.hint}
+            onClick={() => {
+              if (item.key === view) return;
+              setView(item.key);
+            }}
+          >
+            <span>{item.label}</span>
+          </button>
+        ))}
       </div>
 
       <div className="space-columns">
+        {/* 左：网格 */}
         <section className="space-pane space-rank" aria-label="文件网格">
           <div className="space-pane-head">
             <div className="space-rank-title">
               <h2>{VIEWS.find((item) => item.key === view)?.label}</h2>
-              <p>
-                {summaryLine}
-                {currentStat?.rule ? ` · ${currentStat.rule}` : ""}
-                {hasMore ? " · 已载入 " + rows.length + "+" : ""}
-              </p>
+              <p>{summaryLine}</p>
             </div>
             <div className="space-rank-tools">
               <div className="space-filter">
@@ -653,7 +570,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
                     window.clearTimeout(filterTimer.current);
                     filterTimer.current = window.setTimeout(() => setPathFilter(value.trim()), 150);
                   }}
-                  placeholder="按路径筛选…"
+                  placeholder="筛选路径"
                   aria-label="按路径筛选文件网格"
                 />
                 {filterInput && (
@@ -669,109 +586,79 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
                   </button>
                 )}
               </div>
+              <button
+                type="button"
+                className={clsx("space-info", infoOpen && "on")}
+                onClick={() => setInfoOpen((open) => !open)}
+                aria-label="口径说明"
+                aria-expanded={infoOpen}
+              >
+                <Info size={12} strokeWidth={1.8} />
+              </button>
             </div>
           </div>
 
-          {(view === "screenshot" || view === "dup") && visibleGroups.length > 0 && (
-            <div className={view === "dup" ? "space-group-chips dup" : "space-group-chips"}>
-              {view === "dup" ? (
-                <DupChipList
-                  groups={visibleGroups}
-                  queueIds={queueIds}
-                  knownIds={groupIds}
-                  busyKey={busyKey}
-                  onToggle={(group) => void toggleDupGroup(group)}
-                />
-              ) : (
-                visibleGroups.map((group) => {
-                  const ids = group.ids ?? [];
-                  const candidates = ids.filter((id) => id !== group.keep);
-                  const inQueue = candidates.filter((id) => queueIds.has(id)).length;
-                  return (
-                    <button
-                      key={group.key}
-                      type="button"
-                      className={clsx(
-                        "space-group-chip",
-                        inQueue === candidates.length && candidates.length > 0 && "on",
-                      )}
-                      onClick={() => {
-                        const add = candidates.some((id) => !queueIds.has(id));
-                        applyQueue(add ? candidates.filter((id) => !queueIds.has(id)) : candidates, add);
-                      }}
-                    >
-                      <strong>{group.label}</strong>
-                      <span>
-                        {ids.length} 张（保留 1）· 可回收 {statBytes(group.reclaim_bytes ?? 0)}
-                      </span>
-                      <em>{inQueue === candidates.length && candidates.length > 0 ? "全部已勾选" : "全选本组待清理"}</em>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          )}
+          {infoOpen && <p className="space-info-pop">{views?.[view]?.rule ?? "按体积与指纹筛选"}</p>}
 
-          {view === "dup" && groupsTotal > groups.length && (
-            <button
-              type="button"
-              className="space-show-all-groups"
-              onClick={() => void loadAllGroups()}
-            >
-              显示全部 {groupsTotal.toLocaleString()} 组 →
-            </button>
-          )}
-
-          {view === "dup" && groups.length > 0 && (
-            <p className="space-view-note">
-              {groups.length} 组真实指纹 · 组内保留 1 张（标「保留」），其余默认勾上待清理；点组内任意一张切换整组，keeper 永不进待清理。
-            </p>
-          )}
-
-          {view === "dup" && groupsTotal > 0 && (
+          {view === "dup" && dupStat?.ready && groupsTotal > 0 && (
             <div className="space-bulk-dup">
+              <span className="space-bulk-copy">
+                {groupsTotal.toLocaleString()} 组重复 · 可回收 {statBytes(dupStat.reclaim ?? 0)}
+              </span>
               <button
                 type="button"
                 className="space-bulk-all"
                 onClick={() => setConfirmAll(true)}
-                disabled={allBusy || !dupReady}
+                disabled={allBusy}
               >
-                {allBusy
-                  ? "正在加入待清理…"
-                  : "把这 " + groupsTotal.toLocaleString() + " 组的重复项全部加入待清理（" +
-                    (currentStat?.reclaim_count ?? 0).toLocaleString() + " 张 · " +
-                    statBytes(currentStat?.reclaim ?? 0) + "）"}
+                {allBusy ? "正在加入…" : "自动保留每组最佳，其余加入待清理"}
               </button>
               {confirmAll && (
                 <div className="space-confirm">
-                  <div>
-                    <strong>确认全部加入？</strong>
-                    <span>
-                      会把所有重复组里 keeper 以外的
-                      重复项加入待清理；keeper 不会被加入。这一步只写清单，不动文件。
-                    </span>
-                  </div>
+                  <span>keeper 不会加入。</span>
                   <button type="button" className="ghost-button" onClick={() => setConfirmAll(false)}>
                     取消
                   </button>
                   <button type="button" className="danger-btn" onClick={() => void addAllDup()}>
-                    确认加入
+                    确认
                   </button>
                 </div>
               )}
             </div>
           )}
 
-          <div
-            className="space-grid"
-            ref={scrollRef}
-            role="grid"
-            aria-label="文件缩略图"
-            aria-multiselectable="true"
-          >
-            <div ref={gridRef} className="space-grid-inner" style={{ height: Math.max(virtualizer.getTotalSize(), cardHeight) + "px" }}>
+          {view === "screenshot" && groups.length > 0 && (
+            <div className="space-group-chips">
+              {groups.map((group) => {
+                const ids = group.ids ?? [];
+                const candidates = ids.filter((id) => id !== group.keep);
+                const inQueue = candidates.filter((id) => queueIds.has(id)).length;
+                return (
+                  <button
+                    key={group.key}
+                    type="button"
+                    className={clsx("space-group-chip", inQueue === candidates.length && candidates.length > 0 && "on")}
+                    onClick={() => {
+                      const add = candidates.some((id) => !queueIds.has(id));
+                      applyQueue(add ? candidates.filter((id) => !queueIds.has(id)) : candidates, add);
+                    }}
+                  >
+                    <strong>{group.label}</strong>
+                    <span>{ids.length} 张</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="space-grid" ref={scrollRef} role="grid" aria-label="文件缩略图" aria-multiselectable="true">
+            <div
+              ref={gridRef}
+              className="space-grid-inner"
+              style={{ height: Math.max(rowVirtualizer.getTotalSize(), cardHeight) + "px" }}
+            >
               {gridWidth > 0 &&
-                virtualizer.getVirtualItems().map((virtualRow) => {
+                rowVirtualizer.getVirtualItems().map((virtualRow) => {
                   const items = rows.slice(virtualRow.index * columns, virtualRow.index * columns + columns);
                   return (
                     <div
@@ -784,50 +671,44 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
                         gap: GAP + "px",
                       }}
                     >
-                      {items.map((asset) => {
-                        const group = groupIndex.get(asset.id);
-                        return (
-                          <SpaceCard
-                            key={asset.id}
-                            asset={asset}
-                            inQueue={queueIds.has(asset.id)}
-                            focused={focusId === asset.id}
-                            dupCount={group?.count ?? asset.dup_count ?? 0}
-                            keeper={group?.keep === asset.id}
-                            onToggle={handleCardClick}
-                            onOpen={() => onOpenDetail(entryFromAsset(asset), rows)}
-                          />
-                        );
-                      })}
+                      {items.map((asset) => (
+                        <SpaceCard
+                          key={asset.id}
+                          asset={asset}
+                          inQueue={queueIds.has(asset.id)}
+                          focused={focusId === asset.id}
+                          dupCount={view === "dup" ? asset.dup_count ?? 0 : 0}
+                          keeper={view === "dup" && asset.keeper === true}
+                          onToggle={handleCardClick}
+                          onOpen={() => onOpenDetail(entryFromAsset(asset), rows)}
+                        />
+                      ))}
                     </div>
                   );
                 })}
               {loading && rows.length === 0 && (
                 <div className="space-grid-loading">
                   <LoaderCircle size={16} className="spin" />
-                  <span>正在读取文件…</span>
+                  <span>正在读取…</span>
                 </div>
               )}
             </div>
             <div ref={sentinelRef} className="space-sentinel">
               {loadingMore ? (
-                <span><LoaderCircle size={12} className="spin" /> 正在加载更多…</span>
+                <span><LoaderCircle size={12} className="spin" /> 载入中…</span>
               ) : hasMore ? (
-                <span>继续下滑载入更多</span>
+                <span>继续下滑</span>
               ) : rows.length > 0 ? (
-                <span>已到列表末尾</span>
+                <span>已到底</span>
               ) : null}
             </div>
             {error && <div className="space-empty">读取失败：{error}</div>}
             {!loading && !error && rows.length === 0 && (
               <div className="space-empty">
-                {view === "dup" && !dupReady ? (
+                {view === "dup" && dupStat?.ready === false ? (
                   <>
                     <LoaderCircle size={20} strokeWidth={1.5} className={computing ? "spin" : undefined} />
-                    <strong>{computing ? "正在为照片计算指纹…" : "照片指纹还没算"}</strong>
-                    <span>
-                      去重需要先对每张图算 dhash（l0 字节 / l1 像素 / burst 连拍）。算完后这里会出现真实分组。
-                    </span>
+                    <strong>{computing ? "正在计算指纹…" : "指纹还没算"}</strong>
                     <button type="button" className="primary-btn" onClick={() => void computeDup()} disabled={computing}>
                       {computing ? "计算中…" : "立即计算"}
                     </button>
@@ -835,8 +716,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
                 ) : (
                   <>
                     <ImageOff size={20} strokeWidth={1.5} />
-                    <strong>{pathFilter ? "没有匹配「" + pathFilter + "」的文件" : "这个视角下还没有文件"}</strong>
-                    {view === "screenshot" && <span>截屏按路径含 Screenshot/截屏/屏幕，或识别结果里的 scene/tags 命中「屏幕截图」两层一起筛。</span>}
+                    <strong>{pathFilter ? "没有匹配的文件" : "这里没有文件"}</strong>
                   </>
                 )}
               </div>
@@ -844,11 +724,12 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
           </div>
         </section>
 
-        <section className="space-pane space-preview" aria-label="选中项预览">
+        {/* 中：预览 */}
+        <section className="space-pane space-preview" aria-label="预览">
           <div className="space-pane-head">
             <div>
               <h2>预览</h2>
-              <p>{focused ? kindText(focused) + " · " + formatBytes(focused.size ?? 0) : "点一个格子，这里显示大图或播放视频"}</p>
+              <p>{focused ? kindText(focused) + " · " + formatBytes(focused.size ?? 0) : ""}</p>
             </div>
           </div>
           {focused ? (
@@ -866,44 +747,19 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
           ) : (
             <div className="space-preview-empty">
               <ImageIcon size={26} strokeWidth={1.4} />
-              <span>点一个格子：这里显示原图；视频可以直接播放。双击打开详情。</span>
+              <span>点一个格子预览</span>
             </div>
           )}
         </section>
 
-        <section className="space-pane space-queue" aria-label="待清理清单">
+        {/* 右：待清理 */}
+        <section className="space-pane space-queue" aria-label="待清理">
           <div className="space-pane-head">
             <div>
               <h2>待清理</h2>
-              <p>{queueTotal} 个 · {statBytes(queueBytes)} · 只记清单，不动文件</p>
             </div>
             {queueTotal > 0 && (
-              <button
-                type="button"
-                className="space-link"
-                disabled={busy}
-                onClick={async () => {
-                  // 用清单里保存的全部 id：items 只是渲染列表，真实条数以 count 为准。
-                  const ids = (queue?.items ?? []).map((item) => item.asset_id);
-                  const previous = queue;
-                  setQueue({ items: [], count: 0, bytes: 0 });
-                  setBusy(true);
-                  try {
-                    // 后端单次最多 2000 个：重复图「全部加入」会有几千条，必须分批移出。
-                    let change = { changed: 0, count: ids.length, bytes: 0 };
-                    for (let start = 0; start < ids.length; start += 2000) {
-                      change = await cleanupRemove(ids.slice(start, start + 2000));
-                    }
-                    setQueue({ items: [], count: change.count, bytes: change.bytes });
-                    void refreshStats();
-                  } catch (reason) {
-                    setQueue(previous);
-                    onToast("移出待清理失败：" + String(reason));
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-              >
+              <button type="button" className="space-link" disabled={busy} onClick={() => void removeAll()}>
                 <Undo2 size={12} strokeWidth={1.9} /> 全部移出
               </button>
             )}
@@ -912,10 +768,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
           <div className="space-queue-list" role="list">
             {(queue?.items ?? []).length === 0 ? (
               <div className="space-queue-empty">
-                <CheckSquare size={22} strokeWidth={1.4} />
-                <strong>待清理清单是空的</strong>
-                <span>点一下左边任意格子就会加入；再点一下取消。这一步只记清单，不动文件。</span>
-                <span>确认后点右下角「清理」，原图才会移进废纸篓、库里的记录一并移除。</span>
+                <span>点一下左侧格子加入</span>
               </div>
             ) : (
               (queue?.items ?? []).map((entry) => (
@@ -930,17 +783,14 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
                     title={entry.path}
                   >
                     <span className="space-queue-name">{entry.path.split("/").pop()}</span>
-                    <span className="space-queue-meta">
-                      {formatBytes(entry.size ?? 0)} · {entry.kind === "video" ? "视频" : "照片"}
-                    </span>
+                    <span className="space-queue-meta">{formatBytes(entry.size ?? 0)}</span>
                   </button>
                   <button
                     type="button"
                     className="space-queue-remove"
                     onClick={() => applyQueue([entry.asset_id], false)}
                     disabled={busy}
-                    aria-label="从待清理移出"
-                    title="移出清单（不删文件）"
+                    aria-label="移出待清理"
                   >
                     <X size={13} strokeWidth={2} />
                   </button>
@@ -954,10 +804,10 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
               <strong>{queueTotal} 个 · {statBytes(queueBytes)}</strong>
               {lastClean && queueTotal === 0 && (
                 <em className="space-settlement-last">
-                  上次已清理 {lastClean.count} 个 · {statBytes(lastClean.bytes)}，文件在废纸篓
+                  上次清理 {lastClean.count} 个 · {statBytes(lastClean.bytes)}
                 </em>
               )}
-              <span>清理后原图移进废纸篓，记录同时移除；需要时可从废纸篓找回文件。</span>
+              <span>原图进废纸篓，可从那里找回</span>
             </div>
             <button
               type="button"
@@ -971,7 +821,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
                 );
               }}
             >
-              <Trash2 size={13} strokeWidth={2} /> 清理 {queueTotal > 0 ? queueTotal : ""}
+              <Trash2 size={13} strokeWidth={2} /> 清理
             </button>
           </div>
         </section>
@@ -980,12 +830,21 @@ export function SpaceView({ onOpenDetail, onClean, onToast, dataVersion, onRows 
   );
 }
 
+/** 面板头的唯一一句统计：每个数字只在这里出现一次。 */
+function currentStatLine(views: SpaceViews | null, view: SpaceViewKey, loading: boolean): string {
+  const stat = views?.[view];
+  if (!stat) return loading ? "读取中…" : "";
+  if (view === "dup") {
+    return `${stat.count.toLocaleString()} 张`;
+  }
+  return `${stat.count.toLocaleString()} 个 · ${statBytes(stat.bytes)}`;
+}
+
 function focusedId(rows: Asset[], queue: CleanupList | null, id: string | null): CleanupEntry | null {
   if (!id) return null;
   const asset = rows.find((item) => item.id === id);
   if (asset) return entryFromAsset(asset);
-  const item = queue?.items.find((entry) => entry.asset_id === id);
-  return item ?? null;
+  return queue?.items.find((entry) => entry.asset_id === id) ?? null;
 }
 
 function SpaceCard({
@@ -1214,64 +1073,6 @@ function PreviewBody({
         <button type="button" className="ghost-button" onClick={openExternal}>
           <ExternalLink size={12} strokeWidth={1.8} /> 外部播放器
         </button>
-      </div>
-    </div>
-  );
-}
-
-
-/** 重复图组 chip：横向虚拟滚动，只挂可视范围内的按钮。 */
-function DupChipList({
-  groups,
-  queueIds,
-  knownIds,
-  busyKey,
-  onToggle,
-}: {
-  groups: SpaceGroup[];
-  queueIds: Set<string>;
-  knownIds: Record<string, string[]>;
-  busyKey: string | null;
-  onToggle: (group: SpaceGroup) => void;
-}) {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const virtualizer = useVirtualizer({
-    horizontal: true,
-    count: groups.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 188,
-    overscan: 4,
-  });
-
-  return (
-    <div ref={scrollRef} className="space-chip-strip" role="list" aria-label="重复组">
-      <div style={{ width: virtualizer.getTotalSize() + "px", position: "relative", height: "58px" }}>
-        {virtualizer.getVirtualItems().map((item) => {
-          const group = groups[item.index];
-          if (!group) return null;
-          const ids = knownIds[group.key];
-          const candidates = (ids ?? []).filter((id) => id !== group.keep);
-          const inQueue = candidates.filter((id) => queueIds.has(id)).length;
-          const allQueued = candidates.length > 0 && inQueue === candidates.length;
-          return (
-            <button
-              key={group.key}
-              type="button"
-              role="listitem"
-              className={clsx("space-group-chip", allQueued && "on")}
-              style={{ position: "absolute", left: item.start + "px", top: 0, width: item.size - 8 + "px" }}
-              title={group.reason ? "reason: " + group.reason : undefined}
-              disabled={busyKey === group.key}
-              onClick={() => onToggle(group)}
-            >
-              <strong>{group.label}</strong>
-              <span>
-                {group.count} 张（保留 1）· 可回收 {statBytes(group.reclaim_bytes ?? 0)}
-              </span>
-              <em>{allQueued ? "全部已勾选" : busyKey === group.key ? "读取中…" : "整组切换"}</em>
-            </button>
-          );
-        })}
       </div>
     </div>
   );

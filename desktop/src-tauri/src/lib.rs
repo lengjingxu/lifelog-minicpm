@@ -130,6 +130,8 @@ struct AssetRow {
     size: Option<i64>,
     /// 同 size + 同 kind 的图片组：组内文件数（≥2 才有值）。
     dup_count: Option<i64>,
+    /// 仅重复图：这张是否是所在组的 keeper（保留那张）。
+    keeper: Option<bool>,
 }
 
 #[derive(Deserialize, Default)]
@@ -612,15 +614,25 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     } else {
         ""
     };
-    let dup_col = if has_dup { "(SELECT count(*) FROM dup_members dm WHERE dm.group_id = (SELECT dm2.group_id FROM dup_members dm2 WHERE dm2.asset_id = a.id LIMIT 1))".to_string() } else { "0".to_string() };
+    let dup_col = if has_dup {
+        "(SELECT count(*) FROM dup_members dm WHERE dm.group_id = (SELECT dm2.group_id FROM dup_members dm2 WHERE dm2.asset_id = a.id LIMIT 1))".to_string()
+    } else {
+        "0".to_string()
+    };
+    // keeper 标记：网格卡片据此显示「保留」，不再需要额外拉成员映射。
+    let keeper_col = if has_dup {
+        "CASE WHEN (SELECT g2.keeper_id FROM dup_members dm3 JOIN dup_groups g2 ON g2.id = dm3.group_id WHERE dm3.asset_id = a.id LIMIT 1) = a.id THEN 1 ELSE 0 END".to_string()
+    } else {
+        "0".to_string()
+    };
     let mut sql = format!(
         "SELECT a.id, a.path, a.day, a.taken_at, a.kind, \
-                c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text{}, a.size, {} \
+                c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text{}, a.size, {}, {} \
          FROM assets a \
          LEFT JOIN captions c ON c.rowid = ( \
              SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1){} \
          {}",
-        score_col, dup_col, score_join, where_sql
+        score_col, dup_col, keeper_col, score_join, where_sql
     );
 
 
@@ -667,9 +679,11 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
                 ocr_text: row.get(12)?,
                 // 没有 asset_quality 表时 SELECT 里没有 q.score 这一列，后面两列要各退一位，
                 // 否则 size 永远读成 None（空间页整列显示成「—」）。
+                // 列位置随 score_mode 变化：score 存在时多一列，size/dup_count/keeper 都要顺延。
                 score: if score_mode { row.get(13).ok() } else { None },
                 size: if score_mode { row.get(14).ok() } else { row.get(13).ok() },
-                dup_count: row.get(15).ok(),
+                dup_count: if score_mode { row.get(15).ok() } else { row.get(14).ok() },
+                keeper: if score_mode { row.get(16).ok() } else { row.get(15).ok() },
             })
         })
         .map_err(|e| e.to_string())?;
@@ -1803,6 +1817,35 @@ mod filter_tests {
         assert_eq!(count("photo"), 4);
         // 路径命中 Screenshot + caption 的 scene/tags 命中，两层都算
         assert_eq!(count("screenshot"), 1);
+    }
+
+    #[test]
+    fn asset_dup_count_and_keeper_survive_without_score_column() {
+        // dup_count / keeper 也排在 score、size 之后：没有评分表时不能错位。
+        let conn = seed();
+        conn.execute_batch(
+            "ALTER TABLE assets ADD COLUMN size INTEGER;",
+        )
+        .unwrap();
+        conn.execute_batch(
+            "CREATE TABLE dup_groups (id INTEGER PRIMARY KEY, keeper_id TEXT, reason TEXT, created_at TEXT);
+             CREATE TABLE dup_members (group_id INTEGER, asset_id TEXT, distance INTEGER, PRIMARY KEY (group_id, asset_id));
+             INSERT INTO dup_groups VALUES (1, 'a1', 'burst', '2024-01-01');
+             INSERT INTO dup_members VALUES (1, 'a1', 0);
+             INSERT INTO dup_members VALUES (1, 'a2', 4);",
+        )
+        .unwrap();
+        let sql = "SELECT a.id, a.path, a.day, a.taken_at, a.kind, \
+                          c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text, a.size, \
+                          (SELECT count(*) FROM dup_members dm WHERE dm.group_id = (SELECT dm2.group_id FROM dup_members dm2 WHERE dm2.asset_id = a.id LIMIT 1)), \
+                          CASE WHEN (SELECT g2.keeper_id FROM dup_members dm3 JOIN dup_groups g2 ON g2.id = dm3.group_id WHERE dm3.asset_id = a.id LIMIT 1) = a.id THEN 1 ELSE 0 END \
+                   FROM assets a LEFT JOIN captions c ON c.rowid = (SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1) \
+                   WHERE a.id = 'a1'";
+        let (dup_count, keeper): (Option<i64>, Option<i64>) = conn
+            .query_row(sql, [], |row| Ok((row.get(14).ok(), row.get(15).ok())))
+            .unwrap();
+        assert_eq!(dup_count, Some(2), "dup_count 应读在第 14 列");
+        assert_eq!(keeper, Some(1), "keeper 应读在第 15 列");
     }
 
     #[test]
