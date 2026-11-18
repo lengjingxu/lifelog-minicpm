@@ -1001,6 +1001,11 @@ export const generateThumbs = (force = false) => invoke<{ ok: boolean }>("genera
 import { open } from "@tauri-apps/plugin-dialog";
 
 export const pickFolder = async (options?: { title?: string; defaultPath?: string }): Promise<string | null> => {
+  // 浏览器 fixture 没有桌面目录选择器：允许测试/预览里预先指定一个目录。
+  if (!isTauri) {
+    const preset = (window as Window & { __fixtureFolder?: string }).__fixtureFolder;
+    return preset ?? null;
+  }
   const picked = await open({
     directory: true,
     multiple: false,
@@ -1010,7 +1015,18 @@ export const pickFolder = async (options?: { title?: string; defaultPath?: strin
   return typeof picked === "string" ? picked : null;
 };
 
-export const importFolder = (path: string) => invoke<{ ok: boolean; stats?: unknown }>("import_folder", { path });
+export const importFolder = async (path: string): Promise<{ ok: boolean; stats?: unknown }> => {
+  // 浏览器 fixture 没有真实 ingest：默认挂起，让进度视图停在「正在导入」；
+  // 测试可以用 window.__fixtureImportResolve() 主动结束。
+  if (!isTauri) {
+    void path;
+    return new Promise((resolve) => {
+      (window as Window & { __fixtureImportResolve?: () => void }).__fixtureImportResolve = () =>
+        resolve({ ok: true });
+    });
+  }
+  return invoke<{ ok: boolean; stats?: unknown }>("import_folder", { path });
+};
 
 export type Album = { id: string; name: string; count: number };
 

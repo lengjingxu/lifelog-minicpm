@@ -17,7 +17,15 @@ def cmd_fetch_model(args) -> int:
 
 
 def cmd_ingest(args) -> int:
-    stats = ingest.ingest(args.roots, content_hash=args.hash, limit=args.limit)
+    import sys
+
+    def progress(current):
+        # stderr 走进度事件，stdout 留给最终统计（桌面端按行解析）
+        print(json.dumps({"phase": "ingest", **current}, ensure_ascii=False),
+              file=sys.stderr, flush=True)
+
+    stats = ingest.ingest(args.roots, content_hash=args.hash, limit=args.limit,
+                          progress=progress if getattr(args, "progress", False) else None)
     print(json.dumps(stats, ensure_ascii=False))
     return 0
 
@@ -409,6 +417,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("ingest", help="扫描相册目录登记资产")
     p.add_argument("roots", nargs="+")
+    p.add_argument("--progress", action="store_true", help="每 200 个文件往 stderr 打一行进度")
     p.add_argument("--hash", action="store_true", help="按内容哈希去重（慢）")
     p.add_argument("--limit", type=int)
     p.set_defaults(func=cmd_ingest)

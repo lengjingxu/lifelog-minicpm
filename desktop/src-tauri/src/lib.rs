@@ -1489,16 +1489,32 @@ async fn import_folder(
         let root = repo_root();
         let _ = app.emit("import-progress", serde_json::json!({"stage": "ingest", "message": "正在扫描文件夹"}));
         let python = py::resolve(&home)?;
-        let output = std::process::Command::new(python)
+        // 边走边读 stderr：每 200 个文件一行 {"phase":"ingest","seen":…}，原样转成事件。
+        let mut child = std::process::Command::new(python)
             .arg("-c")
             .arg("from lifelog.cli import main; main()")
             .arg("ingest")
             .arg(&path)
+            .arg("--progress")
             .current_dir(&root)
             .env("PYTHONPATH", &root)
             .env("LIFELOG_HOME", &home)
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|err| format!("启动导入失败：{err}"))?;
+        if let Some(err_pipe) = child.stderr.take() {
+            for line in BufReader::new(err_pipe).lines().map_while(Result::ok) {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+                    if value.get("phase").and_then(|v| v.as_str()) == Some("ingest") {
+                        let _ = app.emit("import-progress", value);
+                    }
+                }
+            }
+        }
+        let output = child
+            .wait_with_output()
+            .map_err(|err| format!("导入进程失败：{err}"))?;
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         if !output.status.success() {

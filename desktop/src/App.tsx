@@ -64,6 +64,7 @@ import { ImportDialog, type ImportPlan, type ImportProgress } from "./components
 import { DeleteDialog } from "./components/DeleteDialog";
 import { AccessDialog } from "./components/AccessDialog";
 import { EmptyState } from "./components/EmptyState";
+import { ImportProgressView, ImportMiniBar, type FolderProgress } from "./components/ImportProgress";
 import { OrganizeView } from "./components/OrganizeView";
 import { RecognitionDialog } from "./components/RecognitionDialog";
 import { SettingsView } from "./components/SettingsView";
@@ -572,6 +573,12 @@ const route = useMemo(readRoute, []);
 
 
   const [importPlan, setImportPlan] = useState<ImportPlan | null>(null);
+  // 空状态「扫描本地文件夹」：整页进度视图 + 可收起细条。
+  const [folderImport, setFolderImport] = useState<FolderProgress | null>(null);
+  const [folderImportOpen, setFolderImportOpen] = useState(false);
+  const [folderImportBusy, setFolderImportBusy] = useState(false);
+  const [folderImportError, setFolderImportError] = useState<string | null>(null);
+  const folderTarget = useRef<string | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [importAuthError, setImportAuthError] = useState(false);
@@ -613,38 +620,121 @@ const route = useMemo(readRoute, []);
     }
   }, [refreshData, showToast]);
 
+  /** 真正开始一个文件夹导入：先切到进度视图，再等后端事件。 */
+  const runFolderImport = useCallback(
+    async (folder: string) => {
+      folderTarget.current = folder;
+      setFolderImportError(null);
+      setFolderImport({ stage: "ingest", seen: 0, added: 0, skipped: 0 });
+      setFolderImportOpen(true);
+      setFolderImportBusy(true);
+      try {
+        const result = await importFolder(folder);
+        if (!result.ok) {
+          const message = "导入没有返回成功";
+          setFolderImportError(message);
+          showError("导入失败：" + message);
+          return;
+        }
+        // 保留「导入完成」状态，用户点「在后台继续」或自己关掉再回图库；
+        // 否则导入瞬间就结束、整页换算太快，看起来像什么都没发生。
+        setFolderImport((previous) => ({
+          ...(previous ?? { seen: 0, added: 0, skipped: 0, stage: "ingest" }),
+          stage: "done",
+        }));
+        refreshData();
+        showToast("导入完成");
+      } catch (err) {
+        const message = extractMessage(err);
+        setFolderImportError(message);
+        showError("导入失败：" + message);
+      } finally {
+        setFolderImportBusy(false);
+      }
+    },
+    [refreshData, showError, showToast],
+  );
+
   const handleEmptyChoice = async (label: string) => {
     if (label.includes(String.fromCharCode(23567,31859)) || label.includes(String.fromCharCode(35782,21035))) {
       setRecognitionOpen(true);
       return;
     }
     if (!label.includes(String.fromCharCode(25195,25551))) return;
-    try {
-      const folder = await pickFolder();
-      if (!folder) return;
-      showToast(String.fromCharCode(27491,22312,23548,20837));
-      const result = await importFolder(folder);
-      if (result.ok) {
-        showToast(String.fromCharCode(23548,20837,23436,25104));
-        refreshData();
-      } else {
-        showToast(String.fromCharCode(23548,20837,22833,36133));
-      }
-    } catch (err) {
-      showToast(String.fromCharCode(23548,20837,22833,36133,65306) + extractMessage(err));
-    }
+    const folder = await pickFolder();
+    if (!folder) return;
+    void runFolderImport(folder);
   };
 
+  // 文件夹导入：ingest 阶段每 200 个文件一条；缩略图阶段沿用 thumbs-progress。
   useEffect(() => {
-    if (!isTauri) return;
-    let unlisten: (() => void) | undefined;
-    void listen<ImportProgress>("import-progress", (event) => {
-      setImportProgress(event.payload);
-    }).then((fn) => {
-      unlisten = fn;
+    let alive = true;
+    const cleanups: Array<() => void> = [];
+    const register = <T,>(name: string, handler: (payload: T) => void) => {
+      if (!isTauri) {
+        // 浏览器 fixture：允许 window.dispatchEvent(new CustomEvent(name, { detail }))
+        const listener = (event: Event) => handler((event as CustomEvent<T>).detail);
+        window.addEventListener(name, listener);
+        cleanups.push(() => window.removeEventListener(name, listener));
+        return;
+      }
+      void listen<T>(name, (event) => handler(event.payload)).then((fn) => {
+        if (alive) cleanups.push(fn);
+        else fn();
+      });
+    };
+
+    register<Record<string, unknown>>("import-progress", (payload) => {
+      const stage = String(payload.stage ?? "");
+      if (stage === "failed") {
+        const message = String(payload.message ?? "导入失败");
+        setFolderImportError(message);
+        setFolderImportBusy(false);
+        setFolderImportOpen(true);
+        showError("导入失败：" + message);
+        return;
+      }
+      if (stage !== "ingest" && stage !== "ingest-done" && stage !== "thumbs") return;
+      setFolderImport((previous) => {
+        const base: FolderProgress = previous ?? { stage: "ingest", seen: 0, added: 0, skipped: 0 };
+        return {
+          ...base,
+          stage: stage as FolderProgress["stage"],
+          seen: typeof payload.seen === "number" ? payload.seen : base.seen,
+          added: typeof payload.new === "number" ? payload.new : base.added,
+          skipped: typeof payload.skipped === "number" ? payload.skipped : base.skipped,
+        };
+      });
+      // 兼容旧的云相册导入弹窗：它也用 import-progress，但带 message/done/total。
+      if (stage === "thumbs" && (payload.message || payload.total)) {
+        setImportProgress(payload as ImportProgress);
+      }
     });
-    return () => unlisten?.();
-  }, []);
+
+    register<{ done?: number; total?: number; rate_per_s?: number; eta_s?: number | null }>("thumbs-progress", (payload) => {
+      setFolderImport((previous) =>
+        previous
+          ? {
+              ...previous,
+              stage: "thumbs",
+              thumbs: {
+                done: payload.done ?? 0,
+                total: payload.total ?? 0,
+                rate: payload.rate_per_s ?? 0,
+                eta: payload.eta_s ?? null,
+              },
+            }
+          : previous,
+      );
+    });
+
+    register<ImportProgress>("import-xiaomi-progress", (payload) => setImportProgress(payload));
+
+    return () => {
+      alive = false;
+      cleanups.forEach((fn) => fn());
+    };
+  }, [showError]);
 
   useEffect(() => () => {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
@@ -1593,6 +1683,29 @@ const route = useMemo(readRoute, []);
       );
     }
 
+      if (folderImport && folderImportOpen) {
+        return (
+          <ImportProgressView
+            progress={folderImport}
+            busy={folderImportBusy}
+            failed={Boolean(folderImportError)}
+            onBackground={() => setFolderImportOpen(false)}
+            onCancel={() => {
+              setFolderImportOpen(false);
+              showToast("导入在后台继续");
+            }}
+            onRetry={() => {
+              if (folderTarget.current) void runFolderImport(folderTarget.current);
+            }}
+            onPickAnother={() => {
+              setFolderImport(null);
+              setFolderImportOpen(false);
+              void handleEmptyChoice("扫描本地文件夹");
+            }}
+          />
+        );
+      }
+
     if (view === "organize") {
       return (
         <OrganizeView
@@ -1943,6 +2056,18 @@ const route = useMemo(readRoute, []);
         onClose={() => setPaletteOpen(false)}
       />
 
+
+      {folderImport && !folderImportOpen && (
+        <ImportMiniBar
+          progress={folderImport}
+          failure={folderImportError ? { message: folderImportError } : null}
+          onExpand={() => setFolderImportOpen(true)}
+          onDismiss={() => {
+            setFolderImport(null);
+            setFolderImportError(null);
+          }}
+        />
+      )}
       {toast && (
         <div
           className={clsx(

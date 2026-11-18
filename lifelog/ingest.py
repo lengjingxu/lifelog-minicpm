@@ -96,13 +96,17 @@ def parse_exif_time(raw: str | None) -> tuple[str | None, str | None]:
     return None, None
 
 
-def ingest(roots: list[str], content_hash: bool = False, limit: int | None = None) -> dict:
+def ingest(roots: list[str], content_hash: bool = False, limit: int | None = None,
+           progress=None) -> dict:
+    """扫目录建索引。progress(stats) 每 200 个文件回调一次，供桌面端显示进度。"""
     db.init_db()
     stats = {"seen": 0, "new": 0, "updated": 0, "skipped": 0}
     with db.session() as con:
         for path in iter_media(roots):
             path = path.resolve()  # 统一绝对路径，避免同一文件以两种 path 重复登记
             stats["seen"] += 1
+            if progress and stats["seen"] % 200 == 0:
+                progress(dict(stats))
             if limit and stats["seen"] > limit:
                 break
             try:
@@ -133,4 +137,6 @@ def ingest(roots: list[str], content_hash: bool = False, limit: int | None = Non
                 (aid, str(path), stat.st_size, stat.st_mtime, taken_at, day, lat, lon, kind, now_iso()),
             )
             stats["new"] += 1
+    if progress:
+        progress(dict(stats))
     return stats
