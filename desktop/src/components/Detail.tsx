@@ -292,9 +292,21 @@ export function Detail({
       </div>
 
       <aside className="inspector glass-surface">
-        <button type="button" className="close-btn" onClick={onClose} aria-label="关闭详情">
-          <X size={15} strokeWidth={1.9} />
-        </button>
+        <div className="inspector-top-actions">
+          <button
+            type="button"
+            className="inspector-danger"
+            onClick={onDelete}
+            disabled={deleting}
+            aria-label="删除这一张"
+            title="删除这一张（Backspace / Delete）"
+          >
+            <Trash2 size={14} strokeWidth={1.9} />
+          </button>
+          <button type="button" className="close-btn" onClick={onClose} aria-label="关闭详情">
+            <X size={15} strokeWidth={1.9} />
+          </button>
+        </div>
 
         <div className="inspector-kicker">{kindLabel(asset)} · 详情</div>
         {recognition && (
@@ -356,15 +368,7 @@ export function Detail({
               <FolderOpen size={13} strokeWidth={1.8} />外部播放器
             </button>
           )}
-          <button
-            type="button"
-            className="inspector-delete"
-            onClick={onDelete}
-            disabled={deleting}
-            title="删除这一张（Backspace / Delete）"
-          >
-            <Trash2 size={13} strokeWidth={1.8} />{deleting ? "删除中…" : "删除"}
-          </button>
+
         </div>
         {deleteError && (
           <p className="inspector-delete-error" role="alert">{deleteError}</p>

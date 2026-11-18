@@ -1080,7 +1080,33 @@ export type Album = { id: string; name: string; count: number };
 export const bulkTag = (ids: string[], tag: string, remove = false) =>
   invoke<{ ok: boolean; added?: number; removed?: number }>("bulk_tag", { ids, tag, remove });
 
-export const albumList = () => invoke<{ ok: boolean; albums: Album[] }>("album_list");
+function fixtureAlbums(): Album[] {
+  return (window as Window & { __fixtureAlbums?: Album[] }).__fixtureAlbums ?? [];
+}
+
+export const albumList = async (): Promise<{ ok: boolean; albums: Album[] }> => {
+  if (!isTauri) {
+    // 浏览器 fixture 下相册列表允许由测试预先挂上（window.__fixtureAlbums）。
+    const preset = fixtureAlbums();
+    if (preset.length) return { ok: true, albums: preset };
+    const facets = (await loadFixture()).facets;
+    return {
+      ok: true,
+      albums: (facets.albums ?? []).map(([name, count]) => ({
+        id: `fixture:${name}`,
+        name,
+        count,
+      })),
+    };
+  }
+  return invoke<{ ok: boolean; albums: Album[] }>("album_list");
+};
 export const albumCreate = (name: string) => invoke<{ ok: boolean; album: Album }>("album_create", { name });
-export const albumAdd = (name: string, ids: string[], remove = false) =>
-  invoke<{ ok: boolean; added?: number; removed?: number }>("album_add", { name, ids, remove });
+export const albumAdd = async (name: string, ids: string[], remove = false) => {
+  if (!isTauri) {
+    // fixture 里没有后端：相册内容由 App 自己维护，这里只回报一次成功。
+    void name;
+    return { ok: true, added: remove ? 0 : ids.length, removed: remove ? ids.length : 0 };
+  }
+  return invoke<{ ok: boolean; added?: number; removed?: number }>("album_add", { name, ids, remove });
+};

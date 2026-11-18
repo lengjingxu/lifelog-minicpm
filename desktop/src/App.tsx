@@ -73,6 +73,7 @@ import { RecognitionDialog } from "./components/RecognitionDialog";
 import { SettingsView } from "./components/SettingsView";
 import { SpaceView, assetFromEntry } from "./components/SpaceView";
 import { AlbumPicker } from "./components/AlbumPicker";
+import { TagPicker } from "./components/TagPicker";
 import { openTrash, openExternal } from "./api";
 import { liveEventMessage, useLiveController } from "./live";
 import {
@@ -207,7 +208,8 @@ const route = useMemo(readRoute, []);
   const [detailDelete, setDetailDelete] = useState<{ id: string; origin: DOMRect | null } | null>(null);
   const [detailDeleteError, setDetailDeleteError] = useState<string | null>(null);
   // 详情页「加入相册」选择器；导出这一张时禁一下重复点击。
-  const [albumPick, setAlbumPick] = useState<{ id: string } | null>(null);
+  const [albumPick, setAlbumPick] = useState<{ ids: string[] } | null>(null);
+  const [tagPick, setTagPick] = useState(false);
   const [detailExporting, setDetailExporting] = useState(false);
   // 详情页单张识别进行中：按钮禁用，事件回来时刷新这一张。
   const [recognizing, setRecognizing] = useState(false);
@@ -258,7 +260,7 @@ const route = useMemo(readRoute, []);
   const firstGridMarked = useRef(false);
 
   const tagKey = tags.join("\u0001");
-  const active = Boolean(query || tags.length || scene || person || place || album);
+  const active = Boolean(query || tags.length || scene || person || place || album || dayFrom || dayTo);
   const columns = gridColumnCount(viewportWidth, density);
 
   useEffect(() => {
@@ -426,38 +428,63 @@ const route = useMemo(readRoute, []);
     [selection, bulkBusy, refreshData, setLocalRemoval, showToast],
   );
 
-  const runBulk = async (kind: "tag" | "album", value: string) => {
-    if (!selection.length || bulkBusy) return;
-    setBulkBusy(true);
-    try {
-      if (kind === "tag") {
+  /** 批量加标签：面板里点已有标签或回车建新标签都走这里，成功才关面板。 */
+  const runBulkTag = useCallback(
+    async (tag: string) => {
+      if (!selection.length || bulkBusy) return;
+      const ids = [...selection];
+      setBulkBusy(true);
+      try {
         if (isFixture) {
           setFixtureUserTags((previous) => ({
             ...previous,
-            [value]: Array.from(new Set([...(previous[value] ?? []), ...selection])),
+            [tag]: Array.from(new Set([...(previous[tag] ?? []), ...ids])),
           }));
         } else {
-          await bulkTag(selection, value);
+          await bulkTag(ids, tag);
         }
-        showToast(`已给 ${selection.length} 张加标签「${value}」`);
-      } else if (isFixture) {
-        setFixtureAlbums((previous) => ({
-          ...previous,
-          [value]: Array.from(new Set([...(previous[value] ?? []), ...selection])),
-        }));
-        showToast(`已把 ${selection.length} 张加入相册「${value}」`);
-      } else {
-        await albumAdd(value, selection);
-        showToast(`已把 ${selection.length} 张加入相册「${value}」`);
+        showToast(`已给 ${ids.length} 张加标签「${tag}」`);
+        setTagPick(false);
+        setSelection([]);
+        refreshData();
+      } catch (err) {
+        showError(`加标签失败：${String(err)}`);
+        throw err;
+      } finally {
+        setBulkBusy(false);
       }
-      setSelection([]);
-      refreshData();
-    } catch (err) {
-      showError(`批量操作失败：${String(err)}`);
-    } finally {
-      setBulkBusy(false);
-    }
-  };
+    },
+    [bulkBusy, refreshData, selection, setFixtureUserTags, showError, showToast],
+  );
+
+  /** 批量加入相册：AlbumPicker 一次把选中的 id 全传进去。 */
+  const runBulkAlbum = useCallback(
+    async (ids: string[], name: string) => {
+      if (!ids.length) return;
+      setBulkBusy(true);
+      try {
+        if (isFixture) {
+          setFixtureAlbums((previous) => ({
+            ...previous,
+            [name]: Array.from(new Set([...(previous[name] ?? []), ...ids])),
+          }));
+          showToast(`已把 ${ids.length} 张加入相册「${name}」`);
+        } else {
+          const result = await albumAdd(name, ids);
+          if (!result.ok) throw new Error("加入相册没有返回成功");
+          showToast(`已把 ${ids.length} 张加入相册「${name}」`);
+        }
+        setAlbumPick(null);
+        setSelection([]);
+        refreshData();
+      } catch (err) {
+        showError(`批量操作失败：${String(err)}`);
+      } finally {
+        setBulkBusy(false);
+      }
+    },
+    [refreshData, setFixtureAlbums, showError, showToast],
+  );
 
   const [exporting, setExporting] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -1230,6 +1257,8 @@ const route = useMemo(readRoute, []);
     setPlace(null);
     setDayFrom(null);
     setDayTo(null);
+    // 相册也是筛选条件之一：漏掉它，「清除全部」之后结果会少一截。
+    setAlbum(null);
   }, []);
 
   const viewAlbumTag = useCallback(
@@ -1601,18 +1630,31 @@ const route = useMemo(readRoute, []);
     .filter((value, index, list) => list.indexOf(value) === index)
     .join(" · ");
 
+  // 每个生效条件一条：顺序按「关键词 → 标签 → 人物 → 地点 → 场景 → 日期 → 相册」，
+  // 和侧栏从上到下的读取顺序一致，用户扫一眼就知道结果为什么变少。
   const conditions: { key: string; label: string; remove: () => void }[] = [];
-  if (query) conditions.push({ key: "query", label: `搜索 “${query}”`, remove: clearSearch });
+  if (query) conditions.push({ key: "query", label: `关键词：「${query}」`, remove: clearSearch });
   for (const tag of tags) {
     conditions.push({
       key: `tag-${tag}`,
-      label: `标签 · ${tag}`,
+      label: `标签：${tag}`,
       remove: () => setTags((previous) => previous.filter((item) => item !== tag)),
     });
   }
-  if (scene) conditions.push({ key: "scene", label: `场景 · ${scene}`, remove: () => setScene(null) });
-  if (person) conditions.push({ key: "person", label: `人物 · ${person}`, remove: () => setPerson(null) });
-  if (place) conditions.push({ key: "place", label: `地点 · ${place}`, remove: () => setPlace(null) });
+  if (person) conditions.push({ key: "person", label: `人物：${person}`, remove: () => setPerson(null) });
+  if (place) conditions.push({ key: "place", label: `地点：${place}`, remove: () => setPlace(null) });
+  if (scene) conditions.push({ key: "scene", label: `场景：${scene}`, remove: () => setScene(null) });
+  if (dayFrom || dayTo) {
+    conditions.push({
+      key: "day",
+      label: `日期：${dayFrom || "最早"} ~ ${dayTo || "今天"}`,
+      remove: () => {
+        setDayFrom(null);
+        setDayTo(null);
+      },
+    });
+  }
+  if (album) conditions.push({ key: "album", label: `相册：${album}`, remove: () => setAlbum(null) });
 
   // ⌘K 面板：跳转 + 从 facets 里取的热门筛选 + 直接搜索
   const paletteSections = useMemo(() => {
@@ -1812,7 +1854,15 @@ const route = useMemo(readRoute, []);
     if (loading && assets.length === 0) return <LoadingState label="正在读取本地相册…" />;
     if (!loading && (stats?.assets === 0 || (assets.length === 0 && !active))) return <EmptyState onChoose={handleEmptyChoice} />;
     if (!loading && active && filteredAssets.length === 0) {
-      return <EmptyState mode="search" onChoose={handleEmptyChoice} onReset={clearAll} />;
+      // 空结果里也能逐条去掉条件，和网格上方的 chip 条同一套语义。
+      return (
+        <EmptyState
+          mode="search"
+          onChoose={handleEmptyChoice}
+          onReset={clearAll}
+          conditions={conditions}
+        />
+      );
     }
     return (
       <div className="grid-wrap">
@@ -1823,6 +1873,7 @@ const route = useMemo(readRoute, []);
           assets={displayAssets}
           dupCounts={dupCounts}
           columns={columns}
+          density={density}
           selection={new Set(selection)}
           multi={selection.length > 1}
           selectMode={selectMode}
@@ -1906,18 +1957,24 @@ const route = useMemo(readRoute, []);
           onTheme={setTheme}
         />
 
-        {view !== "organize" && view !== "settings" && view !== "space" && (
-          <div className="condition-slot" data-open={conditions.length > 0} aria-hidden={conditions.length === 0}>
+        {/* 没有任何条件时整条不渲染：不留空白，也不占一次布局 */}
+        {view !== "organize" && view !== "settings" && view !== "space" && conditions.length > 0 && (
+          <div className="condition-slot" data-open="true">
           <div className="condition-bar">
             <div className="result-count">
               <Search size={12} strokeWidth={1.8} />
               <span>{count}{active && assets.length >= 1000 && view === "library" ? "+" : ""} 张结果</span>
             </div>
-            <div className="chip-row">
+            <div className="chip-row filter-chips">
               {conditions.map((condition) => (
-                <span className="chip" key={condition.key}>
+                <span className="chip" key={condition.key} data-condition={condition.key}>
                   {condition.label}
-                  <button type="button" onClick={condition.remove} aria-label={`移除 ${condition.label}`}>
+                  <button
+                    type="button"
+                    onClick={condition.remove}
+                    aria-label={`移除 ${condition.label}`}
+                    title={`移除 ${condition.label}`}
+                  >
                     <X size={11} strokeWidth={2} />
                   </button>
                 </span>
@@ -1959,7 +2016,7 @@ const route = useMemo(readRoute, []);
           onTag={applyTag}
           actions={{
             onRecognize: () => void recognizeOne(detailAsset),
-            onAddToAlbum: () => setAlbumPick({ id: detailAsset.id }),
+            onAddToAlbum: () => setAlbumPick({ ids: [detailAsset.id] }),
             onExport: () => void exportOne(detailAsset),
             onReveal: () => {
               void revealInFinder(detailAsset.path).catch((err: unknown) =>
@@ -2000,8 +2057,8 @@ const route = useMemo(readRoute, []);
           busy={bulkBusy}
           tagContext={tags.length === 1 && userTagNames.has(tags[0]) ? tags[0] : null}
           albumContext={album}
-          onTag={(tag) => void runBulk("tag", tag)}
-          onAlbum={(name) => void runBulk("album", name)}
+          onOpenTag={() => setTagPick(true)}
+          onOpenAlbum={() => setAlbumPick({ ids: [...selection] })}
           onRemoveTag={(tag) => void runRemove("tag", tag)}
           onRemoveAlbum={(name) => void runRemove("album", name)}
           onDelete={(rect: DOMRect) => {
@@ -2039,11 +2096,24 @@ const route = useMemo(readRoute, []);
         />
       )}
 
+      {tagPick && (
+        <TagPicker
+          tags={displayFacets?.user_tags ?? []}
+          count={selection.length}
+          onApply={runBulkTag}
+          onCancel={() => setTagPick(false)}
+        />
+      )}
+
       {albumPick && (
         <AlbumPicker
-          assetId={albumPick.id}
+          assetIds={albumPick.ids}
           onCancel={() => setAlbumPick(null)}
           onAdded={(album, created) => {
+            if (albumPick.ids.length > 1) {
+              void runBulkAlbum(albumPick.ids, album);
+              return;
+            }
             setAlbumPick(null);
             refreshData();
             showToast(created ? `已新建相册「${album}」并加入` : `已加入相册「${album}」`);

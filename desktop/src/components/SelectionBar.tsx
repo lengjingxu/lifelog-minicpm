@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { FolderMinus, FolderPlus, Tag, Trash2, X } from "lucide-react";
 
 type Props = {
@@ -8,8 +8,10 @@ type Props = {
   busy: boolean;
   tagContext?: string | null;
   albumContext?: string | null;
-  onTag: (tag: string) => void;
-  onAlbum: (name: string) => void;
+  /** 打开「加标签」面板：标签列表和新建都在里面。 */
+  onOpenTag: () => void;
+  /** 打开「加入相册」面板（复用 AlbumPicker，一次带多张）。 */
+  onOpenAlbum: () => void;
   onRemoveTag: (tag: string) => void;
   onRemoveAlbum: (name: string) => void;
   onClear: () => void;
@@ -22,15 +24,13 @@ export function SelectionBar({
   busy,
   tagContext = null,
   albumContext = null,
-  onTag,
-  onAlbum,
+  onOpenTag,
+  onOpenAlbum,
   onRemoveTag,
   onRemoveAlbum,
   onClear,
   onDelete,
 }: Props) {
-  const [value, setValue] = useState("");
-  const trimmed = value.trim();
   const barRef = useRef<HTMLDivElement | null>(null);
 
   // 第一次选中时，条从那张照片的下沿长出来；之后只是内容变化。
@@ -56,14 +56,20 @@ export function SelectionBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const run = (action: (text: string) => void) => {
-    if (!trimmed) return;
-    action(trimmed);
-    setValue("");
-  };
-
   return (
-    <div ref={barRef} className="selection-bar glass-surface" role="toolbar" aria-label="批量操作">
+    <div
+      ref={barRef}
+      className="selection-bar glass-surface"
+      role="toolbar"
+      aria-label="批量操作"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          // 不要让全局 Escape 顺手把搜索条件也清了
+          event.stopPropagation();
+          onClear();
+        }
+      }}
+    >
       <span className="selection-count">已选 {count} 张</span>
       {tagContext && (
         <button
@@ -87,25 +93,10 @@ export function SelectionBar({
           <FolderMinus size={13} /> 移出此相册：{albumContext}
         </button>
       )}
-      <input
-        className="selection-input"
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && trimmed) run(onAlbum);
-          if (event.key === "Escape") {
-            // 不要让全局 Escape 顺手把搜索条件也清了
-            event.stopPropagation();
-            onClear();
-          }
-        }}
-        placeholder="输入标签或相册名"
-        disabled={busy}
-      />
-      <button type="button" onClick={() => run(onTag)} disabled={!trimmed || busy}>
+      <button type="button" onClick={onOpenTag} disabled={busy}>
         <Tag size={13} /> 加标签
       </button>
-      <button type="button" onClick={() => run(onAlbum)} disabled={!trimmed || busy}>
+      <button type="button" onClick={onOpenAlbum} disabled={busy}>
         <FolderPlus size={13} /> 加入相册
       </button>
       <button

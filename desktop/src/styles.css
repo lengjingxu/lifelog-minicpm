@@ -917,11 +917,6 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   animation: toast-in var(--duration-sm) var(--ease-out) both;
 }
 .selection-count { font-size: var(--font-12); color: var(--text-dim); white-space: nowrap; padding: 0 var(--space-4); }
-.selection-input {
-  width: 190px; height: 28px; padding: 0 var(--space-10); border-radius: var(--radius-10);
-  background: var(--bg-elevated); border: 1px solid var(--line); color: var(--text); font-size: var(--font-12-5);
-}
-.selection-input:focus { outline: none; border-color: var(--line-strong); }
 .selection-bar button {
   display: inline-flex; align-items: center; gap: var(--space-6); height: 28px; padding: 0 var(--space-10);
   border-radius: var(--radius-10); font-size: var(--font-12-5); color: var(--text-dim); background: var(--bg-elevated);
@@ -1840,7 +1835,7 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .selection-bar .selection-remove, .selection-bar .selection-delete,
 .hud-tags span { box-shadow: none; }
 .category-icon, .empty-icon, .month-cover, .inflight-card img, .inflight-empty { box-shadow: none; }
-.tag-cloud button, .ocr, .selection-input { border: 0; }
+.tag-cloud button, .ocr { border: 0; }
 
 /* 空状态卡：面板层 */
 .empty-card {
@@ -2608,3 +2603,43 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   .import-summary-stats dd { font-size: var(--font-22); }
   .import-summary-note { flex-wrap: wrap; }
 }
+
+/* 常显信息条：不用玻璃（玻璃会跟亮图混），用黑色渐变 + 白字，任何照片上都读得清 */
+.cell-meta {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
+  padding: 18px 9px 7px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--font-10-5); line-height: 1.45;
+  color: rgba(255, 255, 255, 0.96);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.45) 52%, rgba(0, 0, 0, 0));
+  pointer-events: none;
+}
+.cell[data-density="compact"] .cell-meta {
+  padding: 14px 7px 6px;
+  font-size: var(--font-9-5);
+  color: rgba(255, 255, 255, 0.9);
+}
+/* 悬停时多给一行完整描述，但常显那条一直留在最下面，不会被顶掉 */
+.cell .overlay { padding-bottom: 34px; z-index: 2; }
+.cell .cell-meta { z-index: 3; }
+
+/* 详情页顶部：垃圾桶在关闭按钮左边，独一份的危险操作 */
+.inspector-top-actions {
+  position: absolute; top: 18px; right: 18px; z-index: 2;
+  display: flex; align-items: center; gap: var(--space-8);
+}
+.inspector-top-actions .close-btn { position: static; top: auto; right: auto; }
+.inspector-danger {
+  display: grid; place-items: center;
+  width: 34px; height: 34px; border-radius: var(--radius-10);
+  color: var(--accent);
+  background: var(--bg-elevated);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.inspector-danger:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.inspector-danger:disabled { opacity: 0.45; }
+
+/* 空结果：条件 chip 也能在这里单独去掉，不用「一把全清」 */
+.empty-results .empty-conditions { justify-content: center; margin: 0 0 var(--space-16); max-width: 420px; }
+.empty-results .empty-conditions .chip { font-size: var(--font-10-5); }

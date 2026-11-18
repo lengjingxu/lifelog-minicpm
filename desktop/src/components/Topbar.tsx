@@ -78,7 +78,7 @@ export function Topbar({
           aria-label="搜索照片（⌘K）"
           title="搜索与跳转 ⌘K"
         >
-          {searchValue || "搜索描述、标签、地点或文字…"}
+          {searchValue || "搜描述、地点、人物或图内文字"}
         </button>
         {searchValue ? (
           <button type="button" className="search-clear" onClick={onSearchClear} aria-label="清除搜索">

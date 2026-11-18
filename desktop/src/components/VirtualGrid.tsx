@@ -13,6 +13,8 @@ type Props = {
   selection: Set<string>;
   multi: boolean;
   selectMode?: boolean;
+  /** 舒适：常显一行描述；紧凑：只显示拍摄时间。 */
+  density?: "comfort" | "compact";
   onSelect: (asset: Asset, event: MouseEvent) => void;
   onOpen: (asset: Asset, rect?: DOMRect) => void;
   onLoadMore?: () => void;
@@ -27,6 +29,7 @@ export function VirtualGrid({
   selection,
   multi,
   selectMode = false,
+  density = "comfort",
   onSelect,
   onOpen,
   onLoadMore,
@@ -178,6 +181,7 @@ export function VirtualGrid({
                     selected={selection.has(asset.id)}
                     multi={multi}
                     selectMode={selectMode}
+                    density={density}
                     onSelect={onSelect}
                     onOpen={onOpen}
                   />

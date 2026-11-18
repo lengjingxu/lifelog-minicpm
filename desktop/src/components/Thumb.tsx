@@ -2,7 +2,7 @@ import { useEffect, useState, type MouseEvent } from "react";
 import { Check, ImageOff } from "lucide-react";
 import clsx from "clsx";
 import { assetSrc, type Asset } from "../api";
-import { kindLabel } from "../utils";
+import { kindLabel, timeLabel } from "../utils";
 
 type Props = {
   asset: Asset;
@@ -11,11 +11,28 @@ type Props = {
   multi?: boolean;
   /** 选择模式：单击切换选中，不再打开详情 */
   selectMode?: boolean;
+  /** 舒适密度显示描述；紧凑密度只留拍摄时间，避免网格太挤。 */
+  density?: "comfort" | "compact";
   onSelect: (asset: Asset, event: MouseEvent) => void;
   onOpen: (asset: Asset, rect?: DOMRect) => void;
 };
 
-export function Thumb({ asset, dupCount, selected, multi, selectMode = false, onSelect, onOpen }: Props) {
+/** 紧凑密度用的短时间：2026-11-06，比「2026 年 11 月 6 日」省一半宽度。 */
+function shortDay(asset: Asset): string {
+  const raw = asset.taken_at || asset.day || "";
+  return raw.slice(0, 10);
+}
+
+export function Thumb({
+  asset,
+  dupCount,
+  selected,
+  multi,
+  selectMode = false,
+  density = "comfort",
+  onSelect,
+  onOpen,
+}: Props) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [useOriginal, setUseOriginal] = useState(false);
@@ -36,11 +53,18 @@ export function Thumb({ asset, dupCount, selected, multi, selectMode = false, on
     setFailed(true);
   };
 
+  const compact = density === "compact";
+  // 紧凑密度只留一行日期；舒适密度能放得下「时间 · 类型」。
+  const metaText = compact
+    ? shortDay(asset)
+    : asset.caption?.trim() || `${timeLabel(asset.taken_at)} · ${kindLabel(asset)}`;
+
   return (
     <button
       type="button"
       className={clsx("cell", selected && "selected")}
       data-asset-id={asset.id}
+      data-density={density}
       aria-label={`${kindLabel(asset)} · ${asset.caption || asset.path}`}
       aria-pressed={selected}
       // 普通模式单击看大图；选择模式下单击即选中，双击才看大图
@@ -82,6 +106,10 @@ export function Thumb({ asset, dupCount, selected, multi, selectMode = false, on
           ×{dupCount}
         </span>
       )}
+      {/* 悬停时这张卡片靠 z-index 浮起来，信息按钮也拿回自己的层级，不会被它盖住 */}
+      <span className="cell-meta" title={asset.caption || asset.path}>
+        {metaText}
+      </span>
       <span className="overlay">
         <span>{asset.caption || "尚未识别"}</span>
       </span>

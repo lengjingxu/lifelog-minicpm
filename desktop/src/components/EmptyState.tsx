@@ -1,23 +1,44 @@
-import { FolderSearch, Images, SearchX, Sparkles } from "lucide-react";
+import { FolderSearch, Images, SearchX, Sparkles, X } from "lucide-react";
+
+export type EmptyCondition = { key: string; label: string; remove: () => void };
 
 type Props = {
   mode?: "library" | "search";
   onChoose: (label: string) => void;
   onReset?: () => void;
+  /** 空结果时列出生效条件：每条都能单独去掉，不用「一把全清」。 */
+  conditions?: EmptyCondition[];
 };
 
-export function EmptyState({ mode = "library", onChoose, onReset }: Props) {
+export function EmptyState({ mode = "library", onChoose, onReset, conditions = [] }: Props) {
   if (mode === "search") {
     return (
-      <div className="empty-state compact-empty">
+      <div className="empty-state compact-empty empty-results">
         <div className="empty-icon">
           <SearchX size={24} strokeWidth={1.5} />
         </div>
         <h2>没有匹配的照片</h2>
-        <p>试试更短的关键词，或移除一个标签、人物、地点条件。</p>
+        <p>试试去掉其中某个条件，或换个更短的关键词。</p>
+        {conditions.length > 0 && (
+          <div className="chip-row empty-conditions" aria-label="当前生效的条件">
+            {conditions.map((condition) => (
+              <span className="chip" key={condition.key} data-condition={condition.key}>
+                {condition.label}
+                <button
+                  type="button"
+                  onClick={condition.remove}
+                  aria-label={`移除 ${condition.label}`}
+                  title={`移除 ${condition.label}`}
+                >
+                  <X size={11} strokeWidth={2} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         {onReset && (
           <button type="button" className="primary-btn" onClick={onReset}>
-            放宽条件
+            {conditions.length > 1 ? "清除全部条件" : "放宽条件"}
           </button>
         )}
       </div>

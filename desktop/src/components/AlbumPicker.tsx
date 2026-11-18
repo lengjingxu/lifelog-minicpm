@@ -1,24 +1,29 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, FolderPlus, Images, LoaderCircle, X } from "lucide-react";
 import clsx from "clsx";
 import { albumAdd, albumList, type Album } from "../api";
 import { useDialogFocus } from "../useDialogFocus";
 
+type Origin = { x: number; y: number; width: number; height: number } | null;
+
 type Props = {
-  assetId: string;
-  origin?: { x: number; y: number; width: number; height: number } | null;
+  /** 要加入相册的照片 id；详情页传一条，批量条传全部选中。 */
+  assetIds: string[];
+  origin?: Origin;
   onCancel: () => void;
   onAdded: (album: string, created: boolean) => void;
 };
 
-/** 详情页的「加入相册」：已有相册列出来，也可以直接输入新名字建。 */
-export function AlbumPicker({ assetId, origin = null, onCancel, onAdded }: Props) {
+/** 「加入相册」：已有相册列出来，也可以直接输入新名字建；一次可以带多张。 */
+export function AlbumPicker({ assetIds, origin = null, onCancel, onAdded }: Props) {
   const [albums, setAlbums] = useState<Album[] | null>(null);
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dialogRef = useDialogFocus<HTMLDivElement>(onCancel, { growFrom: origin });
+
+  const ids = useMemo(() => Array.from(new Set(assetIds)).filter(Boolean), [assetIds]);
 
   useEffect(() => {
     let alive = true;
@@ -36,12 +41,12 @@ export function AlbumPicker({ assetId, origin = null, onCancel, onAdded }: Props
 
   const submit = async (name: string) => {
     const trimmed = name.trim();
-    if (!trimmed || busy) return;
+    if (!trimmed || busy || !ids.length) return;
     setBusy(trimmed);
     setError(null);
     try {
       const created = !(albums ?? []).some((album) => album.name === trimmed);
-      const result = await albumAdd(trimmed, [assetId]);
+      const result = await albumAdd(trimmed, ids);
       if (!result.ok) throw new Error("加入相册没有返回成功");
       onAdded(trimmed, created);
     } catch (reason: unknown) {
@@ -62,7 +67,11 @@ export function AlbumPicker({ assetId, origin = null, onCancel, onAdded }: Props
         onMouseDown={(event) => event.stopPropagation()}
       >
         <h2 className="delete-title">加入相册</h2>
-        <p className="delete-note">选一个已有相册，或输入新名字直接建。</p>
+        <p className="delete-note">
+          {ids.length > 1
+            ? `把选中的 ${ids.length} 张加进一个相册，或输入新名字直接建。`
+            : "选一个已有相册，或输入新名字直接建。"}
+        </p>
 
         <div className="album-picker-list" role="listbox" aria-label="已有相册">
           {albums === null ? (
