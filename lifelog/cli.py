@@ -353,6 +353,12 @@ def cmd_space_views(args) -> int:
     return 0
 
 
+def cmd_import_summary(args) -> int:
+    from . import space
+    print(json.dumps(space.import_summary(), ensure_ascii=False))
+    return 0
+
+
 def cmd_space_groups(args) -> int:
     from . import space
     group_id = None
@@ -572,6 +578,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("space-views", help="图库清理五个视角的数量与占用")
     p.set_defaults(func=cmd_space_views)
+
+    p = sub.add_parser("import-summary", help="导入结束后的库汇总（只读聚合）")
+    p.set_defaults(func=cmd_import_summary)
 
     p = sub.add_parser("space-groups", help="图库清理分组：dup（真实重复）/ screenshot（来源目录）")
     p.add_argument("--view", required=True)

@@ -2585,3 +2585,26 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .import-mini-close { display: grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-6); color: var(--text-faint); }
 .import-mini-close:hover { color: var(--text); background: var(--bg-hover); }
 @media (prefers-reduced-motion: reduce) { .import-progress-pulse, .import-mini-fill[data-indeterminate="true"] { animation: none; width: 100%; } }
+
+/* 导入完成后的总结页：一次只讲一件事——这次进了什么、库里有什么、下一步做什么 */
+.import-summary { flex: 1; display: grid; place-items: center; padding: var(--space-24); overflow: auto; }
+.import-summary-body { width: min(560px, 100%); display: flex; flex-direction: column; gap: var(--space-20); }
+.import-summary-head h2 { margin: 0; font-size: var(--font-28); font-weight: 600; letter-spacing: -0.02em; }
+.import-summary-head p { margin: var(--space-6) 0 0; font-size: var(--font-12-5); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.import-summary-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-16); margin: 0; padding: var(--space-18) 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.import-summary-stats > div { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.import-summary-stats dt { display: inline-flex; align-items: center; gap: var(--space-6); font-size: var(--font-10-5); color: var(--text-faint); }
+.import-summary-stats dd { margin: 0; font-size: var(--font-30); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.import-summary-stats dd em { font-size: var(--font-12); font-weight: 500; font-style: normal; color: var(--text-faint); }
+.import-summary-stats small { font-size: var(--font-10-5); color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.import-summary-note { display: flex; align-items: center; gap: var(--space-8); font-size: var(--font-12); color: var(--text-dim); }
+.import-summary-note > span { flex: 1; min-width: 0; }
+.import-summary-note svg { flex: none; color: var(--accent); }
+.import-summary-note .ghost-button { flex: none; height: 28px; padding: 0 var(--space-12); font-size: var(--font-11); }
+.import-summary-actions { display: flex; align-items: center; gap: var(--space-10); }
+.import-summary-actions .primary-button, .import-summary-actions .ghost-button { height: 32px; padding: 0 var(--space-18); font-size: var(--font-12); }
+@media (max-width: 600px) {
+  .import-summary-stats { gap: var(--space-10); }
+  .import-summary-stats dd { font-size: var(--font-22); }
+  .import-summary-note { flex-wrap: wrap; }
+}

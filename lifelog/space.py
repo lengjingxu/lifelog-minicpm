@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 import os
 import time
 
@@ -400,3 +401,69 @@ def versions() -> dict:
         "version": hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16],
     }
 
+
+def import_summary() -> dict:
+    """导入结束后的总结：这次进了什么、库里现在有什么、建议清理什么。
+
+    只读聚合，不改任何数据。数字直接来自 assets / merged_caption / dup_groups，
+    所以和「图库清理」页看到的一致，不会出现两处对不上。
+    """
+    con = db.connect()
+    try:
+        def one(sql: str, params=()):
+            row = con.execute(sql, params).fetchone()
+            return row[0] if row else 0
+
+        total = one("SELECT count(*) FROM assets")
+        images = one("SELECT count(*) FROM assets WHERE kind != 'video'")
+        videos = one("SELECT count(*) FROM assets WHERE kind = 'video'")
+        bytes_total = one("SELECT COALESCE(sum(size),0) FROM assets")
+        screenshots = one(
+            "SELECT count(*) FROM assets WHERE path LIKE '%Screenshot%' "
+            "OR path LIKE '%screenshot%' OR path LIKE '%截屏%' OR path LIKE '%屏幕%'"
+        )
+        # 还没跑识别的：有 assets 但没有当前描述。
+        # 用 current_caption 而不是 merged_caption：真实库是 view（合成表），
+        # 别的库可能没有这张表，直接查表会整条命令失败。
+        unlabeled = one(
+            "SELECT count(*) FROM assets a WHERE NOT EXISTS "
+            "(SELECT 1 FROM current_caption m WHERE m.asset_id = a.id)"
+        )
+        # 重复可回收：keeper 之外的成员。去重还没跑过时这几张表可能不存在。
+        try:
+            dup_groups = one("SELECT count(*) FROM dup_groups")
+            dup_reclaim = one(
+                "SELECT count(*) FROM dup_groups g JOIN dup_members m ON m.group_id = g.id "
+                "WHERE m.asset_id != g.keeper_id"
+            )
+            dup_bytes = one(
+                "SELECT COALESCE(sum(a.size),0) FROM dup_groups g "
+                "JOIN dup_members m ON m.group_id = g.id "
+                "JOIN assets a ON a.id = m.asset_id WHERE m.asset_id != g.keeper_id"
+            )
+        except sqlite3.OperationalError:
+            dup_groups, dup_reclaim, dup_bytes = 0, 0, 0
+        days = one("SELECT count(DISTINCT day) FROM assets WHERE day IS NOT NULL")
+        first_day, last_day = con.execute(
+            "SELECT min(day), max(day) FROM assets WHERE day IS NOT NULL"
+        ).fetchone() or (None, None)
+    finally:
+        con.close()
+
+    return {
+        "total": total,
+        "images": images,
+        "videos": videos,
+        "bytes": bytes_total,
+        "screenshots": screenshots,
+        "unlabeled": unlabeled,
+        "days": days,
+        "first_day": first_day,
+        "last_day": last_day,
+        "dup": {
+            "ready": dup_groups > 0,
+            "groups": dup_groups,
+            "count": dup_reclaim,
+            "reclaim": dup_bytes,
+        },
+    }

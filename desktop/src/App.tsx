@@ -37,6 +37,8 @@ import {
   type Stats,
   pickFolder,
   importFolder,
+  importSummary,
+  type ImportSummary,
   isTauri,
   importXiaomi,
   cleanupList,
@@ -65,6 +67,7 @@ import { DeleteDialog } from "./components/DeleteDialog";
 import { AccessDialog } from "./components/AccessDialog";
 import { EmptyState } from "./components/EmptyState";
 import { ImportProgressView, ImportMiniBar, type FolderProgress } from "./components/ImportProgress";
+import { ImportSummaryView } from "./components/ImportSummary";
 import { OrganizeView } from "./components/OrganizeView";
 import { RecognitionDialog } from "./components/RecognitionDialog";
 import { SettingsView } from "./components/SettingsView";
@@ -578,7 +581,15 @@ const route = useMemo(readRoute, []);
   const [folderImportOpen, setFolderImportOpen] = useState(false);
   const [folderImportBusy, setFolderImportBusy] = useState(false);
   const [folderImportError, setFolderImportError] = useState<string | null>(null);
+  // 导入成功后的总结页：只在这一次导入后出现，关掉就清空（不持久化）。
+  const [importSummaryView, setImportSummaryView] = useState<{
+    data: ImportSummary;
+    added: number;
+    first: boolean;
+  } | null>(null);
   const folderTarget = useRef<string | null>(null);
+  // ingest 统计里的「新增」：事件一路更新，成功时从这里取，避免闭包读到旧值。
+  const folderAdded = useRef(0);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [importAuthError, setImportAuthError] = useState(false);
@@ -624,6 +635,7 @@ const route = useMemo(readRoute, []);
   const runFolderImport = useCallback(
     async (folder: string) => {
       folderTarget.current = folder;
+      folderAdded.current = 0;
       setFolderImportError(null);
       setFolderImport({ stage: "ingest", seen: 0, added: 0, skipped: 0 });
       setFolderImportOpen(true);
@@ -636,14 +648,22 @@ const route = useMemo(readRoute, []);
           showError("导入失败：" + message);
           return;
         }
-        // 保留「导入完成」状态，用户点「在后台继续」或自己关掉再回图库；
-        // 否则导入瞬间就结束、整页换算太快，看起来像什么都没发生。
-        setFolderImport((previous) => ({
-          ...(previous ?? { seen: 0, added: 0, skipped: 0, stage: "ingest" }),
-          stage: "done",
-        }));
+        const stats = (result.stats ?? {}) as { new?: number };
+        const added = typeof stats.new === "number" ? stats.new : folderAdded.current;
+        // 进度视图收掉，换成总结页；库数据先刷新，保证总结里的数字就是眼前的库。
+        setFolderImport(null);
+        setFolderImportOpen(false);
         refreshData();
-        showToast("导入完成");
+        try {
+          const data = await importSummary();
+          // 空库第一次导入：库总数就等于这次的增量（只跟本次 ingest 比，不看账号历史）。
+          setImportSummaryView({ data, added, first: added > 0 && data.total === added });
+        } catch (summaryError) {
+          // 汇总拉不到不该挡住宿主看照片：退回原来的成功提示。
+          setImportSummaryView(null);
+          showToast("导入完成");
+          showError("读取导入汇总失败：" + extractMessage(summaryError));
+        }
       } catch (err) {
         const message = extractMessage(err);
         setFolderImportError(message);
@@ -696,6 +716,7 @@ const route = useMemo(readRoute, []);
       }
       // done 也要接：否则最后一格进度停住、标题永远停在「正在生成缩略图」。
       if (stage !== "ingest" && stage !== "ingest-done" && stage !== "thumbs" && stage !== "done") return;
+      if (typeof payload.new === "number") folderAdded.current = payload.new;
       setFolderImport((previous) => {
         const base: FolderProgress = previous ?? { stage: "ingest", seen: 0, added: 0, skipped: 0 };
         return {
@@ -1224,6 +1245,8 @@ const route = useMemo(readRoute, []);
   const navigate = useCallback(
     (next: View) => {
       clearAll();
+      // 总结页只在刚导入完那一下出现；从侧栏去别处就等于看过、关掉了。
+      setImportSummaryView(null);
       setView(next);
     },
     [clearAll],
@@ -1664,6 +1687,28 @@ const route = useMemo(readRoute, []);
           <h2>读取本地库失败</h2>
           <p>{error}</p>
         </div>
+      );
+    }
+
+    if (importSummaryView) {
+      return (
+        <ImportSummaryView
+          summary={importSummaryView.data}
+          added={importSummaryView.added}
+          firstImport={importSummaryView.first}
+          onBrowse={() => {
+            setImportSummaryView(null);
+            navigate("library");
+          }}
+          onCleanup={() => {
+            setImportSummaryView(null);
+            navigate("space");
+          }}
+          onRecognize={() => {
+            setImportSummaryView(null);
+            setRecognitionOpen(true);
+          }}
+        />
       );
     }
 

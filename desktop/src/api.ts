@@ -993,6 +993,53 @@ export type ImportPlan = {
   stage?: string;
 };
 
+export type ImportSummary = {
+  total: number;
+  images: number;
+  videos: number;
+  bytes: number;
+  screenshots: number;
+  unlabeled: number;
+  days: number;
+  first_day: string | null;
+  last_day: string | null;
+  dup: { ready: boolean; groups: number; count: number; reclaim: number };
+};
+
+/** 浏览器 fixture 里的库汇总：与真实库（2026-11-18）同一批数字，供前端验收比对。 */
+export const FIXTURE_IMPORT_SUMMARY: ImportSummary = {
+  total: 32826,
+  images: 29853,
+  videos: 2973,
+  // 真实库 sum(size)：361,046,806,953 字节（formatBytes 显示 336.2 GB）。
+  bytes: 361_046_806_953,
+  screenshots: 383,
+  unlabeled: 2982,
+  days: 1579,
+  first_day: "2011-01-01",
+  last_day: "2026-11-08",
+  dup: { ready: true, groups: 5251, count: 6818, reclaim: 18_624_084_890 },
+};
+
+let fixtureSummaryOverride: Partial<ImportSummary> | null = null;
+
+/** 测试用：fixture 下临时改汇总内容（例如把 unlabeled 置 0）。不写任何持久化状态。 */
+export function setFixtureImportSummary(patch: Partial<ImportSummary> | null) {
+  fixtureSummaryOverride = patch;
+}
+
+export async function importSummary(): Promise<ImportSummary> {
+  if (!isTauri) {
+    // 测试/预览可以直接挂 window.__fixtureImportSummary 换一份数字，不碰真实状态。
+    const injected = (window as Window & { __fixtureImportSummary?: Partial<ImportSummary> })
+      .__fixtureImportSummary;
+    const patch = injected ?? fixtureSummaryOverride;
+    const base: ImportSummary = patch ? { ...FIXTURE_IMPORT_SUMMARY, ...patch } : FIXTURE_IMPORT_SUMMARY;
+    return { ...base, dup: { ...base.dup, ...(patch?.dup ?? {}) } };
+  }
+  return invoke<ImportSummary>("import_summary");
+}
+
 export const importXiaomi = (dryRun: boolean) => invoke<ImportPlan>("import_xiaomi", { dryRun });
 
 export const thumbStatus = () => invoke<ThumbStatus>("thumb_status");

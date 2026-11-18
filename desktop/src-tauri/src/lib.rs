@@ -983,6 +983,16 @@ fn trash_with(path: &std::path::Path) -> Result<(), trash::Error> {
 // 也能保证 config.DB_PATH 与桌面端实际打开的库是同一个文件。
 
 #[tauri::command]
+async fn import_summary(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        run_python_cli(&home, &["import-summary".to_string()])
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
 async fn space_views(db: State<'_, Db>) -> Result<serde_json::Value, String> {
     let home = db.data_dir.clone();
     tauri::async_runtime::spawn_blocking(move || run_python_cli(&home, &["space-views".to_string()]))
@@ -1634,6 +1644,7 @@ pub fn run() {
             cleanup_remove,
             space_summary,
             space_views,
+            import_summary,
             space_groups,
             space_versions,
             live::live_health,

@@ -109,8 +109,6 @@ export function RecognitionDialog({
       .map(([slot, id]) => ({ slot, asset: assets.get(id) }));
   }, [live.events, assets]);
 
-  if (!open) return null;
-
   const begin = async () => {
     setSubmitting(true);
     try {
@@ -158,6 +156,9 @@ export function RecognitionDialog({
       window.clearInterval(importTimer.current);
     };
   }, [open]);
+
+  // 关闭后提前返回必须放在全部 hook 之后：否则 open 变 true 时 hook 数量会变，React 直接崩。
+  if (!open) return null;
 
   const previewImport = async () => {
     setImportBusy(true);

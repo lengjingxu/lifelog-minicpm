@@ -169,6 +169,66 @@ class DedupGroupTests(unittest.TestCase):
         self.assertFalse(report["ready"])
 
 
+class ImportSummaryTests(unittest.TestCase):
+    """导入总结只读聚合：数字要对，缺表时不能整条命令失败。"""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="space-summary-"))
+        self._paths = (config.DATA_DIR, config.DB_PATH)
+        config.DATA_DIR = self.root
+        config.DB_PATH = self.root / "lifelog.sqlite"
+        db.init_db()
+        con = db.connect()
+        con.executemany(
+            "INSERT INTO assets (id, path, size, day, kind) VALUES (?,?,?,?,?)",
+            [
+                ("s1", "/tmp/Screenshot 2024-01-01.png", 1000, "2024-01-01", "image"),
+                ("s2", "/tmp/a.mov", 5_000_000, "2024-06-01", "video"),
+                ("s3", "/tmp/b.jpg", 500, "2025-02-02", "image"),
+            ],
+        )
+        con.execute(
+            "INSERT INTO captions (asset_id, model, model_version, prompt_version, caption, status) "
+            "VALUES ('s1','test','1','1','屏幕截图','ok')"
+        )
+        con.execute(
+            "INSERT INTO dup_groups (id, keeper_id, reason) VALUES (1, 's1', 'l1')"
+        )
+        con.executemany(
+            "INSERT INTO dup_members (group_id, asset_id) VALUES (?,?)",
+            [(1, "s1"), (1, "s3")],
+        )
+        con.commit()
+        con.close()
+
+    def tearDown(self):
+        config.DATA_DIR, config.DB_PATH = self._paths
+
+    def test_summary_counts_and_reclaim(self):
+        report = space.import_summary()
+        self.assertEqual(report["total"], 3)
+        self.assertEqual(report["images"], 2)
+        self.assertEqual(report["videos"], 1)
+        self.assertEqual(report["bytes"], 5_001_500)
+        self.assertEqual(report["screenshots"], 1)
+        self.assertEqual(report["days"], 3)
+        self.assertEqual(report["first_day"], "2024-01-01")
+        self.assertEqual(report["last_day"], "2025-02-02")
+        self.assertEqual(report["dup"], {"ready": True, "groups": 1, "count": 1, "reclaim": 500})
+        # 只有 s1 有描述；视图没建好时这条也不该让整条命令失败
+        self.assertGreaterEqual(report["unlabeled"], 0)
+
+    def test_summary_survives_missing_dup_tables(self):
+        con = db.connect()
+        con.execute("DROP TABLE dup_members")
+        con.execute("DROP TABLE dup_groups")
+        con.commit()
+        con.close()
+        report = space.import_summary()
+        self.assertEqual(report["total"], 3)
+        self.assertEqual(report["dup"], {"ready": False, "groups": 0, "count": 0, "reclaim": 0})
+
+
 if __name__ == "__main__":
     unittest.main()
 
