@@ -689,7 +689,8 @@ export type LibraryRoot = { root: string; exists: boolean; readable: boolean; as
 export type LibraryAccess = { roots: LibraryRoot[] };
 
 /** 库里照片所在的顶层目录能不能读：被 TCC 拒绝时这里就是 false。 */
-export const libraryAccess = () => invoke<LibraryAccess>("library_access");
+export const libraryAccess = () =>
+  isTauri ? invoke<LibraryAccess>("library_access") : Promise.resolve({ roots: [] });
 export const openPrivacySettings = () => invoke<void>("open_privacy_settings");
 
 export const deleteRecords = (ids: string[], withFiles = false) =>
