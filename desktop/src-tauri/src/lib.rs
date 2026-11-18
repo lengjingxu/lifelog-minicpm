@@ -1505,8 +1505,8 @@ async fn import_folder(
             .map_err(|err| format!("启动导入失败：{err}"))?;
         if let Some(err_pipe) = child.stderr.take() {
             for line in BufReader::new(err_pipe).lines().map_while(Result::ok) {
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
-                    if value.get("phase").and_then(|v| v.as_str()) == Some("ingest") {
+                if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&line) {
+                    if normalize_ingest_event(&mut value) {
                         let _ = app.emit("import-progress", value);
                     }
                 }
@@ -2461,5 +2461,39 @@ pub fn access_report_for(data_dir: &Path) -> Vec<AccessRoot> {
     match Connection::open(data_dir.join("lifelog.sqlite")) {
         Ok(conn) => access_report(&conn),
         Err(_) => Vec::new(),
+    }
+}
+
+/// CLI 的进度行用 phase 标记阶段，前端读的是 stage。
+/// 这个转换曾经漏过：事件发出去了但进度数字不动，所以单独抽出来测。
+fn normalize_ingest_event(value: &mut serde_json::Value) -> bool {
+    if value.get("phase").and_then(|v| v.as_str()) != Some("ingest") {
+        return false;
+    }
+    if let Some(map) = value.as_object_mut() {
+        map.insert("stage".to_string(), serde_json::json!("ingest"));
+    }
+    true
+}
+
+#[cfg(test)]
+mod ingest_event_tests {
+    use super::normalize_ingest_event;
+
+    #[test]
+    fn ingest_line_gains_stage_so_frontend_updates() {
+        let mut value = serde_json::json!({
+            "phase": "ingest", "seen": 600, "new": 590, "skipped": 10
+        });
+        assert!(normalize_ingest_event(&mut value));
+        assert_eq!(value["stage"], "ingest");
+        assert_eq!(value["seen"], 600);
+    }
+
+    #[test]
+    fn other_phase_is_ignored() {
+        let mut value = serde_json::json!({ "phase": "hash", "done": 1 });
+        assert!(!normalize_ingest_event(&mut value));
+        assert!(value.get("stage").is_none());
     }
 }
