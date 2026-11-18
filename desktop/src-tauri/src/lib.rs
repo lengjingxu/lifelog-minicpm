@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -1489,39 +1489,19 @@ async fn import_folder(
         let root = repo_root();
         let _ = app.emit("import-progress", serde_json::json!({"stage": "ingest", "message": "正在扫描文件夹"}));
         let python = py::resolve(&home)?;
-        // 边走边读 stderr：每 200 个文件一行 {"phase":"ingest","seen":…}，原样转成事件。
-        let mut child = std::process::Command::new(python)
-            .arg("-c")
-            .arg("from lifelog.cli import main; main()")
-            .arg("ingest")
-            .arg(&path)
-            .arg("--progress")
-            .current_dir(&root)
-            .env("PYTHONPATH", &root)
-            .env("LIFELOG_HOME", &home)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|err| format!("启动导入失败：{err}"))?;
-        if let Some(err_pipe) = child.stderr.take() {
-            for line in BufReader::new(err_pipe).lines().map_while(Result::ok) {
-                if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&line) {
-                    if normalize_ingest_event(&mut value) {
-                        let _ = app.emit("import-progress", value);
-                    }
-                }
-            }
+        // 与 ingest_probe 共用同一条读取路径：边跑边把进度转发给前端。
+        let mut failed_message: Option<String> = None;
+        let stats = stream_ingest_events(&python, &root, &home, &path, |value| {
+            let _ = app.emit("import-progress", value);
+        })
+        .unwrap_or_else(|err| {
+            failed_message = Some(err.clone());
+            serde_json::Value::Null
+        });
+        if let Some(message) = failed_message {
+            let _ = app.emit("import-progress", serde_json::json!({"stage": "failed", "message": message}));
+            return Ok(serde_json::json!({"ok": false, "stderr": message}));
         }
-        let output = child
-            .wait_with_output()
-            .map_err(|err| format!("导入进程失败：{err}"))?;
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        if !output.status.success() {
-            let _ = app.emit("import-progress", serde_json::json!({"stage": "failed", "message": stderr.trim()}));
-            return Ok(serde_json::json!({"ok": false, "stderr": stderr.trim(), "stdout": stdout.trim()}));
-        }
-        let stats: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap_or(serde_json::Value::Null);
         let _ = app.emit("import-progress", serde_json::json!({"stage": "ingest-done", "stats": stats}));
 
         // 导入完成后自动补齐缩略图
@@ -2496,4 +2476,75 @@ mod ingest_event_tests {
         assert!(!normalize_ingest_event(&mut value));
         assert!(value.get("stage").is_none());
     }
+}
+
+/// 跑一次 ingest，边读 stderr 边回调事件（与 import_folder 完全同一条代码路径）。
+/// 抽出来是为了让验收脚本能用同一份逻辑，而不是另写一份可能再次跑偏的模拟。
+fn stream_ingest_events<F>(python: &Path, root: &Path, home: &Path, folder: &str, mut on_event: F)
+    -> Result<serde_json::Value, String>
+where
+    F: FnMut(serde_json::Value),
+{
+    let mut child = std::process::Command::new(python)
+        .arg("-c")
+        .arg("from lifelog.cli import main; main()")
+        .arg("ingest")
+        .arg(folder)
+        .arg("--progress")
+        .current_dir(root)
+        .env("PYTHONPATH", root)
+        .env("LIFELOG_HOME", home)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("启动导入失败：{err}"))?;
+
+    // stderr 与 stdout 必须同时读，否则任一管道写满 64KB 就会互相等死。
+    let stderr = child.stderr.take();
+    let reader = std::thread::spawn(move || {
+        let mut lines = Vec::new();
+        if let Some(pipe) = stderr {
+            for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+                lines.push(line);
+            }
+        }
+        lines
+    });
+
+    let mut stdout = String::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        let _ = pipe.read_to_string(&mut stdout);
+    }
+    let stderr_lines = reader.join().unwrap_or_default();
+    let status = child.wait().map_err(|err| format!("导入进程失败：{err}"))?;
+
+    for line in stderr_lines {
+        if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&line) {
+            if normalize_ingest_event(&mut value) {
+                on_event(value);
+            }
+        }
+    }
+    if !status.success() {
+        return Err(format!("导入失败：{}", stdout.trim()));
+    }
+    Ok(serde_json::from_str(stdout.trim()).unwrap_or(serde_json::Value::Null))
+}
+
+/// 验收用：跑真实 ingest，把每一步事件按行打到 stdout（与桌面端 emit 的内容一致）。
+pub fn ingest_probe(folder: &str) -> Result<Vec<String>, String> {
+    let home = PathBuf::from(std::env::var("LIFELOG_HOME").unwrap_or_else(|_| {
+        format!(
+            "{}/dev/lifelog-minicpm/data",
+            std::env::var("HOME").unwrap_or_default()
+        )
+    }));
+    let root = repo_root();
+    let python = py::resolve(&home)?;
+    let mut events = Vec::new();
+    let stats = stream_ingest_events(&python, &root, &home, folder, |value| {
+        events.push(value.to_string());
+    })?;
+    events.push(serde_json::json!({"stage": "ingest-done", "stats": stats}).to_string());
+    Ok(events)
 }

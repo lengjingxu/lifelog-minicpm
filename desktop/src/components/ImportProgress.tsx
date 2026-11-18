@@ -86,7 +86,9 @@ export function ImportProgressView({
             ? `${number(thumbs.done)} / ${number(thumbs.total)} 张 · ${thumbs.rate.toFixed(1)} 张/秒${
                 thumbs.eta != null ? ` · 剩余 ${thumbs.eta}s` : ""
               }`
-            : "总数未知，正在逐个数…"}
+            : scanning
+              ? "总数未知，正在逐个数…"
+              : "正在准备缩略图…"}
         </p>
 
         {/* 失败时也保留「在后台继续」：失败只是这一节点的结果，不该劫持整个视图。 */}

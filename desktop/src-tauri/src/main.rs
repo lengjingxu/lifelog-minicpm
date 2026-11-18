@@ -14,6 +14,21 @@ fn main() {
         println!("{}", shiguang_mac_lib::python_report_for(&std::path::PathBuf::from(home)));
         return;
     }
+    // 验收：跑真实 ingest，把桌面端会 emit 的进度事件逐行打出来。
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(pos) = args.iter().position(|a| a == "--ingest-probe") {
+        let folder = args.get(pos + 1).cloned().unwrap_or_default();
+        match shiguang_mac_lib::ingest_probe(&folder) {
+            Ok(events) => {
+                for event in events { println!("{event}"); }
+            }
+            Err(err) => {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if std::env::args().any(|arg| arg == "--access-report") {
         let home = std::env::var("LIFELOG_HOME").unwrap_or_else(|_| {
             format!(

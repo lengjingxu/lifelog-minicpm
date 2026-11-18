@@ -694,7 +694,8 @@ const route = useMemo(readRoute, []);
         showError("导入失败：" + message);
         return;
       }
-      if (stage !== "ingest" && stage !== "ingest-done" && stage !== "thumbs") return;
+      // done 也要接：否则最后一格进度停住、标题永远停在「正在生成缩略图」。
+      if (stage !== "ingest" && stage !== "ingest-done" && stage !== "thumbs" && stage !== "done") return;
       setFolderImport((previous) => {
         const base: FolderProgress = previous ?? { stage: "ingest", seen: 0, added: 0, skipped: 0 };
         return {
@@ -716,7 +717,11 @@ const route = useMemo(readRoute, []);
         previous
           ? {
               ...previous,
-              stage: "thumbs",
+              // 最后一条 done==total 就是收尾，直接进「导入完成」，别再停在缩略图阶段。
+              stage:
+                payload.done != null && payload.total != null && payload.total > 0 && payload.done >= payload.total
+                  ? "done"
+                  : "thumbs",
               thumbs: {
                 done: payload.done ?? 0,
                 total: payload.total ?? 0,
