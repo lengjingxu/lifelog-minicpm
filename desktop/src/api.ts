@@ -72,7 +72,15 @@ export type Filter = {
   view?: SpaceViewKey;
 };
 
-export type SortKey = "taken_desc" | "taken_asc" | "size_desc" | "size_asc";
+export type SortKey =
+  | "taken_desc"
+  | "taken_asc"
+  | "size_desc"
+  | "size_asc"
+  /** 全局按美学分从高到低；没有评分表的库会安静退回时间序。 */
+  | "quality_desc"
+  /** 日期倒序，同一天内高分在前。 */
+  | "day_desc_quality";
 
 export type LiveStatus = "running" | "done" | "stopped" | "idle";
 
@@ -263,6 +271,20 @@ async function fixtureQuery(filter: Filter): Promise<Asset[]> {
         return [...filtered].sort((a, b) => (a.size ?? 0) - (b.size ?? 0));
       case "taken_asc":
         return [...filtered].sort((a, b) => (a.taken_at ?? "").localeCompare(b.taken_at ?? ""));
+      case "quality_desc":
+        // 与 Rust 一致：缺分排最后，同分按拍摄时间倒序。
+        return [...filtered].sort(
+          (a, b) =>
+            (b.score ?? -1) - (a.score ?? -1) ||
+            (b.taken_at ?? "").localeCompare(a.taken_at ?? ""),
+        );
+      case "day_desc_quality":
+        return [...filtered].sort(
+          (a, b) =>
+            (b.day ?? "").localeCompare(a.day ?? "") ||
+            (b.score ?? -1) - (a.score ?? -1) ||
+            (b.taken_at ?? "").localeCompare(a.taken_at ?? ""),
+        );
       default:
         return filtered;
     }

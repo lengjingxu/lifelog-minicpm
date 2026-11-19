@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, CheckSquare, Clock, Command, Download, LayoutGrid, Moon, Search, Sun, X } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckSquare, Clock, Command, Download, LayoutGrid, Moon, Search, Sparkles, Sun, X } from "lucide-react";
 import clsx from "clsx";
 import type { SortKey } from "../api";
 import type { View } from "../utils";
 
 const SORT_OPTIONS: { key: SortKey; label: string; icon: typeof Clock }[] = [
   { key: "taken_desc", label: "拍摄时间 · 新→旧", icon: ArrowDown },
+  { key: "day_desc_quality", label: "按日期 · 当天内高分优先", icon: Sparkles },
   { key: "taken_asc", label: "拍摄时间 · 旧→新", icon: ArrowUp },
+  { key: "quality_desc", label: "画质优先 · 高分在前", icon: Sparkles },
   { key: "size_desc", label: "文件大小 · 大→小", icon: ArrowDown },
   { key: "size_asc", label: "文件大小 · 小→大", icon: ArrowUp },
 ];
@@ -219,7 +221,16 @@ function SortButton({ sort, onSort }: { sort: SortKey; onSort: (sort: SortKey) =
         title={current.label}
       >
         <Icon size={13} strokeWidth={1.9} />
-        <span>{sort.startsWith("size") ? "大小" : "时间"}</span>
+        {/* 短标签要能区分三种排序，否则选了画质仍显示「时间」，看起来没生效。 */}
+        <span>
+          {sort.startsWith("size")
+            ? "大小"
+            : sort === "quality_desc"
+              ? "画质"
+              : sort === "day_desc_quality"
+                ? "日期·分数"
+                : "时间"}
+        </span>
       </button>
       {open && (
         <div className="sort-menu glass-surface" role="listbox" aria-label="排序方式">

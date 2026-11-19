@@ -526,6 +526,53 @@ fn count_assets(db: State<'_, Db>, filter: Filter) -> Result<i64, String> {
     Ok(total)
 }
 
+/// 排序计划：是否要 JOIN 评分表、是否退回 offset 分页。
+/// 抽成纯函数是为了让「没有 asset_quality 的库」也能被单测覆盖。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SortPlan {
+    uses_score: bool,
+    offset_paging: bool,
+    join: &'static str,
+}
+
+const QUALITY_JOIN: &str = " LEFT JOIN asset_quality q ON q.asset_id = a.id";
+
+fn sort_plan(sort: &str, has_quality: bool, in_month: bool) -> SortPlan {
+    match sort {
+        "size_desc" | "size_asc" => SortPlan { uses_score: false, offset_paging: true, join: "" },
+        // 全局按分数：缺分的行排最后（COALESCE -1），同分按时间倒序兜底。
+        "quality_desc" => SortPlan { uses_score: has_quality, offset_paging: true, join: QUALITY_JOIN },
+        // 当天内高分优先：跨天分组，必须 offset 分页。
+        "day_desc_quality" => SortPlan { uses_score: has_quality, offset_paging: true, join: QUALITY_JOIN },
+        // 纯时间序保持原来的 keyset 游标；点进某个月且库里有分数时，月内高分优先。
+        "taken_desc" => SortPlan {
+            uses_score: in_month && has_quality,
+            // 没有评分表时仍可走 keyset 游标；只有「月内按分」才必须 offset。
+            offset_paging: in_month && has_quality,
+            join: if in_month && has_quality { QUALITY_JOIN } else { "" },
+        },
+        _ => SortPlan { uses_score: false, offset_paging: false, join: "" },
+    }
+}
+
+/// 订单子句（不含 LIMIT）。`key_col` 是 taken_sort（有索引）或 taken_at。
+fn order_clause(sort: &str, has_quality: bool, key_col: &str) -> String {
+    match sort {
+        "size_desc" => " ORDER BY COALESCE(a.size,0) DESC, a.id DESC".to_string(),
+        "size_asc" => " ORDER BY COALESCE(a.size,0) ASC, a.id ASC".to_string(),
+        "quality_desc" if has_quality => {
+            " ORDER BY COALESCE(q.score,-1) DESC, COALESCE(a.taken_at,'') DESC, a.id DESC".to_string()
+        }
+        "day_desc_quality" if has_quality => {
+            " ORDER BY COALESCE(a.day,'') DESC, COALESCE(q.score,-1) DESC, COALESCE(a.taken_at,'') DESC, a.id DESC"
+                .to_string()
+        }
+        // 没有评分表 / 非法排序：安静退回时间序，不能报错。
+        "taken_asc" => format!(" ORDER BY {key_col} ASC, a.id ASC"),
+        _ => format!(" ORDER BY {key_col} DESC, a.id DESC"),
+    }
+}
+
 /// 深翻页游标，格式 taken_at|id（二元组）。命中时改写 where 并把参数追加到 args 末尾。
 /// 返回 true 表示这是 keyset 分页，调用方应忽略 offset。
 fn apply_cursor(
@@ -593,27 +640,25 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
         return Err("数据库缺少 taken_sort 列，请先运行一次 lifelog CLI 升级索引".to_string());
     }
     let key_col = if has_sort { "a.taken_sort" } else { "a.taken_at" };
-    // 按月看（时间线点进某个月）时，月内按美学分排序；没有评分表就退回时间序。
-    let score_mode = filter.day_from.is_some()
-        && filter.day_to.is_some()
-        && has_table(conn, "asset_quality");
-    // 排序：按大小排时不走时间游标（游标是时间序的），退回 offset。
+    // 排序：taken_desc（默认）/ taken_asc / size_* / quality_desc / day_desc_quality。
     let sort = filter.sort.as_deref().unwrap_or("taken_desc");
-    let by_size = matches!(sort, "size_desc" | "size_asc");
-    let time_keyset = sort == "taken_desc" && !by_size;
-    let keyset = if !time_keyset {
+    let has_quality = has_table(conn, "asset_quality");
+    // 按月看（时间线点进某个月）时，月内按美学分排序；没有评分表就退回时间序。
+    let in_month = filter.day_from.is_some() && filter.day_to.is_some();
+    let plan = sort_plan(sort, has_quality, in_month);
+    let score_mode = plan.uses_score;
+    // 按大小 / 按分数 / 当天内高分优先都要跨行分组，「上一页最后一条」不足以保证位置，
+    // 一律退回 offset 分页（调用方已把 limit 限制在 MAX_PAGE_LIMIT 内）。
+    let offset_paging = plan.offset_paging;
+    let keyset = if !(sort == "taken_desc" && !offset_paging) {
         false
-    } else if score_mode {
+    } else if in_month && has_quality {
         apply_score_cursor(&mut where_sql, &mut args, filter.cursor.as_deref())
     } else {
         apply_cursor(&mut where_sql, &mut args, filter.cursor.as_deref(), key_col)
     };
     let score_col = if score_mode { ", q.score" } else { "" };
-    let score_join = if score_mode {
-        " LEFT JOIN asset_quality q ON q.asset_id = a.id"
-    } else {
-        ""
-    };
+    let score_join = if score_mode { plan.join } else { "" };
     let dup_col = if has_dup {
         "(SELECT count(*) FROM dup_members dm WHERE dm.group_id = (SELECT dm2.group_id FROM dup_members dm2 WHERE dm2.asset_id = a.id LIMIT 1))".to_string()
     } else {
@@ -636,18 +681,8 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     );
 
 
-    if by_size {
-        let dir = if sort == "size_asc" { "ASC" } else { "DESC" };
-        sql.push_str(&format!(
-            " ORDER BY COALESCE(a.size,0) {dir}, a.id DESC LIMIT ?"
-        ));
-    } else if score_mode && sort == "taken_desc" {
-        sql.push_str(" ORDER BY COALESCE(q.score,-1) DESC, COALESCE(a.taken_at,'') DESC, a.id DESC LIMIT ?");
-    } else if sort == "taken_asc" {
-        sql.push_str(&format!(" ORDER BY {key_col} ASC, a.id ASC LIMIT ?"));
-    } else {
-        sql.push_str(&format!(" ORDER BY {key_col} DESC, a.id DESC LIMIT ?"));
-    }
+    sql.push_str(&order_clause(sort, has_quality, key_col));
+    sql.push_str(" LIMIT ?");
     args.push(rusqlite::types::Value::Integer(filter.limit.unwrap_or(500)));
     sql.push_str(" OFFSET ?");
     args.push(rusqlite::types::Value::Integer(if keyset {
@@ -2115,6 +2150,130 @@ mod filter_tests {
             .unwrap();
         assert_eq!(seen.len() as i64, jan, "一个月内的行没有翻全");
         assert!(pages >= 6, "600 行 / 100 应至少 6 页，实际 {pages}");
+    }
+
+    /// 「当天内高分优先」：天与天之间仍按日期倒序，同一天内按分数降序。
+    #[test]
+    fn day_desc_quality_keeps_days_in_order_and_puts_best_photo_first() {
+        let conn = seed();
+        conn.execute_batch(
+            "CREATE TABLE asset_quality (asset_id TEXT PRIMARY KEY, score REAL NOT NULL,
+                                        stars INTEGER, model TEXT, model_version TEXT, created_at TEXT);
+             -- 同一天三张：分数 3.0 / 9.0 / 6.0，排序后应是高分那张第一
+             INSERT INTO assets VALUES ('x1','/p/x1.jpg','2024-01-01','2024-01-01T10:00:00','image');
+             INSERT INTO assets VALUES ('b1','/p/b1.jpg','2024-01-01','2024-01-01T11:00:00','image');
+             INSERT INTO assets VALUES ('c1','/p/c1.jpg','2024-01-01','2024-01-01T12:00:00','image');
+             INSERT INTO asset_quality VALUES ('x1',3.0,NULL,NULL,NULL,NULL);
+             INSERT INTO asset_quality VALUES ('b1',9.0,NULL,NULL,NULL,NULL);
+             INSERT INTO asset_quality VALUES ('c1',6.0,NULL,NULL,NULL,NULL);",
+        )
+        .unwrap();
+
+        let sql = format!(
+            "SELECT a.id, a.day, q.score FROM assets a {} WHERE a.day = '2024-01-01'{}",
+            QUALITY_JOIN,
+            order_clause("day_desc_quality", true, "a.taken_at")
+        );
+        let mut stmt = conn.prepare(&sql).unwrap();
+        let rows: Vec<(String, String, f64)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .flatten()
+            .collect();
+        let ids: Vec<&str> = rows.iter().map(|(id, _, _)| id.as_str()).collect();
+        assert_eq!(ids, vec!["b1", "c1", "x1"], "当天内应按分数降序");
+        assert!(rows.windows(2).all(|w| w[0].2 >= w[1].2));
+
+        // 换成跨两天：日期优先，高分不能把昨天的照片顶到前面
+        conn.execute_batch(
+            "INSERT INTO assets VALUES ('z1','/p/z1.jpg','2024-01-02','2024-01-02T09:00:00','image');
+             INSERT INTO assets VALUES ('z2','/p/z2.jpg','2024-01-02','2024-01-02T10:00:00','image');
+             INSERT INTO asset_quality VALUES ('z1',1.0,NULL,NULL,NULL,NULL);
+             INSERT INTO asset_quality VALUES ('z2',0.5,NULL,NULL,NULL,NULL);",
+        )
+        .unwrap();
+        let sql = format!(
+            "SELECT a.id, a.day FROM assets a {} WHERE a.day IN ('2024-01-01','2024-01-02') AND a.id != 'a2'{}",
+            QUALITY_JOIN,
+            order_clause("day_desc_quality", true, "a.taken_at")
+        );
+        let mut stmt = conn.prepare(&sql).unwrap();
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .flatten()
+            .collect();
+        assert_eq!(rows[0].1, "2024-01-02", "日期大的天整体在前，哪怕分数很低");
+        assert_eq!(rows[0].0, "z1", "同一天里 1.0 分在前");
+        assert_eq!(rows[1].0, "z2", "同一天里 0.5 分排第二");
+        assert!(rows[2..].iter().all(|(_, day)| day == "2024-01-01"), "第二天的低分照片不能插到前一天前面");
+    }
+
+    /// 没有 asset_quality 的库：两个新排序都要安静退回时间序，不能报错。
+    #[test]
+    fn quality_sorts_degrade_without_quality_table() {
+        let conn = seed();
+        assert!(!has_table(&conn, "asset_quality"));
+
+        for sort in ["quality_desc", "day_desc_quality"] {
+            let plan = sort_plan(sort, false, false);
+            assert!(!plan.uses_score, "{sort} 在没有评分表时不该 JOIN");
+            assert!(plan.offset_paging);
+            let sql = format!(
+                "SELECT a.id FROM assets a {} LIMIT 3",
+                order_clause(sort, false, "a.taken_at")
+            );
+            let mut stmt = conn.prepare(&sql).unwrap();
+            let ids: Vec<String> = stmt
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .flatten()
+                .collect();
+            assert_eq!(ids, vec!["a3", "a2", "a1"], "{sort} 应退回时间倒序");
+        }
+    }
+
+    /// 有评分表时，全局按分排序：缺分的行排在最后，同分按时间兜底。
+    #[test]
+    fn quality_desc_puts_unscored_rows_last() {
+        let conn = seed();
+        conn.execute_batch(
+            "CREATE TABLE asset_quality (asset_id TEXT PRIMARY KEY, score REAL NOT NULL,
+                                        stars INTEGER, model TEXT, model_version TEXT, created_at TEXT);
+             INSERT INTO asset_quality VALUES ('a1',5.0,NULL,NULL,NULL,NULL);",
+        )
+        .unwrap();
+        let sql = format!(
+            "SELECT a.id FROM assets a {} {}",
+            QUALITY_JOIN,
+            order_clause("quality_desc", true, "a.taken_at")
+        );
+        let mut stmt = conn.prepare(&sql).unwrap();
+        let ids: Vec<String> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .flatten()
+            .collect();
+        assert_eq!(ids[0], "a1", "有分数的排第一");
+        assert!(ids[1..].iter().all(|id| id == "a3" || id == "a2"), "缺分的排最后");
+    }
+
+    #[test]
+    fn sort_plan_keeps_keyset_only_for_plain_time_order() {
+        // 纯时间序且有分数表：仍然走 keyset（不 JOIN），否则默认浏览会变慢。
+        let plan = sort_plan("taken_desc", true, false);
+        assert!(!plan.uses_score);
+        assert!(!plan.offset_paging);
+
+        // 点进某个月：月内高分优先，必须 offset。
+        let plan = sort_plan("taken_desc", true, true);
+        assert!(plan.uses_score);
+        assert!(plan.offset_paging);
+
+        // 没有分数表：月和全局都退回纯时间序 + keyset。
+        let plan = sort_plan("taken_desc", false, true);
+        assert!(!plan.uses_score);
+        assert!(!plan.offset_paging);
     }
 
     #[test]

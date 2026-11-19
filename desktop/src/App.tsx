@@ -96,7 +96,9 @@ const PAGE_SIZE = 200;
 /** 排序项：按钮上显示短标签，菜单里显示完整说法 */
 const SORT_LABELS: Record<SortKey, string> = {
   taken_desc: "按拍摄时间 · 最新优先",
+  day_desc_quality: "按日期 · 当天内高分优先",
   taken_asc: "按拍摄时间 · 最早优先",
+  quality_desc: "按画质 · 高分在前",
   size_desc: "按文件大小 · 从大到小",
   size_asc: "按文件大小 · 从小到大",
 };
@@ -189,7 +191,14 @@ const route = useMemo(readRoute, []);
   const [density, setDensity] = useState<Density>(route.density);
   const [sort, setSort] = useState<SortKey>(() => {
     const value = new URLSearchParams(window.location.search).get("sort");
-    return value === "taken_asc" || value === "size_desc" || value === "size_asc" ? value : "taken_desc";
+    const allowed: SortKey[] = [
+      "taken_asc",
+      "size_desc",
+      "size_asc",
+      "quality_desc",
+      "day_desc_quality",
+    ];
+    return allowed.includes(value as SortKey) ? (value as SortKey) : "taken_desc";
   });
   const [selection, setSelection] = useState<string[]>(route.assetId ? [route.assetId] : []);
   /** 选择模式：单击即选中，不弹详情；由右上角的「多选」开关切换 */
@@ -1317,11 +1326,12 @@ const route = useMemo(readRoute, []);
     // 有 taken_at 就走 keyset 游标（深翻页不随页数变慢）；缺失时退回 offset。
     // taken_at 为空也照样给游标（空串），由服务端 COALESCE 处理；
     // 退回 offset 会让 NULL 行在深翻页时被重复或跳过。
-    // 按月看时服务端按美学分排序，游标要带分数：score|taken_at|id
+    // 只有纯时间序才走游标；按分数 / 当天内高分优先要跨行分组，服务端一律 offset。
+    // 按月看且库里有分数时，服务端月内按分排序，游标要带分数：score|taken_at|id
     const cursor =
       last && sort === "taken_desc"
-        ? dayFrom && dayTo
-          ? [last.score ?? -1, last.taken_at ?? "", last.id].join("|")
+        ? dayFrom && dayTo && last.score != null
+          ? [last.score, last.taken_at ?? "", last.id].join("|")
           : [last.taken_at ?? "", last.id].join("|")
         : undefined;
     setLoadingMore(true);

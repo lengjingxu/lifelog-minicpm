@@ -37,6 +37,14 @@ def make_photo(path: Path, seed: int, size=(800, 600)) -> None:
     image.save(path, quality=90)
 
 
+def aesthetic_schema() -> str:
+    """按 aesthetic.SCHEMA 建表（不引入 torch/transformers 依赖）。"""
+    return (
+        "CREATE TABLE IF NOT EXISTS asset_quality ("
+        " asset_id TEXT PRIMARY KEY, score REAL NOT NULL, stars INTEGER,"
+        " model TEXT, model_version TEXT, created_at TEXT);"
+    )
+
 def insert_asset(con, asset_id, path, size, taken_at=None, day=None, kind="image"):
     con.execute(
         "INSERT INTO assets (id, path, size, mtime, taken_at, day, kind, created_at) "
@@ -259,6 +267,47 @@ class GroupingTests(DedupBase):
             insert_hash(con, "early", "00000000000000ff", "0" * 60 + "f", 4000, 3000, sharp=50)
             dedup.group(con)
             self.assertEqual(self.groups()[1]["keeper"], "early")
+
+    def test_keeper_prefers_aesthetic_score_between_sharpness_and_time(self):
+        with db.session() as con:
+            con.executescript(aesthetic_schema())
+            # 同分辨率、同清晰度：美学分高的当 keeper，即使拍摄时间更晚。
+            insert_asset(con, "plain", self.photos / "p.jpg", 10, taken_at="2026-01-01T08:00:00", day="2026-01-01")
+            insert_hash(con, "plain", "00000000000000ff", "0" * 60 + "f", 4000, 3000, sharp=50)
+            insert_asset(con, "pretty", self.photos / "q.jpg", 11, taken_at="2026-01-01T20:00:00", day="2026-01-01")
+            insert_hash(con, "pretty", "00000000000000ff", "0" * 60 + "f", 4000, 3000, sharp=50)
+            con.execute("INSERT INTO asset_quality(asset_id, score) VALUES ('plain', 3.0)")
+            con.execute("INSERT INTO asset_quality(asset_id, score) VALUES ('pretty', 8.4)")
+            dedup.group(con)
+            self.assertEqual(self.groups()[1]["keeper"], "pretty")
+
+        with db.session() as con:
+            con.execute("DELETE FROM dup_members")
+            con.execute("DELETE FROM dup_groups")
+            con.execute("DELETE FROM asset_hash")
+            con.execute("DELETE FROM assets")
+            # 分辨率仍然优先：低分的大图还是 keeper。
+            insert_asset(con, "big-low", self.photos / "r.jpg", 10, taken_at="2026-01-01T09:00:00", day="2026-01-01")
+            insert_hash(con, "big-low", "00000000000000ff", "0" * 60 + "f", 4000, 3000, sharp=50)
+            insert_asset(con, "small-high", self.photos / "s.jpg", 11, taken_at="2026-01-01T10:00:00", day="2026-01-01")
+            insert_hash(con, "small-high", "00000000000000ff", "0" * 60 + "f", 1200, 900, sharp=50)
+            con.execute("INSERT INTO asset_quality(asset_id, score) VALUES ('big-low', 1.0)")
+            con.execute("INSERT INTO asset_quality(asset_id, score) VALUES ('small-high', 10.0)")
+            dedup.group(con)
+            self.assertEqual(self.groups()[1]["keeper"], "big-low")
+
+        with db.session() as con:
+            con.execute("DELETE FROM dup_members")
+            con.execute("DELETE FROM dup_groups")
+            con.execute("DELETE FROM asset_hash")
+            con.execute("DELETE FROM assets")
+            # 没有评分数据：行为必须和改动前一致（时间早的优先）。
+            insert_asset(con, "later", self.photos / "t.jpg", 10, taken_at="2026-01-01T12:00:00", day="2026-01-01")
+            insert_hash(con, "later", "00000000000000ff", "0" * 60 + "f", 4000, 3000, sharp=50)
+            insert_asset(con, "earlier", self.photos / "u.jpg", 11, taken_at="2026-01-01T08:00:00", day="2026-01-01")
+            insert_hash(con, "earlier", "00000000000000ff", "0" * 60 + "f", 4000, 3000, sharp=50)
+            dedup.group(con)
+            self.assertEqual(self.groups()[1]["keeper"], "earlier")
 
     def test_video_only_joins_byte_level_group(self):
         video = self.photos / "clip.mp4"

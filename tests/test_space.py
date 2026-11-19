@@ -158,6 +158,19 @@ class DedupGroupTests(unittest.TestCase):
         self.assertEqual(report["reclaim"], 500)
         self.assertTrue(report["ready"])
 
+    def test_dup_ids_put_highest_score_first_after_keeper(self):
+        con = db.connect()
+        con.execute("CREATE TABLE IF NOT EXISTS asset_quality (asset_id TEXT PRIMARY KEY, score REAL NOT NULL)")
+        con.execute("INSERT INTO dup_groups (id, keeper_id, reason) VALUES (9, 'k', 'l1')")
+        for asset_id, score in [("k", 9.9), ("low", 1.0), ("mid", 5.0), ("none", None)]:
+            if score is not None:
+                con.execute("INSERT INTO asset_quality VALUES (?,?)", (asset_id, score))
+            con.execute("INSERT INTO dup_members VALUES (9, ?, NULL)", (asset_id,))
+        con.commit()
+        ids = space.dup_group_ids(con, 9)
+        con.close()
+        self.assertEqual(ids[0], "k", "keeper 永远第一")
+        self.assertEqual(ids[1:], ["mid", "low", "none"], "其余按分数降序，无分的最后")
     def test_views_dup_not_ready_without_tables(self):
         con = db.connect()
         con.execute("DELETE FROM dup_members")

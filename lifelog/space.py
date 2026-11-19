@@ -252,6 +252,13 @@ def _dup_truth(con) -> bool:
     return groups > 0 and members > 0
 
 
+def _table_exists(con, name: str) -> bool:
+    row = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?", (name,)
+    ).fetchone()
+    return row is not None
+
+
 def _dup_groups(con, limit: int | None = None, offset: int = 0) -> list[dict]:
     """真实去重组。
 
@@ -290,16 +297,28 @@ def _dup_groups(con, limit: int | None = None, offset: int = 0) -> list[dict]:
 
 
 def dup_group_ids(con, group_id: int) -> list[str]:
-    """按需取一组的成员（keeper 排第一）。"""
+    """按需取一组的成员：keeper 第一，其余按美学分从高到低。"""
     row = con.execute("SELECT keeper_id FROM dup_groups WHERE id = ?", (group_id,)).fetchone()
     if not row:
         return []
     keeper = row[0] or ""
-    members = con.execute(
-        "SELECT asset_id FROM dup_members WHERE group_id = ? "
-        "ORDER BY asset_id = ? DESC, distance IS NULL, distance, asset_id",
-        (group_id, keeper),
-    ).fetchall()
+    # 有评分表时组内按分数降序，让用户一眼看到最好的那张；
+    # 没有评分表就退回原来的 distance 顺序，行为不变。
+    score_join = (
+        " LEFT JOIN asset_quality q ON q.asset_id = m.asset_id"
+        if _table_exists(con, "asset_quality")
+        else ""
+    )
+    order = ["CASE WHEN m.asset_id = ? THEN 0 ELSE 1 END"]
+    if score_join:
+        # 有评分表时按分数降序（无分垫底）；没有评分表时退回 distance。
+        order.append("COALESCE(q.score, -1) DESC")
+    order += ["m.distance IS NULL", "m.distance", "m.asset_id"]
+    sql = "SELECT m.asset_id FROM dup_members m{} WHERE m.group_id = ? ORDER BY {}".format(
+        score_join, ", ".join(order)
+    )
+    # 占位符顺序按 SQL 文本：先 WHERE 的 group_id，再 ORDER BY 的 keeper。
+    members = con.execute(sql, (group_id, keeper)).fetchall()
     return [member[0] for member in members]
 
 

@@ -408,9 +408,23 @@ def _parse_time(value: str | None) -> datetime | None:
     return parsed
 
 
+def _has_quality_table(con) -> bool:
+    row = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = 'asset_quality'"
+    ).fetchone()
+    return row is not None
+
+
 def _group_rows(con) -> list:
+    # 美学分只影响 keeper 选择，没有评分表时给 NULL，排序键退回 0。
+    score_col = (
+        "(SELECT q.score FROM asset_quality q WHERE q.asset_id = a.id)"
+        if _has_quality_table(con)
+        else "NULL"
+    )
     return con.execute(
-        "SELECT a.id, a.taken_at, a.day, a.kind, h.sha256, h.dhash, h.dhash2, h.w, h.h, h.sharp, h.sig "
+        "SELECT a.id, a.taken_at, a.day, a.kind, h.sha256, h.dhash, h.dhash2, h.w, h.h, h.sharp, h.sig, "
+        f"{score_col} "
         "FROM assets a JOIN asset_hash h ON h.asset_id = a.id "
         "WHERE h.status = 'ok'"
     ).fetchall()
@@ -422,7 +436,7 @@ def group(con) -> dict:
     rows = _group_rows(con)
     union = _Union()
     info: dict[str, dict] = {}
-    for asset_id, taken_at, day, kind, sha256, dhash, dhash2, width, height, sharp, sig in rows:
+    for asset_id, taken_at, day, kind, sha256, dhash, dhash2, width, height, sharp, sig, score in rows:
         union.add(asset_id)
         info[asset_id] = {
             "taken_at": taken_at,
@@ -435,16 +449,20 @@ def group(con) -> dict:
             "h": height,
             "sharp": sharp,
             "sig": sig,
+            "score": score,
         }
 
     def keeper_key(asset_id: str):
         meta = info[asset_id]
         resolution = (meta["w"] or 0) * (meta["h"] or 0)
         sharp = meta["sharp"] if meta["sharp"] is not None else 0.0
+        # 分辨率、清晰度之后看美学分：同组里更能打的那张当 keeper。
+        # 没有评分表 / 没算过分的照片记 0，行为和以前完全一致。
+        score = meta["score"] if meta["score"] is not None else 0.0
         moment = _parse_time(meta["taken_at"])
         # taken_at 缺失的排最后；同条件用 id 兜底，保证每次结果一致。
         epoch = moment.timestamp() if moment else float("inf")
-        return (-resolution, -sharp, epoch, asset_id)
+        return (-resolution, -sharp, -score, epoch, asset_id)
 
     # L0：同字节
     by_sha: dict[str, list[str]] = defaultdict(list)
