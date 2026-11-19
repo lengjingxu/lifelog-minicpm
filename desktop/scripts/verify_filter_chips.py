@@ -170,13 +170,67 @@ def run(cdp) -> dict:
     return out
 
 
+def check(results: dict) -> list[str]:
+    """把打印出来的观测值变成断言。没有断言的验收脚本等于没有验收。"""
+    problems: list[str] = []
+
+    def must(cond: bool, message: str) -> None:
+        if not cond:
+            problems.append(message)
+
+    # 1. 无条件时不应有 chip 条
+    must(results.get("chips_when_clean") is False, "无条件时不应渲染 chip 条")
+    must(results.get("baseline_cells", 0) > 10, f"基线应加载出网格，实际 {results.get('baseline_cells')}")
+
+    # 2. 点标签 → 1 个 chip，且网格变少
+    must(len(results.get("after_tag_chips") or []) == 1, "点标签后应恰好 1 个 chip")
+    must("风景" in "".join(results.get("after_tag_chips") or []), "chip 文案应含「风景」")
+    must(results.get("after_tag_cells", 999) < results.get("baseline_cells", 0), "按标签筛选后网格应变少")
+    must(results.get("after_tag_clear_all") is False, "只有 1 个条件时不应出现「清除全部」")
+
+    # 3. 两个条件 → 2 个 chip + 清除全部
+    must(len(results.get("after_person_chips") or []) == 2, "两个条件应有 2 个 chip")
+    must(results.get("clear_all_visible") is True, "≥2 条件应出现「清除全部」")
+
+    # 4. 移除一个条件 → 只剩 1 个，且网格变多
+    must(len(results.get("after_remove_chips") or []) == 1, "移除一个条件后应剩 1 个 chip")
+    must("风景" not in "".join(results.get("after_remove_chips") or []), "被移除的条件不应还在")
+    must(results.get("cells_grew") is True, "移除条件后网格应变多")
+
+    # 5. 清除全部 → 回到基线
+    must(results.get("chips_after_clear_all") is False, "清除全部后 chip 条应消失")
+    must(results.get("cells_after_clear_all") == results.get("baseline_cells"),
+         f"清除全部后应回到基线 {results.get('baseline_cells')}，实际 {results.get('cells_after_clear_all')}")
+
+    # 6. 搜索 → 关键词 chip；清掉后恢复
+    must(any("关键词" in chip for chip in (results.get("search_chips") or [])), "搜索应出现「关键词」chip")
+    must(results.get("search_cleared_chip") is False, "清掉关键词后不应再有 chip")
+    must(results.get("cells_after_search_clear") == results.get("baseline_cells"),
+         "清掉搜索后应回到基线数量")
+
+    # 7. 空结果页的条件 chip 可点，点完回到网格
+    must(results.get("empty_results") is True, "搜不到时应显示空结果页")
+    must(bool(results.get("empty_conditions")), "空结果页应列出当前条件")
+    must(results.get("empty_chip_clickable") is True, "空结果页的条件应可点")
+    must(results.get("cells_after_empty_chip", 0) > 0, "点掉空结果条件后应回到网格")
+    return problems
+
+
 def main() -> int:
     profile = tempfile.mkdtemp(prefix="shiguang-filters-")
     chrome = None
     try:
         chrome, cdp = launch(URL, profile)
         time.sleep(2.5)
-        print(json.dumps(run(cdp), ensure_ascii=False, indent=1))
+        result = run(cdp)
+        print(json.dumps(result, ensure_ascii=False, indent=1))
+        problems = check(result)
+        if problems:
+            print("FAILED:", file=sys.stderr)
+            for item in problems:
+                print("  -", item, file=sys.stderr)
+            return 1
+        print("OK: 断言全部通过")
         return 0
     finally:
         if chrome is not None:
