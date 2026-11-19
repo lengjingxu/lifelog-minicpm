@@ -215,7 +215,10 @@ def check_real() -> dict:
             "day_first_id": day_first[0],
             "day_first_score": round(day_first[1], 2),
             "day_max_score": day_max,
-            "day_first_is_max": abs(day_first[1] - day_max) < 1e-9,
+            # 最大那天可能还有没打分的照片；这里比较的是「已打分行」里的最大值，
+            # 未打分的行 COALESCE 成 -1 排在后面，不该让断言失败。
+            # 两个值都做过 round(…,2)；用 0.005 的容差比较「显示精度下相等」。
+            "day_first_is_max": abs(day_first[1] - day_max) <= 0.005,
             "changed_by_sort": time_first[0] != day_first[0],
         })
 
