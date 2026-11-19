@@ -544,13 +544,8 @@ fn sort_plan(sort: &str, has_quality: bool, in_month: bool) -> SortPlan {
         "quality_desc" => SortPlan { uses_score: has_quality, offset_paging: true, join: QUALITY_JOIN },
         // 当天内高分优先：跨天分组，必须 offset 分页。
         "day_desc_quality" => SortPlan { uses_score: has_quality, offset_paging: true, join: QUALITY_JOIN },
-        // 纯时间序保持原来的 keyset 游标；点进某个月且库里有分数时，月内高分优先。
-        "taken_desc" => SortPlan {
-            uses_score: in_month && has_quality,
-            // 没有评分表时仍可走 keyset 游标；只有「月内按分」才必须 offset。
-            offset_paging: in_month && has_quality,
-            join: if in_month && has_quality { QUALITY_JOIN } else { "" },
-        },
+        // 纯时间序：不管是否点进了某个月，都保持用户选的那个排序，走 keyset 游标。
+        "taken_desc" => SortPlan { uses_score: false, offset_paging: false, join: "" },
         _ => SortPlan { uses_score: false, offset_paging: false, join: "" },
     }
 }
@@ -643,7 +638,8 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     // 排序：taken_desc（默认）/ taken_asc / size_* / quality_desc / day_desc_quality。
     let sort = filter.sort.as_deref().unwrap_or("taken_desc");
     let has_quality = has_table(conn, "asset_quality");
-    // 按月看（时间线点进某个月）时，月内按美学分排序；没有评分表就退回时间序。
+    // 默认排序（taken_desc）始终是纯时间序：以前点进某个月会静默改成按分数排，
+    // 用户以为是「时间线」却看到乱序。想让月内高分优先请显式选 day_desc_quality。
     let in_month = filter.day_from.is_some() && filter.day_to.is_some();
     let plan = sort_plan(sort, has_quality, in_month);
     let score_mode = plan.uses_score;
@@ -652,8 +648,6 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     let offset_paging = plan.offset_paging;
     let keyset = if !(sort == "taken_desc" && !offset_paging) {
         false
-    } else if in_month && has_quality {
-        apply_score_cursor(&mut where_sql, &mut args, filter.cursor.as_deref())
     } else {
         apply_cursor(&mut where_sql, &mut args, filter.cursor.as_deref(), key_col)
     };
@@ -2265,8 +2259,13 @@ mod filter_tests {
         assert!(!plan.uses_score);
         assert!(!plan.offset_paging);
 
-        // 点进某个月：月内高分优先，必须 offset。
+        // 点进某个月也保持纯时间序（不再静默按分数重排）。
         let plan = sort_plan("taken_desc", true, true);
+        assert!(!plan.uses_score, "默认排序不该因为进了某个月就改成按分数");
+        assert!(!plan.offset_paging);
+
+        // 想让月内高分优先，要显式选 day_desc_quality。
+        let plan = sort_plan("day_desc_quality", true, true);
         assert!(plan.uses_score);
         assert!(plan.offset_paging);
 
