@@ -456,13 +456,14 @@ def group(con) -> dict:
         meta = info[asset_id]
         resolution = (meta["w"] or 0) * (meta["h"] or 0)
         sharp = meta["sharp"] if meta["sharp"] is not None else 0.0
-        # 分辨率、清晰度之后看美学分：同组里更能打的那张当 keeper。
-        # 没有评分表 / 没算过分的照片记 0，行为和以前完全一致。
+        # 分辨率仍是硬条件（同一组里优先留大图），其后直接看美学分：
+        # 主人要求「同聚类下高分优先」，所以分数排在清晰度前面。
+        # 没有评分表 / 没算过分的照片记 0，此时按清晰度、再按时间兜底。
         score = meta["score"] if meta["score"] is not None else 0.0
         moment = _parse_time(meta["taken_at"])
         # taken_at 缺失的排最后；同条件用 id 兜底，保证每次结果一致。
         epoch = moment.timestamp() if moment else float("inf")
-        return (-resolution, -sharp, -score, epoch, asset_id)
+        return (-resolution, -score, -sharp, epoch, asset_id)
 
     # L0：同字节
     by_sha: dict[str, list[str]] = defaultdict(list)
