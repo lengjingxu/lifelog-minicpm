@@ -5,6 +5,7 @@ import {
   Trash2,
   Download,
   FolderOpen,
+  Heart,
   Plus,
   RotateCcw,
   X,
@@ -36,6 +37,8 @@ type Props = {
   };
   /** 删除这一张：由 App 弹确认卡并真正调 delete_records。 */
   onDelete: () => void;
+  /** 收藏/取消收藏这一张（L 键同样走它）。 */
+  onFavorite: () => void;
   /** 导出这一张时禁用导出按钮。 */
   exporting?: boolean;
   /** 删除失败的一句话，显示在详情里，不静默。 */
@@ -60,7 +63,7 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
 }
 
 export function Detail({
-  asset, dup, index, total, onClose, onPrev, onNext, onTag, actions, onDelete,
+  asset, dup, index, total, onClose, onPrev, onNext, onTag, actions, onDelete, onFavorite,
   deleteError = null, deleting = false, recognition = false, exporting = false,
   origin, closing = false, canNext, step = 0,
 }: Props) {
@@ -70,6 +73,19 @@ export function Detail({
   const [externalError, setExternalError] = useState<string | null>(null);
   const fullRef = useRef<HTMLImageElement | null>(null);
   const dialogRef = useDialogFocus<HTMLDivElement>(onClose, { focusContainer: true });
+
+  // L 键收藏/取消收藏；和删除键一样，打字时不抢。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "l" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable=\"true\"]")) return;
+      event.preventDefault();
+      onFavorite();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [onFavorite]);
 
   // 删除键只是入口：先弹确认，绝不直接删。输入框里打字时不抢键。
   useEffect(() => {
@@ -293,6 +309,16 @@ export function Detail({
 
       <aside className="inspector glass-surface">
         <div className="inspector-top-actions">
+          <button
+            type="button"
+            className={clsx("inspector-favorite", asset.favorite && "on")}
+            onClick={onFavorite}
+            aria-label={asset.favorite ? "取消收藏" : "收藏这一张"}
+            aria-pressed={Boolean(asset.favorite)}
+            title={asset.favorite ? "取消收藏（L）" : "收藏（L）"}
+          >
+            <Heart size={14} strokeWidth={1.9} fill={asset.favorite ? "currentColor" : "none"} />
+          </button>
           <button
             type="button"
             className="inspector-danger"

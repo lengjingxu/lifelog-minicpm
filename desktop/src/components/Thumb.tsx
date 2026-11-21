@@ -1,5 +1,5 @@
 import { useEffect, useState, type MouseEvent } from "react";
-import { Check, ImageOff } from "lucide-react";
+import { Check, Heart, ImageOff } from "lucide-react";
 import clsx from "clsx";
 import { assetSrc, type Asset } from "../api";
 import { kindLabel, timeLabel } from "../utils";
@@ -15,6 +15,8 @@ type Props = {
   density?: "comfort" | "compact";
   onSelect: (asset: Asset, event: MouseEvent) => void;
   onOpen: (asset: Asset, rect?: DOMRect) => void;
+  /** 角落小心形：收藏/取消收藏。 */
+  onToggleFavorite?: (asset: Asset) => void;
 };
 
 /** 紧凑密度用的短时间：2026-11-06，比「2026 年 11 月 6 日」省一半宽度。 */
@@ -32,6 +34,7 @@ export function Thumb({
   density = "comfort",
   onSelect,
   onOpen,
+  onToggleFavorite,
 }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -101,6 +104,24 @@ export function Thumb({
         )}
       </span>
       <span className="badge glass-surface on-color">{kindLabel(asset)}</span>
+      {onToggleFavorite && (
+        <button
+          type="button"
+          className={clsx("cell-favorite", asset.favorite && "on")}
+          aria-label={asset.favorite ? "取消收藏" : "收藏"}
+          aria-pressed={Boolean(asset.favorite)}
+          title={asset.favorite ? "取消收藏" : "收藏"}
+          onClick={(event) => {
+            // 不要顺手打开详情：这个按钮只做收藏。
+            event.preventDefault();
+            event.stopPropagation();
+            onToggleFavorite(asset);
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          <Heart size={12} strokeWidth={2} fill={asset.favorite ? "currentColor" : "none"} />
+        </button>
+      )}
       {dupCount && dupCount > 1 && (
         <span className="dup-badge glass-surface on-color" title={`同组 ${dupCount} 张，已折叠`}>
           ×{dupCount}

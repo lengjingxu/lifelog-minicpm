@@ -16,6 +16,8 @@ export type Asset = {
   mood: string | null;
   tags: string[];
   ocr_text: string | null;
+  /** 用户手动收藏（和下面的美学分完全无关）。 */
+  favorite?: boolean;
   /** 美学分（0-10），按月查看时用于排序；库里没有评分表时为 null */
   score?: number | null;
   /** 文件字节数 */
@@ -30,6 +32,8 @@ export type Stats = {
   assets: number;
   /** 最近删除里的张数（侧栏入口的角标）。 */
   trash?: number;
+  /** 收藏张数（侧栏入口的角标）。 */
+  favorite?: number;
   captions: number;
   days: number;
   events: number;
@@ -70,6 +74,8 @@ export type Filter = {
   cursor?: string;
   /** 排序；按大小排时服务端不用时间游标，走 offset。 */
   sort?: SortKey;
+  /** 只看收藏：真库走 asset_favorite 主键 EXISTS，不做 LIKE。 */
+  favorite?: boolean;
   /** 图库清理的视角：large（默认）/ dup / screenshot / video / photo。 */
   view?: SpaceViewKey;
 };
@@ -200,7 +206,10 @@ export function assetSrc(path: string): string {
 export const thumbSrc = assetSrc;
 
 export async function libraryStats(): Promise<Stats> {
-  if (!isTauri) return (await loadFixture()).stats;
+  if (!isTauri) {
+    const stats = (await loadFixture()).stats;
+    return { ...stats, favorite: fixtureFavorites.size };
+  }
   return invoke<Stats>("library_stats");
 }
 
@@ -263,32 +272,37 @@ async function fixtureQuery(filter: Filter): Promise<Asset[]> {
     if (filter.view === "photo" && asset.kind === "video") return false;
     if (filter.day_from && (!asset.day || asset.day < filter.day_from)) return false;
     if (filter.day_to && (!asset.day || asset.day > filter.day_to)) return false;
+    if (filter.favorite && !fixtureFavorites.has(asset.id)) return false;
     return true;
   });
+  const marked = filtered.map((asset) => ({
+    ...asset,
+    favorite: fixtureFavorites.has(asset.id),
+  }));
   const sorted = (() => {
     switch (filter.sort) {
       case "size_desc":
-        return [...filtered].sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+        return [...marked].sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
       case "size_asc":
-        return [...filtered].sort((a, b) => (a.size ?? 0) - (b.size ?? 0));
+        return [...marked].sort((a, b) => (a.size ?? 0) - (b.size ?? 0));
       case "taken_asc":
-        return [...filtered].sort((a, b) => (a.taken_at ?? "").localeCompare(b.taken_at ?? ""));
+        return [...marked].sort((a, b) => (a.taken_at ?? "").localeCompare(b.taken_at ?? ""));
       case "quality_desc":
         // 与 Rust 一致：缺分排最后，同分按拍摄时间倒序。
-        return [...filtered].sort(
+        return [...marked].sort(
           (a, b) =>
             (b.score ?? -1) - (a.score ?? -1) ||
             (b.taken_at ?? "").localeCompare(a.taken_at ?? ""),
         );
       case "day_desc_quality":
-        return [...filtered].sort(
+        return [...marked].sort(
           (a, b) =>
             (b.day ?? "").localeCompare(a.day ?? "") ||
             (b.score ?? -1) - (a.score ?? -1) ||
             (b.taken_at ?? "").localeCompare(a.taken_at ?? ""),
         );
       default:
-        return filtered;
+        return marked;
     }
   })();
   const limit = Math.max(0, filter.limit ?? 500);
@@ -723,6 +737,49 @@ export const openPrivacySettings = () => invoke<void>("open_privacy_settings");
 /** 删除 = 移到「最近删除」：只写 deleted_at，文件与关联行都不动，随时可还原。 */
 export const deleteRecords = (ids: string[]) =>
   invoke<DeleteResult>("delete_records", { ids, between: null });
+
+/** 浏览器 fixture 的收藏集合：只影响 fixture 查询，不写任何持久化状态。 */
+const fixtureFavorites = new Set<string>();
+
+export const favoriteAdd = async (ids: string[]) => {
+  if (!isTauri) {
+    ids.forEach((id) => fixtureFavorites.add(id));
+    return { ok: true, added: ids.length };
+  }
+  return invoke<{ ok: boolean; added: number }>("favorite_add", { ids });
+};
+
+export const favoriteRemove = async (ids: string[]) => {
+  if (!isTauri) {
+    ids.forEach((id) => fixtureFavorites.delete(id));
+    return { ok: true, removed: ids.length };
+  }
+  return invoke<{ ok: boolean; removed: number }>("favorite_remove", { ids });
+};
+
+export type FavoriteItem = {
+  asset_id: string;
+  path: string;
+  day: string | null;
+  taken_at: string | null;
+  kind: string | null;
+  created_at: string | null;
+};
+
+export const favoriteList = async (): Promise<{ count: number; items: FavoriteItem[] }> => {
+  if (!isTauri) {
+    const items = [...fixtureFavorites].map((assetId) => ({
+      asset_id: assetId,
+      path: "",
+      day: null,
+      taken_at: null,
+      kind: null,
+      created_at: null,
+    }));
+    return { count: items.length, items };
+  }
+  return invoke<{ count: number; items: FavoriteItem[] }>("favorite_list");
+};
 
 export type TrashItem = {
   id: string;

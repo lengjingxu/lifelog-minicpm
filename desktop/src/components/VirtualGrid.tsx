@@ -15,6 +15,8 @@ type Props = {
   selectMode?: boolean;
   /** 舒适：常显一行描述；紧凑：只显示拍摄时间。 */
   density?: "comfort" | "compact";
+  /** 角落小心形：收藏/取消收藏（不打开详情）。 */
+  onToggleFavorite?: (asset: Asset) => void;
   onSelect: (asset: Asset, event: MouseEvent) => void;
   onOpen: (asset: Asset, rect?: DOMRect) => void;
   onLoadMore?: () => void;
@@ -30,6 +32,7 @@ export function VirtualGrid({
   multi,
   selectMode = false,
   density = "comfort",
+  onToggleFavorite,
   onSelect,
   onOpen,
   onLoadMore,
@@ -182,6 +185,7 @@ export function VirtualGrid({
                     multi={multi}
                     selectMode={selectMode}
                     density={density}
+                    onToggleFavorite={onToggleFavorite}
                     onSelect={onSelect}
                     onOpen={onOpen}
                   />

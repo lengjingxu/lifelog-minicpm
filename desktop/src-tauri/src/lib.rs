@@ -192,6 +192,8 @@ struct AssetRow {
     mood: Option<String>,
     tags: Vec<String>,
     ocr_text: Option<String>,
+    /// 用户手动收藏（asset_favorite 里有行）。
+    favorite: bool,
     /// 美学分（0-10）。库里没有 asset_quality 表时为 None。
     score: Option<f64>,
     /// 文件字节数
@@ -222,6 +224,8 @@ struct Filter {
     sort: Option<String>,
     /// 图库清理视角：large（默认，按大小）/ dup（同 size 同 kind）/ screenshot / video / photo。
     view: Option<String>,
+    /// 只看收藏。true 时 JOIN asset_favorite（走主键，不扫表）。
+    favorite: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -373,6 +377,8 @@ struct Stats {
     assets: i64,
     /// 最近删除里的张数（侧栏入口角标）。
     trash: i64,
+    /// 收藏张数（侧栏入口角标）。
+    favorite: i64,
     captions: i64,
     days: i64,
     events: i64,
@@ -577,6 +583,14 @@ fn library_stats(db: State<'_, Db>) -> Result<Stats, String> {
         trash: conn
             .query_row("SELECT count(*) FROM assets WHERE deleted_at IS NOT NULL", [], |r| r.get(0))
             .unwrap_or(0),
+        favorite: conn
+            .query_row(
+                "SELECT count(*) FROM asset_favorite f JOIN assets a ON a.id = f.asset_id \
+                 AND a.deleted_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0),
         captions: count("captions"),
         days: count("days"),
         events: count("events"),
@@ -654,6 +668,11 @@ fn filter_where(
     push(filter.person.as_deref(), " AND c.people LIKE '%' || ?{n} || '%'", &mut args, &mut sql);
     push(filter.place.as_deref(), " AND c.place LIKE '%' || ?{n} || '%'", &mut args, &mut sql);
     push(filter.kind.as_deref(), " AND a.kind = ?{n}", &mut args, &mut sql);
+    if filter.favorite == Some(true) {
+        sql.push_str(
+            " AND EXISTS (SELECT 1 FROM asset_favorite f WHERE f.asset_id = a.id)",
+        );
+    }
     push(filter.day_from.as_deref(), " AND a.day >= ?{n}", &mut args, &mut sql);
     push(filter.day_to.as_deref(), " AND a.day <= ?{n}", &mut args, &mut sql);
 
@@ -827,6 +846,12 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     } else {
         apply_cursor(&mut where_sql, &mut args, filter.cursor.as_deref(), key_col)
     };
+    // 老库 / 测试库里可能还没有 asset_favorite：没有表时固定返回 0，不能整条查询失败。
+    let favorite_col = if has_table(conn, "asset_favorite") {
+        "(SELECT 1 FROM asset_favorite f WHERE f.asset_id = a.id) IS NOT NULL"
+    } else {
+        "0"
+    };
     let score_col = if score_mode { ", q.score" } else { "" };
     let score_join = if score_mode { plan.join } else { "" };
     let dup_col = if has_dup {
@@ -842,12 +867,13 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
     };
     let mut sql = format!(
         "SELECT a.id, a.path, a.day, a.taken_at, a.kind, \
-                c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text{}, a.size, {}, {} \
+                c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text{},\
+                {}, a.size, {}, {} \
          FROM assets a \
          LEFT JOIN captions c ON c.rowid = ( \
              SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1){} \
          {}",
-        score_col, dup_col, keeper_col, score_join, where_sql
+        score_col, favorite_col, dup_col, keeper_col, score_join, where_sql
     );
 
 
@@ -882,13 +908,14 @@ fn query_assets(db: State<'_, Db>, filter: Filter) -> Result<Vec<AssetRow>, Stri
                 mood: row.get(10)?,
                 tags: parse_tags(row.get(11)?),
                 ocr_text: row.get(12)?,
+                favorite: row.get::<_, Option<i64>>(13)?.unwrap_or(0) != 0,
                 // 没有 asset_quality 表时 SELECT 里没有 q.score 这一列，后面两列要各退一位，
                 // 否则 size 永远读成 None（空间页整列显示成「—」）。
                 // 列位置随 score_mode 变化：score 存在时多一列，size/dup_count/keeper 都要顺延。
-                score: if score_mode { row.get(13).ok() } else { None },
-                size: if score_mode { row.get(14).ok() } else { row.get(13).ok() },
-                dup_count: if score_mode { row.get(15).ok() } else { row.get(14).ok() },
-                keeper: if score_mode { row.get(16).ok() } else { row.get(15).ok() },
+                score: if score_mode { row.get(14).ok() } else { None },
+                size: if score_mode { row.get(15).ok() } else { row.get(14).ok() },
+                dup_count: if score_mode { row.get(16).ok() } else { row.get(15).ok() },
+                keeper: if score_mode { row.get(17).ok() } else { row.get(16).ok() },
             })
         })
         .map_err(|e| e.to_string())?;
@@ -1326,6 +1353,50 @@ async fn delete_records(
 }
 
 /// 还原：清空 deleted_at，照片回到原来的位置。
+#[tauri::command]
+async fn favorite_add(db: State<'_, Db>, ids: Vec<String>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    let ids: Vec<String> = ids.into_iter().filter(|id| !id.trim().is_empty()).collect();
+    if ids.is_empty() {
+        return Err("没有选中要收藏的照片".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        run_python_cli(
+            &home,
+            &["favorite-add".to_string(), "--ids".to_string(), ids.join(",")],
+        )
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn favorite_remove(db: State<'_, Db>, ids: Vec<String>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    let ids: Vec<String> = ids.into_iter().filter(|id| !id.trim().is_empty()).collect();
+    if ids.is_empty() {
+        return Err("没有选中要取消收藏的照片".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        run_python_cli(
+            &home,
+            &["favorite-remove".to_string(), "--ids".to_string(), ids.join(",")],
+        )
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn favorite_list(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        run_python_cli(&home, &["favorite-list".to_string()])
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
 #[tauri::command]
 async fn restore_records(
     db: State<'_, Db>,
@@ -1956,6 +2027,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             library_stats,
             library_state,
+            favorite_add,
+            favorite_remove,
+            favorite_list,
             use_library,
             create_library,
             query_assets,
@@ -2084,6 +2158,7 @@ mod filter_tests {
             cursor: None,
             sort: None,
             view: None,
+            favorite: None,
         }
     }
 
@@ -2214,10 +2289,13 @@ mod filter_tests {
             "ALTER TABLE assets ADD COLUMN size INTEGER; UPDATE assets SET size = 12345 WHERE id = 'a1';",
         )
         .unwrap();
-        let sql = "SELECT a.id, a.path, a.day, a.taken_at, a.kind,                 c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text, a.size          FROM assets a LEFT JOIN captions c ON c.rowid = (              SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)          WHERE a.id = 'a1'";
+        // 与 query_assets 一致：有收藏表时第 13 列是 favorite，size 在 14 列（无评分表）。
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS asset_favorite (asset_id TEXT PRIMARY KEY, created_at TEXT)").unwrap();
+        let sql = "SELECT a.id, a.path, a.day, a.taken_at, a.kind,                 c.caption, c.scene, c.people, c.place, c.activity, c.mood, c.tags, c.ocr_text,                 (SELECT 1 FROM asset_favorite f WHERE f.asset_id = a.id), a.size          FROM assets a LEFT JOIN captions c ON c.rowid = (              SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)          WHERE a.id = 'a1'";
         // 与 query_assets 里 score_mode=false 时的列下标保持一致
-        let size: Option<i64> = conn.query_row(sql, [], |row| Ok(row.get(13).ok())).unwrap();
-        assert_eq!(size, Some(12345), "size 应读在第 13 列");
+        // 多了一列 favorite，size 从第 13 列顺延到第 14 列
+        let size: Option<i64> = conn.query_row(sql, [], |row| Ok(row.get(14).ok())).unwrap();
+        assert_eq!(size, Some(12345), "size 应读在第 14 列");
     }
 
     #[test]

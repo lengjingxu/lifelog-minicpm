@@ -1,6 +1,7 @@
 import {
   ArchiveRestore,
   Clock,
+  Heart,
   Database,
   Folder,
   HardDrive,
@@ -36,6 +37,8 @@ type Props = {
   liveStatus: { status: LiveStatus; done: number; total: number; rate: number | null; paused: boolean } | null;
   onRecognition: (rect?: DOMRect) => void;
   onSettings: () => void;
+  /** 「收藏」= 打开图库并只看收藏。 */
+  onFavorites?: () => void;
 };
 
 const NAV = [
@@ -47,6 +50,7 @@ const NAV = [
   { id: "places" as const, label: "地点", icon: MapPin },
   { id: "space" as const, label: "图库清理", icon: HardDrive },
   { id: "trash" as const, label: "最近删除", icon: ArchiveRestore },
+  { id: "favorites" as const, label: "收藏", icon: Heart },
   { id: "organize" as const, label: "整理视图", icon: Sparkles },
 ];
 
@@ -69,6 +73,7 @@ export function Sidebar({
   liveStatus,
   onRecognition,
   onSettings,
+  onFavorites,
 }: Props) {
   const navRef = useRef<HTMLDivElement | null>(null);
   const indicatorRef = useRef<HTMLSpanElement | null>(null);
@@ -149,6 +154,8 @@ export function Sidebar({
               ? stats?.assets
               : item.id === "trash"
                 ? stats?.trash || undefined
+                : item.id === "favorites"
+                  ? stats?.favorite || undefined
               : item.id === "tags"
                 ? tags.length
                 : item.id === "people"
@@ -161,7 +168,10 @@ export function Sidebar({
               key={item.id}
               type="button"
               className={clsx("nav-item", view === item.id && "active")}
-              onClick={() => onNavigate(item.id)}
+              onClick={() => {
+                if (item.id === "favorites") onFavorites?.();
+                else onNavigate(item.id);
+              }}
               aria-current={view === item.id ? "page" : undefined}
             >
               <Icon size={15} strokeWidth={1.7} />

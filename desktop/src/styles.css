@@ -2681,3 +2681,30 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .library-setup-error svg { flex: none; margin-top: 2px; color: var(--accent); }
 .settings-library-switch { margin-left: auto; height: 26px; padding: 0 var(--space-10); font-size: var(--font-10-5); display: inline-flex; align-items: center; gap: var(--space-4); }
 @media (max-width: 600px) { .library-setup-actions { grid-template-columns: 1fr; } }
+
+/* 收藏：详情页顶部与网格角落各一个心形，实心=已收藏 */
+.inspector-favorite {
+  display: grid; place-items: center;
+  width: 34px; height: 34px; border-radius: var(--radius-10);
+  color: var(--text-dim);
+  background: var(--bg-elevated);
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.inspector-favorite:hover { color: var(--text); background: var(--bg-hover); }
+.inspector-favorite.on { color: var(--accent); }
+.cell-favorite {
+  position: absolute; top: 6px; right: 6px; z-index: 4;
+  display: grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  color: rgba(255,255,255,0.92);
+  background: rgba(0,0,0,0.42);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.cell:hover .cell-favorite,
+.cell:focus-within .cell-favorite,
+.cell-favorite.on { opacity: 1; }
+.cell-favorite.on { color: var(--accent); }
+.cell-favorite:hover { color: var(--accent); background: rgba(0,0,0,0.6); }
+/* 有「×N」角标时把心形挪到它下面，避免重叠 */
+.cell .dup-badge ~ .cell-favorite { top: 30px; }

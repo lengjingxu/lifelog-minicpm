@@ -307,6 +307,23 @@ def cmd_thumbs_prune(args) -> int:
     return 0
 
 
+def cmd_favorite_add(args) -> int:
+    from . import ops
+    print(json.dumps(ops.favorite_add(_ids(args.ids)), ensure_ascii=False))
+    return 0
+
+
+def cmd_favorite_remove(args) -> int:
+    from . import ops
+    print(json.dumps(ops.favorite_remove(_ids(args.ids)), ensure_ascii=False))
+    return 0
+
+
+def cmd_favorite_list(args) -> int:
+    from . import ops
+    print(json.dumps(ops.favorite_list(limit=args.limit, offset=args.offset), ensure_ascii=False))
+    return 0
+
 def cmd_record_trash(args) -> int:
     from . import ops
     print(json.dumps(ops.record_trash(_ids(args.ids)), ensure_ascii=False))
@@ -604,6 +621,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
     p.set_defaults(func=cmd_record_delete)
 
+    p = sub.add_parser("favorite-add", help="收藏照片（用户手动标记，和美学星级无关）")
+    p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
+    p.set_defaults(func=cmd_favorite_add)
+
+    p = sub.add_parser("favorite-remove", help="取消收藏")
+    p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
+    p.set_defaults(func=cmd_favorite_remove)
+
+    p = sub.add_parser("favorite-list", help="列出收藏")
+    p.add_argument("--limit", type=int)
+    p.add_argument("--offset", type=int, default=0)
+    p.set_defaults(func=cmd_favorite_list)
     p = sub.add_parser("record-trash", help="软删除：记录进最近删除，文件不动")
     p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
     p.set_defaults(func=cmd_record_trash)

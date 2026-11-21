@@ -330,6 +330,63 @@ class TrashSoftDeleteTests(unittest.TestCase):
         self.assertEqual(left, 0)
 
 
+class FavoriteTests(unittest.TestCase):
+    """收藏是用户手动标记，和 asset_quality.stars（美学星级）完全无关。"""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="space-fav-"))
+        self._paths = (config.DATA_DIR, config.DB_PATH)
+        config.DATA_DIR = self.root
+        config.DB_PATH = self.root / "lifelog.sqlite"
+        db.init_db()
+        con = db.connect()
+        con.executemany(
+            "INSERT INTO assets (id, path, size, day, kind) VALUES (?,?,?,?,?)",
+            [
+                ("f1", "/tmp/f1.jpg", 100, "2024-01-01", "image"),
+                ("f2", "/tmp/f2.jpg", 200, "2024-01-02", "image"),
+                ("f3", "/tmp/f3.jpg", 300, "2024-01-03", "image"),
+            ],
+        )
+        con.commit()
+        con.close()
+
+    def tearDown(self):
+        config.DATA_DIR, config.DB_PATH = self._paths
+
+    def test_add_counts_and_is_idempotent(self):
+        first = ops.favorite_add(["f1", "f2", "f2"])
+        self.assertEqual(first["added"], 2)
+        again = ops.favorite_add(["f1"])
+        self.assertEqual(again["added"], 0, "重复收藏不应重复计数")
+        self.assertEqual(ops.favorite_stats()["count"], 2)
+
+    def test_remove_decrements(self):
+        ops.favorite_add(["f1", "f2"])
+        removed = ops.favorite_remove(["f2"])
+        self.assertEqual(removed["removed"], 1)
+        self.assertEqual(ops.favorite_stats()["count"], 1)
+        self.assertEqual(ops.favorite_list()["items"][0]["asset_id"], "f1")
+
+    def test_soft_deleted_photos_are_not_favoritable_or_counted(self):
+        ops.record_trash(["f3"])
+        ops.favorite_add(["f3"])
+        self.assertEqual(ops.favorite_stats()["count"], 0, "回收站里的照片不该被收藏")
+        ops.record_restore(["f3"])
+        ops.favorite_add(["f3"])
+        self.assertEqual(ops.favorite_stats()["count"], 1)
+
+    def test_favorites_survive_reopen(self):
+        ops.favorite_add(["f1"])
+        # 重新连接模拟重启：数据落在 sqlite 里，不是内存。
+        self.assertEqual(ops.favorite_stats()["count"], 1)
+        con = db.connect()
+        rows = con.execute("SELECT asset_id FROM asset_favorite").fetchall()
+        con.close()
+        self.assertEqual([row[0] for row in rows], ["f1"])
+
+
+
 if __name__ == "__main__":
     unittest.main()
 

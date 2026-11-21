@@ -52,6 +52,8 @@ import {
   libraryState,
   useLibrary,
   createLibrary,
+  favoriteAdd,
+  favoriteRemove,
   openPrivacySettings,
   revealInFinder,
   albumAdd,
@@ -120,6 +122,7 @@ function readRoute() {
     requestedView === "places" ||
     requestedView === "space" ||
     requestedView === "trash" ||
+    requestedView === "favorites" ||
     requestedView === "organize" ||
     requestedView === "settings"
       ? requestedView
@@ -224,6 +227,8 @@ const route = useMemo(readRoute, []);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [dialogRect, setDialogRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  /** 只看收藏：和标签/相册一样是筛选条件，出现在 chip 条里。 */
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [album, setAlbum] = useState<string | null>(null);
   const [detailClosing, setDetailClosing] = useState(false);
   // 空间页的清理删的是待清理清单，不是网格里的选择；单独存一份，确认卡复用 DeleteDialog。
@@ -285,7 +290,9 @@ const route = useMemo(readRoute, []);
   const firstGridMarked = useRef(false);
 
   const tagKey = tags.join("\u0001");
-  const active = Boolean(query || tags.length || scene || person || place || album || dayFrom || dayTo);
+  const active = Boolean(
+    query || tags.length || scene || person || place || album || dayFrom || dayTo || favoriteOnly,
+  );
   const columns = gridColumnCount(viewportWidth, density);
 
   useEffect(() => {
@@ -903,6 +910,7 @@ const route = useMemo(readRoute, []);
       place: place || undefined,
       day_from: dayFrom ?? undefined,
       day_to: dayTo ?? undefined,
+      favorite: favoriteOnly || undefined,
       limit: PAGE_SIZE,
       offset: 0,
       sort,
@@ -940,7 +948,7 @@ const route = useMemo(readRoute, []);
     return () => {
       cancelled = true;
     };
-  }, [view, query, tagKey, tags.length, scene, person, place, album, dayFrom, dayTo, sort, dataVersion, localRemoved, fixtureAlbums, fixtureUserTags]);
+  }, [view, query, tagKey, tags.length, scene, person, place, album, dayFrom, dayTo, sort, favoriteOnly, dataVersion, localRemoved, fixtureAlbums, fixtureUserTags]);
 
   const needsAll = view === "organize";
 
@@ -1299,6 +1307,7 @@ const route = useMemo(readRoute, []);
     setDayTo(null);
     // 相册也是筛选条件之一：漏掉它，「清除全部」之后结果会少一截。
     setAlbum(null);
+    setFavoriteOnly(false);
   }, []);
 
   const viewAlbumTag = useCallback(
@@ -1375,6 +1384,7 @@ const route = useMemo(readRoute, []);
       place: place || undefined,
       day_from: dayFrom ?? undefined,
       day_to: dayTo ?? undefined,
+      favorite: favoriteOnly || undefined,
       limit: PAGE_SIZE,
       cursor,
       offset: cursor ? 0 : assets.length,
@@ -1386,7 +1396,7 @@ const route = useMemo(readRoute, []);
       })
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)))
       .finally(() => setLoadingMore(false));
-  }, [loadingMore, hasMore, view, query, tagKey, tags, album, scene, person, place, dayFrom, dayTo, assets, sort, fixtureUserTags]);
+  }, [loadingMore, hasMore, view, query, tagKey, tags, album, scene, person, place, dayFrom, dayTo, assets, sort, favoriteOnly, fixtureUserTags]);
 
   const navigateDetail = useCallback(
     (delta: number) => {
@@ -1639,6 +1649,7 @@ const route = useMemo(readRoute, []);
   const title = (() => {
     if (view === "space") return "图库清理";
     if (view === "trash") return "最近删除";
+    if (view === "favorites") return "收藏";
     if (view === "organize") return "整理视图";
     if (view === "settings") return "设置";
     if (album) return `相册 · ${album}`;
@@ -1662,6 +1673,8 @@ const route = useMemo(readRoute, []);
       ? "按体积清理 · 待清理只记清单"
       : view === "trash"
       ? "30 天内可还原"
+      : view === "favorites"
+      ? "手动收藏 · 不影响美学星级"
       : view === "organize"
       ? "AI 归位过程 · 只在内存预演"
       : view === "settings"
@@ -1699,6 +1712,9 @@ const route = useMemo(readRoute, []);
     });
   }
   if (album) conditions.push({ key: "album", label: `相册：${album}`, remove: () => setAlbum(null) });
+  if (favoriteOnly) {
+    conditions.push({ key: "favorite", label: "收藏", remove: () => setFavoriteOnly(false) });
+  }
 
   // ⌘K 面板：跳转 + 从 facets 里取的热门筛选 + 直接搜索
   const paletteSections = useMemo(() => {
@@ -1764,6 +1780,42 @@ const route = useMemo(readRoute, []);
 
     return sections;
   }, [queryInput, displayFacets, stats, navigate, toggleTag]);
+
+  /** 收藏/取消收藏：先本地翻转（立刻可见），失败再回滚。 */
+  const toggleFavorite = useCallback(
+    async (ids: string[]) => {
+      const list = Array.from(new Set(ids.filter(Boolean)));
+      if (!list.length) return;
+      const wanted = new Set(list);
+      const wasFavorite = new Map<string, boolean>();
+      assets.forEach((asset) => {
+        if (wanted.has(asset.id)) wasFavorite.set(asset.id, Boolean(asset.favorite));
+      });
+      const turningOff = list.every((id) => wasFavorite.get(id) !== false);
+      setAssets((previous) =>
+        previous.map((asset) =>
+          wanted.has(asset.id) ? { ...asset, favorite: !turningOff } : asset,
+        ),
+      );
+      try {
+        if (turningOff) await favoriteRemove(list);
+        else await favoriteAdd(list);
+        showToast(turningOff ? "已取消收藏" : "已收藏");
+        refreshData();
+      } catch (err) {
+        // 回滚：界面不能停在假状态上。
+        setAssets((previous) =>
+          previous.map((asset) =>
+            wasFavorite.has(asset.id)
+              ? { ...asset, favorite: wasFavorite.get(asset.id) }
+              : asset,
+          ),
+        );
+        showError("收藏失败：" + (err instanceof Error ? err.message : String(err)));
+      }
+    },
+    [assets, favoriteAdd, favoriteRemove, refreshData, showError, showToast],
+  );
 
   const applyLibrary = useCallback(
     async (kind: "open" | "create", dir: string) => {
@@ -1991,6 +2043,7 @@ const route = useMemo(readRoute, []);
             而不是整块网格消失再出现 */}
         <VirtualGrid
           assets={displayAssets}
+          onToggleFavorite={(asset) => void toggleFavorite([asset.id])}
           dupCounts={dupCounts}
           columns={columns}
           density={density}
@@ -2013,7 +2066,7 @@ const route = useMemo(readRoute, []);
         stats={stats}
         facets={displayFacets}
         healthInfo={healthInfo}
-        view={view}
+        view={view === "library" && favoriteOnly ? "favorites" : view}
         activeTags={tags}
         activeAlbum={album}
         activePerson={person}
@@ -2050,6 +2103,13 @@ const route = useMemo(readRoute, []);
           setRecognitionOpen(true);
         }}
         onSettings={() => navigate("settings")}
+      onFavorites={() => {
+        // 和标签/相册一样：再点一次取消筛选，而不是只能开不能关。
+        const next = !favoriteOnly;
+        clearAll();
+        setFavoriteOnly(next);
+        setView("library");
+      }}
       />
 
       <main className="main">
@@ -2148,6 +2208,7 @@ const route = useMemo(readRoute, []);
                 showError(`外部播放器打不开：${extractMessage(err)}`),
               ),
           }}
+          onFavorite={() => void toggleFavorite([detailAsset.id])}
           onDelete={() =>
             askDeleteDetail(
               document.querySelector<HTMLElement>(".inspector-delete")?.getBoundingClientRect() ?? null,

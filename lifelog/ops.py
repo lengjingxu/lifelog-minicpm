@@ -27,6 +27,11 @@ CREATE TABLE IF NOT EXISTS album_assets (
     added_at TEXT,
     PRIMARY KEY (album_id, asset_id)
 );
+-- 用户手动收藏。和 asset_quality.stars（自动美学星级）完全无关。
+CREATE TABLE IF NOT EXISTS asset_favorite (
+    asset_id TEXT PRIMARY KEY,
+    created_at TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_asset_tags_tag ON asset_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_album_assets_asset ON album_assets(asset_id);
 """
@@ -184,6 +189,88 @@ def delete_records(ids: list[str]) -> dict:
     finally:
         conn.close()
     return {"ok": True, "requested": len(ids), "removed": removed}
+
+
+# ---------- 收藏（用户手动标记） ----------
+
+
+def favorite_add(ids: list[str]) -> dict:
+    ids = [i for i in dict.fromkeys(i.strip() for i in ids if i and i.strip()) if i]
+    if not ids:
+        raise SystemExit("没有要收藏的照片")
+    conn = connect()
+    now = _now()
+    try:
+        changed = 0
+        for asset_id in ids:
+            # 已软删的照片不允许收藏，避免回收站里出现「收藏」这种怪状态。
+            row = conn.execute(
+                "SELECT 1 FROM assets WHERE id = ? AND deleted_at IS NULL", (asset_id,)
+            ).fetchone()
+            if not row:
+                continue
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO asset_favorite (asset_id, created_at) VALUES (?, ?)",
+                (asset_id, now),
+            )
+            changed += cur.rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "requested": len(ids), "added": changed}
+
+
+def favorite_remove(ids: list[str]) -> dict:
+    ids = [i for i in dict.fromkeys(i.strip() for i in ids if i and i.strip()) if i]
+    if not ids:
+        raise SystemExit("没有要取消收藏的照片")
+    conn = connect()
+    removed = 0
+    try:
+        marks = ",".join("?" for _ in ids)
+        cur = conn.execute(
+            f"DELETE FROM asset_favorite WHERE asset_id IN ({marks})", ids
+        )
+        conn.commit()
+        removed = cur.rowcount
+    finally:
+        conn.close()
+    return {"ok": True, "requested": len(ids), "removed": removed}
+
+
+def favorite_stats(conn=None) -> dict:
+    own = conn is None
+    if own:
+        conn = connect()
+    try:
+        count = conn.execute(
+            "SELECT count(*) FROM asset_favorite f JOIN assets a ON a.id = f.asset_id "
+            "AND a.deleted_at IS NULL"
+        ).fetchone()[0] or 0
+    finally:
+        if own:
+            conn.close()
+    return {"count": count}
+
+
+def favorite_list(limit: int | None = None, offset: int = 0) -> dict:
+    conn = connect()
+    try:
+        rows = conn.execute(
+            "SELECT f.asset_id, a.path, a.day, a.taken_at, a.kind, f.created_at "
+            "FROM asset_favorite f JOIN assets a ON a.id = f.asset_id "
+            "WHERE a.deleted_at IS NULL ORDER BY f.created_at DESC, f.asset_id"
+        ).fetchall()
+    finally:
+        conn.close()
+    items = [
+        {"asset_id": r[0], "path": r[1], "day": r[2], "taken_at": r[3],
+         "kind": r[4], "created_at": r[5]}
+        for r in rows
+    ]
+    if limit:
+        items = items[max(0, offset): max(0, offset) + int(limit)]
+    return {"count": len(rows), "items": items}
 
 
 # ---------- 最近删除（软删除） ----------
