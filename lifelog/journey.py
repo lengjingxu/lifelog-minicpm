@@ -23,7 +23,7 @@ def event_photos(con, start_day: str, end_day: str, count: int = 6) -> list[dict
         """SELECT a.id, a.path, a.day, a.taken_at, c.caption, c.tags, c.place, c.activity
            FROM assets a JOIN current_caption c ON c.asset_id = a.id
            WHERE c.prompt_version = 'describe-v1' AND c.status = 'ok'
-             AND a.day >= ? AND a.day <= ?
+             AND a.deleted_at IS NULL AND a.day >= ? AND a.day <= ?
            ORDER BY a.taken_at, a.path""",
         (start_day, end_day),
     ).fetchall()

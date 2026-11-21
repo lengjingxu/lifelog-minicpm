@@ -33,7 +33,7 @@ def build_facts(since_day: str | None = None) -> dict:
         query = """SELECT a.id, a.day, a.taken_at, c.caption, c.scene, c.people, c.place,
                           c.activity, c.mood, c.tags
                    FROM assets a JOIN current_caption c ON c.asset_id = a.id
-                   WHERE c.status='ok' AND c.prompt_version='describe-v1'"""
+                   WHERE c.status='ok' AND c.prompt_version='describe-v1' AND a.deleted_at IS NULL"""
         params: list = []
         if since_day:
             query += " AND a.day >= ?"
@@ -299,7 +299,7 @@ def build_beats(since_day: str | None = None) -> list[dict]:
     with db.session() as con:
         query = ("SELECT a.id, a.day, a.taken_at, c.caption, c.people, c.place, c.activity, c.tags "
                  "FROM assets a JOIN current_caption c ON c.asset_id = a.id "
-                 "WHERE c.status='ok' AND c.prompt_version='describe-v1'")
+                 "WHERE c.status='ok' AND c.prompt_version='describe-v1' AND a.deleted_at IS NULL")
         params: list = []
         if since_day:
             query += " AND a.day >= ?"
@@ -381,7 +381,7 @@ def build_evidence(since_day: str | None = None) -> dict:
     with db.session() as con:
         query = ("SELECT a.id, a.day, a.taken_at, c.caption, c.people, c.place, c.activity, c.tags "
                  "FROM assets a JOIN current_caption c ON c.asset_id = a.id "
-                 "WHERE c.status='ok' AND c.prompt_version='describe-v1'")
+                 "WHERE c.status='ok' AND c.prompt_version='describe-v1' AND a.deleted_at IS NULL")
         params: list = []
         if since_day:
             query += " AND a.day >= ?"

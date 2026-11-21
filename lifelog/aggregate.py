@@ -15,7 +15,7 @@ def _caption_rows(con, since_day=None, until_day=None, model=None):
     query = """SELECT a.id, a.day, a.taken_at, a.path, c.caption, c.scene, c.people,
                       c.place, c.activity, c.mood, c.tags
                FROM assets a JOIN current_caption c ON c.asset_id = a.id
-               WHERE c.status = 'ok'"""
+               WHERE c.status = 'ok' AND a.deleted_at IS NULL"""
     params: list = []
     if since_day:
         query += " AND a.day >= ?"
@@ -36,7 +36,7 @@ def build_days(model: str | None = None) -> int:
     with db.session() as con:
         rows = _caption_rows(con, model=model)
         photos = {row["day"]: row["n"] for row in con.execute(
-            "SELECT day, COUNT(*) AS n FROM assets WHERE day IS NOT NULL GROUP BY day")}
+            "SELECT day, COUNT(*) AS n FROM assets WHERE day IS NOT NULL AND deleted_at IS NULL GROUP BY day")}
         buckets: dict[str, dict] = {}
         for day in photos:
             buckets[day] = {"tags": Counter(), "hours": Counter(), "described": 0}
@@ -75,7 +75,7 @@ def build_events(gap_days: int = 1, min_photos: int = 3, model: str | None = Non
         rows = con.execute(
             """SELECT a.day, COUNT(*) AS n FROM assets a
                JOIN current_caption c ON c.asset_id = a.id
-               WHERE c.status='ok' AND a.day IS NOT NULL
+               WHERE c.status='ok' AND a.day IS NOT NULL AND a.deleted_at IS NULL
                GROUP BY a.day ORDER BY a.day"""
         ).fetchall()
         if not rows:
@@ -169,7 +169,7 @@ def compute_stats(model: str | None = None, since_day=None, until_day=None) -> d
             if row["day"]:
                 months[row["day"][:7]] += 1
                 days[row["day"]] += 1
-        total_assets = con.execute("SELECT COUNT(*) FROM assets WHERE kind='image'").fetchone()[0]
+        total_assets = con.execute("SELECT COUNT(*) FROM assets WHERE kind='image' AND deleted_at IS NULL").fetchone()[0]
     return {
         "described": len(rows),
         "total_assets": total_assets,

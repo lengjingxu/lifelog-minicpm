@@ -31,7 +31,7 @@ def run_ocr(model_key: str = "minicpm-ocr-1.0", limit: int | None = None,
     query = (
         "SELECT a.id, a.path, a.day, c.tags FROM assets a "
         "JOIN captions c ON c.asset_id = a.id AND c.prompt_version = 'describe-v1' "
-        "WHERE a.kind='image' AND (c.ocr_text IS NULL OR c.ocr_text = '')"
+        "WHERE a.kind='image' AND a.deleted_at IS NULL AND (c.ocr_text IS NULL OR c.ocr_text = '')"
     )
     params: list = []
     if since_day:

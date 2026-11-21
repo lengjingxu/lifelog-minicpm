@@ -141,7 +141,7 @@ def build(limit: int | None = None, batch: int = 16, progress=None) -> dict:
         rows = con.execute(
             """SELECT a.id, a.path FROM assets a
                LEFT JOIN asset_quality q ON q.asset_id = a.id AND q.model_version = ?
-               WHERE q.asset_id IS NULL AND a.kind = 'image'
+               WHERE q.asset_id IS NULL AND a.kind = 'image' AND a.deleted_at IS NULL
                ORDER BY a.taken_at DESC""",
             (MODEL_VERSION,),
         ).fetchall()

@@ -85,13 +85,13 @@ def render_index(con, day: str | None = None, limit: int = 60) -> str:
         rows = con.execute(
             """SELECT a.id, a.path, a.day, a.taken_at, c.caption, c.tags
                FROM assets a LEFT JOIN current_caption c ON c.asset_id=a.id AND c.prompt_version='describe-v1'
-               WHERE a.day = ? ORDER BY a.taken_at LIMIT ?""", (day, limit)).fetchall()
+               WHERE a.day = ? AND a.deleted_at IS NULL ORDER BY a.taken_at LIMIT ?""", (day, limit)).fetchall()
         title = f"{day} 的照片"
     else:
         rows = con.execute(
             """SELECT a.id, a.path, a.day, a.taken_at, c.caption, c.tags
                FROM assets a LEFT JOIN current_caption c ON c.asset_id=a.id AND c.prompt_version='describe-v1'
-               WHERE a.kind='image' ORDER BY a.day DESC, a.taken_at DESC LIMIT ?""", (limit,)).fetchall()
+               WHERE a.kind='image' AND a.deleted_at IS NULL ORDER BY a.day DESC, a.taken_at DESC LIMIT ?""", (limit,)).fetchall()
         title = "最近的相册"
     cards = []
     for row in rows:

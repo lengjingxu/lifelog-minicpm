@@ -197,7 +197,7 @@ def pending_assets(model: str, prompt_version: str = PROMPT_VERSION, limit: int 
     query = """SELECT a.id, a.path, a.day, a.taken_at FROM assets a
                LEFT JOIN captions c
                  ON c.asset_id = a.id AND c.model = ? AND c.prompt_version = ?
-               WHERE {status_clause} AND a.kind = 'image'"""
+               WHERE {status_clause} AND a.kind = 'image' AND a.deleted_at IS NULL"""
     # force：详情页「重新识别这一张」要覆盖已有描述，不能只挑还没描述的。
     status_clause = (
         "CASE WHEN ? THEN 1 ELSE (c.asset_id IS NULL OR c.status != 'ok') END"

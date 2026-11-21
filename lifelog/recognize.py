@@ -167,7 +167,7 @@ def _fetch_captioned(order: str, limit: int) -> list[dict]:
         rows = con.execute(
             f"""SELECT a.id, c.caption, c.tags
                 FROM assets a JOIN current_caption c ON c.asset_id = a.id
-                WHERE c.status = 'ok' AND a.kind = 'image'
+                WHERE c.status = 'ok' AND a.kind = 'image' AND a.deleted_at IS NULL
                 ORDER BY {order} LIMIT ?""",
             (limit,),
         ).fetchall()
