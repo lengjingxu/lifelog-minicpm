@@ -11,7 +11,14 @@ import {
   UserRound,
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
-import { appSettings, generateThumbs, rebuildThumbs, thumbStatus, type AppSettings, type ThumbStatus } from "../api";
+import {
+  appSettings,
+  generateThumbs,
+  rebuildThumbs,
+  thumbStatus,
+  type AppSettings,
+  type ThumbStatus,
+} from "../api";
 import { formatBytes } from "../utils";
 
 const SHORTCUTS: [string, string][] = [
@@ -25,7 +32,16 @@ const SHORTCUTS: [string, string][] = [
   ["⌘ A", "全选当前视图"],
 ];
 
-export function SettingsView({ onToast }: { onToast: (message: string) => void }) {
+export function SettingsView({
+  onToast,
+  onSwitchLibrary,
+  switchingLibrary = false,
+}: {
+  onToast: (message: string) => void;
+  /** 换库：由 App 负责选目录、写入配置并刷新整个界面。 */
+  onSwitchLibrary?: () => void;
+  switchingLibrary?: boolean;
+}) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -140,6 +156,17 @@ export function SettingsView({ onToast }: { onToast: (message: string) => void }
             <Database size={16} />
             <h3>资料库</h3>
             <span className="status-pill muted">只读</span>
+            {onSwitchLibrary && (
+              <button
+                type="button"
+                className="ghost-button settings-library-switch"
+                onClick={onSwitchLibrary}
+                disabled={switchingLibrary}
+              >
+                <FolderOpen size={13} strokeWidth={1.8} />
+                {switchingLibrary ? "处理中…" : "更换库"}
+              </button>
+            )}
           </div>
           <dl className="settings-list">
             <div>

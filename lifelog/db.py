@@ -197,6 +197,14 @@ def init_db() -> None:
     with connect() as con:
         con.executescript(SCHEMA)
         _ensure_deleted_at(con)
+        # 首次启动建的空库也必须有这几张表，否则第一张照片导入/收藏时会报 no such table。
+        try:
+            from . import ops, space
+
+            con.executescript(ops.SCHEMA)
+            con.executescript(space.SCHEMA)
+        except Exception:  # noqa: BLE001 - 建表失败不该让整个启动崩掉
+            pass
         _ensure_cursor_index(con)
         try:
             con.executescript(FTS_SCHEMA)

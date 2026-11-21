@@ -49,6 +49,9 @@ import {
   deleteRecords,
   describeDeleteError,
   libraryAccess,
+  libraryState,
+  useLibrary,
+  createLibrary,
   openPrivacySettings,
   revealInFinder,
   albumAdd,
@@ -73,6 +76,7 @@ import { RecognitionDialog } from "./components/RecognitionDialog";
 import { SettingsView } from "./components/SettingsView";
 import { SpaceView, assetFromEntry } from "./components/SpaceView";
 import { TrashView } from "./components/TrashView";
+import { LibrarySetup } from "./components/LibrarySetup";
 import { AlbumPicker } from "./components/AlbumPicker";
 import { TagPicker } from "./components/TagPicker";
 import { openExternal } from "./api";
@@ -185,6 +189,15 @@ const route = useMemo(readRoute, []);
   const [hasMore, setHasMore] = useState(false);
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 第一次启动（或库被挪走）：先选库，再读数据。
+  const [libraryNeedsSetup, setLibraryNeedsSetup] = useState(() => {
+    // ?setup=1 可手动打开引导页（浏览器验收用），不影响正常启动。
+    const params = new URLSearchParams(window.location.search);
+    return params.get("setup") === "1";
+  });
+  const [libraryDir, setLibraryDir] = useState<string | null>(null);
+  const [libraryBusy, setLibraryBusy] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
   const [queryInput, setQueryInput] = useState(route.query);
   const [query, setQuery] = useState(route.query);
   const [tags, setTags] = useState<string[]>(route.tags);
@@ -809,6 +822,16 @@ const route = useMemo(readRoute, []);
   }, []);
 
   useEffect(() => {
+    void libraryState()
+      .then((state) => {
+        setLibraryDir(state.data_dir);
+        if (state.needs_setup) setLibraryNeedsSetup(true);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (libraryNeedsSetup) return;
     let alive = true;
     Promise.all([libraryStats(), getFacets()])
       .then(([nextStats, nextFacets]) => {
@@ -825,7 +848,7 @@ const route = useMemo(readRoute, []);
     return () => {
       alive = false;
     };
-  }, []);
+  }, [libraryNeedsSetup]);
 
   const checkAccess = useCallback(() => {
     void libraryAccess()
@@ -1742,6 +1765,53 @@ const route = useMemo(readRoute, []);
     return sections;
   }, [queryInput, displayFacets, stats, navigate, toggleTag]);
 
+  const applyLibrary = useCallback(
+    async (kind: "open" | "create", dir: string) => {
+      setLibraryBusy(true);
+      setLibraryError(null);
+      try {
+        const state = kind === "open" ? await useLibrary(dir) : await createLibrary(dir);
+        setLibraryDir(state.data_dir);
+        setLibraryNeedsSetup(!state.ready);
+        if (state.ready) {
+          // 换库后整个界面要按新库重新读，不能只改路径。
+          refreshData();
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("library-changed", { detail: state }));
+          }
+        }
+      } catch (reason: unknown) {
+        setLibraryError(reason instanceof Error ? reason.message : String(reason));
+      } finally {
+        setLibraryBusy(false);
+      }
+    },
+    [refreshData],
+  );
+
+  /** 设置页换库：先选目录，再提示状态影响，最后写入配置并整体刷新。 */
+  const switchLibrary = useCallback(async () => {
+    const dir = await pickFolder({ title: "选择拾光的数据目录" });
+    if (!dir) return;
+    // 换库的状态影响：选中项会清空，待清理清单留在旧库。
+    let pending = 0;
+    try {
+      pending = (await cleanupList()).count;
+    } catch {
+      pending = 0;
+    }
+    if (selection.length > 0 || pending > 0) {
+      const detail =
+        (selection.length > 0 ? "当前选中 " + selection.length + " 张会被清空。" : "") +
+        (pending > 0 ? "旧库里还有 " + pending + " 张待清理清单。" : "");
+      const ok = window.confirm(
+        "换库后界面会按新库重新加载。\n" + detail + "\n确定切换吗？",
+      );
+      if (!ok) return;
+    }
+    await applyLibrary("open", dir);
+  }, [applyLibrary, selection.length]);
+
   const content = (() => {
     if (error && view !== "organize" && view !== "settings") {
       return (
@@ -1771,6 +1841,18 @@ const route = useMemo(readRoute, []);
             setImportSummaryView(null);
             setRecognitionOpen(true);
           }}
+        />
+      );
+    }
+
+    if (libraryNeedsSetup) {
+      return (
+        <LibrarySetup
+          error={libraryError}
+          busy={libraryBusy}
+          onOpen={(dir) => void applyLibrary("open", dir)}
+          onCreate={(dir) => void applyLibrary("create", dir)}
+          onDismiss={libraryDir ? () => setLibraryNeedsSetup(false) : undefined}
         />
       );
     }
@@ -1848,7 +1930,13 @@ const route = useMemo(readRoute, []);
     }
 
     if (view === "settings") {
-      return <SettingsView onToast={showToast} />;
+      return (
+        <SettingsView
+          onToast={showToast}
+          onSwitchLibrary={() => void switchLibrary()}
+          switchingLibrary={libraryBusy}
+        />
+      );
     }
 
     if (view === "albums") {

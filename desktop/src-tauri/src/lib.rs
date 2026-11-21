@@ -30,14 +30,73 @@ fn open_conn(dir: &Path) -> Result<Connection, String> {
     .map_err(|err| err.to_string())
 }
 
+// ---------- 照片库位置：配置文件 + 首次启动引导 ----------
+
+const LIBRARY_CONFIG_NAME: &str = "library.json";
+
+fn app_config_dir() -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_default();
+    home.join("Library/Application Support/com.leng.shiguang")
+}
+
+fn library_config_path() -> PathBuf {
+    app_config_dir().join(LIBRARY_CONFIG_NAME)
+}
+
+fn read_library_config() -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(library_config_path()).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let dir = value.get("data_dir")?.as_str()?.trim();
+    if dir.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(dir))
+    }
+}
+
+fn write_library_config(dir: &Path) -> Result<(), String> {
+    let path = library_config_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let body = serde_json::json!({ "data_dir": dir.to_string_lossy() });
+    std::fs::write(&path, format!("{}\n", body)).map_err(|e| e.to_string())
+}
+
+/// 库是否可用：目录存在且里面有 lifelog.sqlite。
+fn library_ready(dir: &Path) -> bool {
+    dir.is_dir() && dir.join("lifelog.sqlite").is_file()
+}
+
+/// 解析顺序：LIFELOG_HOME → 配置文件 → 默认路径（存在才用）→ 需要首次启动引导。
 fn resolve_data_dir() -> PathBuf {
     if let Ok(home) = std::env::var("LIFELOG_HOME") {
         return PathBuf::from(home);
     }
+    if let Some(dir) = read_library_config() {
+        return dir;
+    }
     let fallback = dirs::home_dir()
         .unwrap_or_default()
         .join("dev/lifelog-minicpm/data");
+    if library_ready(&fallback) {
+        return fallback;
+    }
     fallback
+}
+
+/// 启动时是否需要引导用户选库。
+fn needs_library_setup(dir: &Path) -> bool {
+    // 真实库被删/挪走时也要回到引导页，否则打开就是一个空库而且还不能换。
+    !library_ready(dir)
+}
+
+fn ensure_library_layout(dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("创建目录失败：{e}"))?;
+    for child in ["thumbs", "thumbs/full"] {
+        std::fs::create_dir_all(dir.join(child)).map_err(|e| format!("创建目录失败：{e}"))?;
+    }
+    Ok(())
 }
 
 fn desktop_root() -> PathBuf {
@@ -401,6 +460,94 @@ fn parse_tags(raw: Option<String>) -> Vec<String> {
     }
 }
 
+// ---------- 换库 / 建库 ----------
+
+#[derive(Serialize)]
+struct LibraryState {
+    data_dir: String,
+    db_path: String,
+    ready: bool,
+    needs_setup: bool,
+    first_launch: bool,
+}
+
+fn library_state_of(dir: &Path) -> LibraryState {
+    LibraryState {
+        data_dir: dir.to_string_lossy().to_string(),
+        db_path: dir.join("lifelog.sqlite").to_string_lossy().to_string(),
+        ready: library_ready(dir),
+        needs_setup: needs_library_setup(dir),
+        first_launch: read_library_config().is_none() && !library_ready(dir),
+    }
+}
+
+#[tauri::command]
+fn library_state(db: State<'_, Db>) -> LibraryState {
+    library_state_of(&db.data_dir)
+}
+
+fn init_library_at(dir: &Path) -> Result<(), String> {
+    ensure_library_layout(dir)?;
+    let output = std::process::Command::new(py::resolve(dir)?)
+        .arg("-c")
+        .arg("from lifelog import db; db.init_db()")
+        .current_dir(repo_root())
+        .env("LIFELOG_HOME", dir)
+        .env("PYTHONPATH", repo_root())
+        .output()
+        .map_err(|e| format!("初始化数据库失败：{e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "初始化数据库失败：{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    if !library_ready(dir) {
+        return Err("初始化后仍没有找到 lifelog.sqlite".to_string());
+    }
+    Ok(())
+}
+
+/// 选一个已有库：必须是包含 lifelog.sqlite 的目录，否则明确报错。
+#[tauri::command]
+fn use_library(dir: String) -> Result<LibraryState, String> {
+    let trimmed = dir.trim();
+    if trimmed.is_empty() {
+        return Err("没有选择目录".to_string());
+    }
+    let path = PathBuf::from(trimmed);
+    if !path.is_dir() {
+        return Err(format!("目录不存在：{trimmed}"));
+    }
+    if !path.join("lifelog.sqlite").is_file() {
+        return Err("这个文件夹里没有 lifelog.sqlite，请选择拾光的数据目录".to_string());
+    }
+    write_library_config(&path)?;
+    Ok(library_state_of(&path))
+}
+
+/// 新建库：空目录（或不存在）里初始化 schema 与目录结构。
+#[tauri::command]
+fn create_library(dir: String) -> Result<LibraryState, String> {
+    let trimmed = dir.trim();
+    if trimmed.is_empty() {
+        return Err("没有选择目录".to_string());
+    }
+    let path = PathBuf::from(trimmed);
+    if path.exists() {
+        if !path.is_dir() {
+            return Err(format!("这里不是文件夹：{trimmed}"));
+        }
+        let mut entries = std::fs::read_dir(&path)
+            .map_err(|e| format!("读取目录失败：{e}"))?;
+        if entries.next().is_some() {
+            return Err("这个文件夹不是空的。请选择空文件夹，或改用「选择已有库」".to_string());
+        }
+    }
+    init_library_at(&path)?;
+    write_library_config(&path)?;
+    Ok(library_state_of(&path))
+}
 #[tauri::command]
 fn library_stats(db: State<'_, Db>) -> Result<Stats, String> {
     let guard = db.open()?;
@@ -1808,6 +1955,9 @@ pub fn run() {
         .manage(sidecar)
         .invoke_handler(tauri::generate_handler![
             library_stats,
+            library_state,
+            use_library,
+            create_library,
             query_assets,
             count_assets,
             export_assets,
@@ -2802,6 +2952,36 @@ fn normalize_ingest_event(value: &mut serde_json::Value) -> bool {
     true
 }
 
+#[cfg(test)]
+mod library_tests {
+    use super::*;
+
+    #[test]
+    fn library_ready_requires_sqlite_file() {
+        let dir = std::env::temp_dir().join(format!("sg-lib-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!library_ready(&dir), "空目录不算就绪");
+        std::fs::write(dir.join("lifelog.sqlite"), b"").unwrap();
+        assert!(library_ready(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_roundtrip_remembers_library() {
+        // 不碰真实配置：直接验证写/读 JSON 的逻辑。
+        let dir = std::env::temp_dir().join(format!("sg-cfg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("library.json");
+        let body = serde_json::json!({ "data_dir": "/tmp/photos-library" });
+        std::fs::write(&path, body.to_string()).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(raw["data_dir"], "/tmp/photos-library");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
 #[cfg(test)]
 mod ingest_event_tests {
     use super::normalize_ingest_event;

@@ -2664,3 +2664,20 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .trash-restore:hover:not(:disabled) { color: var(--text); background: var(--bg-hover); }
 .trash-when { font-size: var(--font-9-5); font-style: normal; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) { .trash-head { flex-direction: column; } .trash-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); } }
+
+/* 首次启动：先选库，再进图库 */
+.library-setup { flex: 1; display: grid; place-items: center; padding: var(--space-24); }
+.library-setup-card { width: min(520px, 100%); display: flex; flex-direction: column; gap: var(--space-14); }
+.library-setup-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: var(--radius-10); color: var(--text-dim); background: rgba(255,255,255,var(--alpha-0-045)); }
+.library-setup-card h2 { margin: 0; font-size: var(--font-28); font-weight: 600; letter-spacing: -0.02em; }
+.library-setup-card > p { margin: 0; font-size: var(--font-12); line-height: 1.6; color: var(--text-dim); }
+.library-setup-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-10); margin-top: var(--space-6); }
+.library-choice { display: flex; align-items: flex-start; gap: var(--space-10); padding: var(--space-14); border-radius: var(--radius-12); text-align: left; color: var(--text-dim); background: rgba(255,255,255,var(--alpha-0-035)); box-shadow: 0 0 0 1px var(--line) inset; }
+.library-choice:hover:not(:disabled) { color: var(--text); background: var(--bg-hover); }
+.library-choice span { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.library-choice b { font-size: var(--font-12); color: var(--text); }
+.library-choice small { font-size: var(--font-10); color: var(--text-faint); }
+.library-setup-error { display: flex; align-items: flex-start; gap: var(--space-6); margin: 0; padding: var(--space-10); border-radius: var(--radius-10); font-size: var(--font-11); line-height: 1.5; color: var(--text); background: var(--accent-soft); }
+.library-setup-error svg { flex: none; margin-top: 2px; color: var(--accent); }
+.settings-library-switch { margin-left: auto; height: 26px; padding: 0 var(--space-10); font-size: var(--font-10-5); display: inline-flex; align-items: center; gap: var(--space-4); }
+@media (max-width: 600px) { .library-setup-actions { grid-template-columns: 1fr; } }

@@ -1051,6 +1051,34 @@ export async function spaceSummary(): Promise<SpaceSummary> {
   return invoke<SpaceSummary>("space_summary");
 }
 
+export type LibraryState = {
+  data_dir: string;
+  db_path: string;
+  ready: boolean;
+  needs_setup: boolean;
+  first_launch: boolean;
+};
+
+/** 浏览器 fixture：默认当成「已就绪」，不弹引导页。 */
+const fixtureLibrary: LibraryState = {
+  data_dir: "sample-data",
+  db_path: "sample-data/lifelog.sqlite",
+  ready: true,
+  needs_setup: false,
+  first_launch: false,
+};
+
+export async function libraryState(): Promise<LibraryState> {
+  if (!isTauri) {
+    // 测试可以让 fixture 走引导页：window.__fixtureLibrary = { needs_setup: true }
+    const override = (window as Window & { __fixtureLibrary?: Partial<LibraryState> }).__fixtureLibrary;
+    return override ? { ...fixtureLibrary, ...override } : fixtureLibrary;
+  }
+  return invoke<LibraryState>("library_state");
+}
+
+export const useLibrary = (dir: string) => invoke<LibraryState>("use_library", { dir });
+export const createLibrary = (dir: string) => invoke<LibraryState>("create_library", { dir });
 export type ImportPlan = {
   listed: number;
   new: number;
