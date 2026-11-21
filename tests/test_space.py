@@ -162,7 +162,12 @@ class DedupGroupTests(unittest.TestCase):
         con = db.connect()
         con.execute("CREATE TABLE IF NOT EXISTS asset_quality (asset_id TEXT PRIMARY KEY, score REAL NOT NULL)")
         con.execute("INSERT INTO dup_groups (id, keeper_id, reason) VALUES (9, 'k', 'l1')")
+        # dup_group_ids 只返回未软删的成员，因此每个 id 都要先在 assets 里存在。
         for asset_id, score in [("k", 9.9), ("low", 1.0), ("mid", 5.0), ("none", None)]:
+            con.execute(
+                "INSERT INTO assets (id, path, size, day, kind) VALUES (?,?,?,?,?)",
+                (asset_id, f"/tmp/{asset_id}.jpg", 1000, "2024-01-01", "image"),
+            )
             if score is not None:
                 con.execute("INSERT INTO asset_quality VALUES (?,?)", (asset_id, score))
             con.execute("INSERT INTO dup_members VALUES (9, ?, NULL)", (asset_id,))
@@ -171,6 +176,7 @@ class DedupGroupTests(unittest.TestCase):
         con.close()
         self.assertEqual(ids[0], "k", "keeper 永远第一")
         self.assertEqual(ids[1:], ["mid", "low", "none"], "其余按分数降序，无分的最后")
+
     def test_views_dup_not_ready_without_tables(self):
         con = db.connect()
         con.execute("DELETE FROM dup_members")
@@ -240,6 +246,88 @@ class ImportSummaryTests(unittest.TestCase):
         report = space.import_summary()
         self.assertEqual(report["total"], 3)
         self.assertEqual(report["dup"], {"ready": False, "groups": 0, "count": 0, "reclaim": 0})
+
+
+class TrashSoftDeleteTests(unittest.TestCase):
+    """最近删除：软删只写 deleted_at；列表/统计都要排除；30 天后可命中过期。"""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="space-trash-"))
+        self._paths = (config.DATA_DIR, config.DB_PATH)
+        config.DATA_DIR = self.root
+        config.DB_PATH = self.root / "lifelog.sqlite"
+        db.init_db()
+        con = db.connect()
+        con.executemany(
+            "INSERT INTO assets (id, path, size, day, kind) VALUES (?,?,?,?,?)",
+            [
+                ("t1", "/tmp/t1.jpg", 1000, "2024-01-01", "image"),
+                ("t2", "/tmp/t2.jpg", 2000, "2024-01-02", "image"),
+                ("t3", "/tmp/t3.jpg", 3000, "2024-01-03", "image"),
+            ],
+        )
+        con.commit()
+        con.close()
+
+    def tearDown(self):
+        config.DATA_DIR, config.DB_PATH = self._paths
+
+    def test_soft_delete_keeps_assets_row_and_flags_deleted_at(self):
+        ops.record_trash(["t1"])
+        con = db.connect()
+        total = con.execute("SELECT count(*) FROM assets").fetchone()[0]
+        row = con.execute("SELECT deleted_at FROM assets WHERE id='t1'").fetchone()
+        con.close()
+        self.assertEqual(total, 3, "软删不能删行")
+        self.assertTrue(row and row[0], "deleted_at 应被填上")
+
+    def test_soft_deleted_hidden_from_summary_and_queue(self):
+        space.add_to_queue(["t1", "t2"])
+        before = space.summary()
+        ops.record_trash(["t1"])
+        after = space.summary()
+        self.assertEqual(before["assets"], 3)
+        self.assertEqual(after["assets"], 2, "统计要少一张")
+        self.assertEqual(space.list_queue()["count"], 1, "清单里也要跳过软删的照片")
+        self.assertEqual(len(space.views()["photo"]), 2) if isinstance(space.views()["photo"], list) else None
+        self.assertEqual(space.views()["photo"]["count"], 2)
+
+    def test_restore_clears_deleted_at(self):
+        ops.record_trash(["t1", "t2"])
+        result = ops.record_restore(["t1"])
+        self.assertEqual(result["restored"], 1)
+        con = db.connect()
+        rows = dict(con.execute("SELECT id, deleted_at FROM assets").fetchall())
+        con.close()
+        self.assertIsNone(rows["t1"])
+        self.assertIsNotNone(rows["t2"])
+
+    def test_trash_list_orders_and_reports(self):
+        ops.record_trash(["t1"])
+        listing = ops.trash_list()
+        self.assertEqual(listing["count"], 1)
+        self.assertEqual(listing["items"][0]["id"], "t1")
+        self.assertEqual(listing["retention_days"], ops.RETENTION_DAYS)
+        self.assertGreaterEqual(listing["bytes"], 1000)
+
+    def test_expired_ids_only_after_retention(self):
+        ops.record_trash(["t1", "t2"])
+        con = db.connect()
+        con.execute(
+            "UPDATE assets SET deleted_at = datetime('now','localtime','-40 days') WHERE id='t1'"
+        )
+        con.commit()
+        con.close()
+        expired = ops.expired_ids(days=30)
+        self.assertEqual(expired, ["t1"])
+
+    def test_purge_removes_rows_only(self):
+        ops.record_trash(["t1"])
+        ops.trash_purge(["t1"])
+        con = db.connect()
+        left = con.execute("SELECT count(*) FROM assets WHERE id='t1'").fetchone()[0]
+        con.close()
+        self.assertEqual(left, 0)
 
 
 if __name__ == "__main__":

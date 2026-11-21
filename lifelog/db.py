@@ -20,7 +20,9 @@ CREATE TABLE IF NOT EXISTS assets (
     lat REAL,
     lon REAL,
     kind TEXT DEFAULT 'image',
-    created_at TEXT
+    created_at TEXT,
+    -- 软删除时间：非空即在「最近删除」里，所有列表查询都要排除。
+    deleted_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS captions (
@@ -175,9 +177,26 @@ def _ensure_cursor_index(con: sqlite3.Connection) -> None:
     )
 
 
+DELETED_AT_MIGRATION = """
+ALTER TABLE assets ADD COLUMN deleted_at TEXT;
+CREATE INDEX IF NOT EXISTS idx_assets_deleted ON assets(deleted_at);
+"""
+
+
+def _ensure_deleted_at(con: sqlite3.Connection) -> None:
+    """老库补 deleted_at 列（幂等），并保证「回收站」查询有索引。"""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(assets)").fetchall()}
+    if "deleted_at" not in columns:
+        con.execute("ALTER TABLE assets ADD COLUMN deleted_at TEXT")
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_assets_deleted ON assets(deleted_at)"
+    )
+
+
 def init_db() -> None:
     with connect() as con:
         con.executescript(SCHEMA)
+        _ensure_deleted_at(con)
         _ensure_cursor_index(con)
         try:
             con.executescript(FTS_SCHEMA)

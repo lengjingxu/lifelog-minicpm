@@ -186,6 +186,121 @@ def delete_records(ids: list[str]) -> dict:
     return {"ok": True, "requested": len(ids), "removed": removed}
 
 
+# ---------- 最近删除（软删除） ----------
+
+RETENTION_DAYS = 30
+
+
+def _clean_ids(ids: list[str]) -> list[str]:
+    return list(dict.fromkeys(i.strip() for i in ids if i and i.strip()))
+
+
+def record_trash(ids: list[str]) -> dict:
+    """软删除：只写 deleted_at，不动文件、不删关联行（还原零成本）。"""
+    ids = _clean_ids(ids)
+    if not ids:
+        raise SystemExit("没有要删除的照片")
+    conn = connect()
+    try:
+        marks = ",".join("?" for _ in ids)
+        cur = conn.execute(
+            f"UPDATE assets SET deleted_at = ? WHERE id IN ({marks}) AND deleted_at IS NULL",
+            [_now(), *ids],
+        )
+        # 已经在回收站里的照片不该继续留在待清理清单里（清单表可能还不存在）。
+        try:
+            conn.execute(f"DELETE FROM cleanup_queue WHERE asset_id IN ({marks})", ids)
+        except sqlite3.OperationalError:
+            pass
+        conn.commit()
+        changed = cur.rowcount
+    finally:
+        conn.close()
+    return {"ok": True, "requested": len(ids), "trashed": changed}
+
+
+def record_restore(ids: list[str]) -> dict:
+    """还原：把 deleted_at 清空，照片回到原来的位置。"""
+    ids = _clean_ids(ids)
+    if not ids:
+        raise SystemExit("没有要还原的照片")
+    conn = connect()
+    try:
+        marks = ",".join("?" for _ in ids)
+        cur = conn.execute(
+            f"UPDATE assets SET deleted_at = NULL WHERE id IN ({marks}) AND deleted_at IS NOT NULL",
+            ids,
+        )
+        conn.commit()
+        changed = cur.rowcount
+    finally:
+        conn.close()
+    return {"ok": True, "requested": len(ids), "restored": changed}
+
+
+def trash_list(limit: int | None = None, offset: int = 0) -> dict:
+    """回收站列表：只读，按删除时间倒序。"""
+    conn = connect()
+    try:
+        total, total_bytes = conn.execute(
+            "SELECT count(*), COALESCE(sum(size),0) FROM assets WHERE deleted_at IS NOT NULL"
+        ).fetchone()
+        sql = (
+            "SELECT a.id, a.path, a.day, a.taken_at, a.kind, a.size, a.deleted_at "
+            "FROM assets a WHERE a.deleted_at IS NOT NULL "
+            "ORDER BY a.deleted_at DESC, a.id DESC"
+        )
+        params: list = []
+        if limit:
+            sql += " LIMIT ? OFFSET ?"
+            params = [int(limit), max(0, int(offset))]
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+    thumbs_dir = config.DATA_DIR / "thumbs"
+    items = [
+        {
+            "id": row[0],
+            "path": row[1],
+            "day": row[2],
+            "taken_at": row[3],
+            "kind": row[4],
+            "size": row[5],
+            "deleted_at": row[6],
+            # 回收站优先显示缩略图：原图可能在外置盘，直接读原图会很慢。
+            "thumb": str(thumbs_dir / f"{row[0]}.jpg")
+            if (thumbs_dir / f"{row[0]}.jpg").exists()
+            else "",
+        }
+        for row in rows
+    ]
+    return {
+        "count": total or 0,
+        "bytes": total_bytes or 0,
+        "items": items,
+        "retention_days": RETENTION_DAYS,
+    }
+
+
+def expired_ids(days: int = RETENTION_DAYS, now: str | None = None) -> list[str]:
+    """超过保留期的 id（启动时自动清理用）。"""
+    now = now or _now()
+    conn = connect()
+    try:
+        rows = conn.execute(
+            "SELECT id FROM assets WHERE deleted_at IS NOT NULL "
+            "AND julianday(?) - julianday(deleted_at) > ? ORDER BY deleted_at",
+            (now, days),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [row[0] for row in rows]
+
+
+def trash_purge(ids: list[str]) -> dict:
+    """真删记录（文件由桌面端先移进系统废纸篓）。"""
+    return delete_records(ids)
+
 def prune_orphan_thumbs(ids: list[str] | None = None, dry_run: bool = False) -> dict:
     """清理孤儿缩略图。
 

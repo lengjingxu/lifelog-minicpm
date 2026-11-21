@@ -307,6 +307,49 @@ def cmd_thumbs_prune(args) -> int:
     return 0
 
 
+def cmd_record_trash(args) -> int:
+    from . import ops
+    print(json.dumps(ops.record_trash(_ids(args.ids)), ensure_ascii=False))
+    return 0
+
+
+def cmd_record_restore(args) -> int:
+    from . import ops
+    print(json.dumps(ops.record_restore(_ids(args.ids)), ensure_ascii=False))
+    return 0
+
+
+def cmd_trash_list(args) -> int:
+    from . import ops
+    print(json.dumps(ops.trash_list(limit=args.limit, offset=args.offset), ensure_ascii=False))
+    return 0
+
+
+def cmd_trash_empty(args) -> int:
+    """清空回收站：只删记录；文件由桌面端先移进系统废纸篓。"""
+    from . import aggregate, ops
+    ids = _ids(args.ids) if args.ids else [item["id"] for item in ops.trash_list()["items"]]
+    if not ids:
+        print(json.dumps({"ok": True, "removed": {"assets": 0}, "requested": 0}, ensure_ascii=False))
+        return 0
+    result = ops.trash_purge(ids)
+    try:
+        result["cleanup_removed"] = ops.drop_from_cleanup_queue(ids)
+    except Exception as exc:  # noqa: BLE001 - 清单只是辅助状态
+        result["cleanup_error"] = str(exc)
+    result["days_rebuilt"] = aggregate.build_days()
+    result["events_rebuilt"] = aggregate.build_events()
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+def cmd_trash_expired(args) -> int:
+    """列出超过保留期的 id（桌面端启动时据此清理）。"""
+    from . import ops
+    ids = ops.expired_ids(days=args.days)
+    print(json.dumps({"ids": ids, "count": len(ids), "days": args.days}, ensure_ascii=False))
+    return 0
+
 def cmd_record_delete(args) -> int:
     from . import aggregate, ops
     ids = _ids(args.ids)
@@ -561,6 +604,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
     p.set_defaults(func=cmd_record_delete)
 
+    p = sub.add_parser("record-trash", help="软删除：记录进最近删除，文件不动")
+    p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
+    p.set_defaults(func=cmd_record_trash)
+
+    p = sub.add_parser("record-restore", help="从最近删除还原记录")
+    p.add_argument("--ids", required=True, help="逗号分隔的 asset id")
+    p.set_defaults(func=cmd_record_restore)
+
+    p = sub.add_parser("trash-list", help="列出最近删除（含 deleted_at）")
+    p.add_argument("--limit", type=int, help="最多返回多少条")
+    p.add_argument("--offset", type=int, default=0)
+    p.set_defaults(func=cmd_trash_list)
+
+    p = sub.add_parser("trash-empty", help="清空最近删除：只删记录，文件由桌面端移进废纸篓")
+    p.add_argument("--ids", help="只清这些 id；缺省清空全部")
+    p.set_defaults(func=cmd_trash_empty)
+
+    p = sub.add_parser("trash-expired", help="列出超过保留期的 id（启动自动清理用）")
+    p.add_argument("--days", type=int, default=30)
+    p.set_defaults(func=cmd_trash_expired)
     p = sub.add_parser("cleanup-list", help="列出待清理清单（空间页）")
     p.set_defaults(func=cmd_cleanup_list)
 

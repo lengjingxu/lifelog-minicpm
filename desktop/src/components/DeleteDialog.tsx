@@ -1,4 +1,4 @@
-import { Trash2 } from "lucide-react";
+import { ArchiveRestore, Trash2 } from "lucide-react";
 import { useDialogFocus, type GrowRect } from "../useDialogFocus";
 
 type Props = {
@@ -8,6 +8,9 @@ type Props = {
   /** 指定标题/正文（详情页单张删除用）；不传时走批量文案。 */
   title?: string;
   note?: string;
+  /** 确认按钮文案：默认「删除」；最近删除用「移到最近删除」。 */
+  confirmLabel?: string;
+  confirmIcon?: "trash" | "archive";
   origin?: GrowRect | null;
   busy?: boolean;
   onCancel: () => void;
@@ -19,7 +22,18 @@ function sizeText(bytes: number): string {
   return (bytes / 1024 / 1024 / 1024).toFixed(1) + " GB";
 }
 
-export function DeleteDialog({ count, bytes = null, title, note, origin = null, busy = false, onCancel, onConfirm }: Props) {
+export function DeleteDialog({
+  count,
+  bytes = null,
+  title,
+  note,
+  confirmLabel,
+  confirmIcon = "trash",
+  origin = null,
+  busy = false,
+  onCancel,
+  onConfirm,
+}: Props) {
   const dialogRef = useDialogFocus<HTMLDivElement>(onCancel, { growFrom: origin });
 
   return (
@@ -36,7 +50,10 @@ export function DeleteDialog({ count, bytes = null, title, note, origin = null, 
           {title ?? (bytes != null ? "清理 " + count + " 个 · " + sizeText(bytes) : "删除 " + count + " 张")}
         </h2>
         <p className="delete-note">
-          {note ?? (bytes != null ? "原图会移进废纸篓，库里的记录一并移除。" : "原图移到废纸篓，记录一并删除。")}
+          {note ??
+            (bytes != null
+              ? "移到最近删除，30 天内可还原；文件不会被删除。"
+              : "移到最近删除，30 天内可还原。")}
         </p>
 
         <div className="dialog-actions">
@@ -44,7 +61,8 @@ export function DeleteDialog({ count, bytes = null, title, note, origin = null, 
             取消
           </button>
           <button type="button" className="danger-btn" onClick={onConfirm} disabled={busy}>
-            <Trash2 size={14} /> {busy ? (bytes != null ? "清理中…" : "删除中…") : bytes != null ? "清理" : "删除"}
+            {confirmIcon === "archive" ? <ArchiveRestore size={14} /> : <Trash2 size={14} />}{" "}
+            {busy ? "处理中…" : (confirmLabel ?? (bytes != null ? "清理" : "删除"))}
           </button>
         </div>
       </div>

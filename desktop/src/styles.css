@@ -2643,3 +2643,24 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 /* 空结果：条件 chip 也能在这里单独去掉，不用「一把全清」 */
 .empty-results .empty-conditions { justify-content: center; margin: 0 0 var(--space-16); max-width: 420px; }
 .empty-results .empty-conditions .chip { font-size: var(--font-10-5); }
+
+/* 最近删除：软删的照片在这里可还原，30 天后自动清空 */
+.trash-view { flex: 1; display: flex; flex-direction: column; gap: var(--space-18); padding: var(--space-20) var(--space-24); overflow: auto; }
+.trash-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-16); }
+.trash-head h2 { margin: 0; font-size: var(--font-22); font-weight: 600; letter-spacing: -0.01em; }
+.trash-head p { margin: var(--space-4) 0 0; font-size: var(--font-11-5); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.trash-retention { color: var(--text-faint); }
+.trash-actions { display: flex; align-items: center; gap: var(--space-8); }
+.trash-actions .ghost-button { height: 30px; padding: 0 var(--space-12); font-size: var(--font-11); }
+.trash-actions .danger-text { color: var(--accent); }
+.trash-empty-state { display: flex; flex-direction: column; align-items: center; gap: var(--space-10); padding: var(--space-40) 0; color: var(--text-faint); font-size: var(--font-12); }
+.trash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--space-12); }
+.trash-card { position: relative; display: flex; flex-direction: column; gap: var(--space-6); }
+.trash-thumb { position: relative; display: block; width: 100%; aspect-ratio: 16 / 10; overflow: hidden; border-radius: var(--radius-10); background: rgba(255,255,255,var(--alpha-0-035)); }
+.trash-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; filter: saturate(0.9) brightness(0.92); }
+.trash-card.picked .trash-thumb { box-shadow: 0 0 0 2px var(--accent) inset; }
+.trash-meta { position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 8px 6px; font-size: var(--font-9-5); color: rgba(255,255,255,0.95); text-shadow: 0 1px 2px rgba(0,0,0,0.6); background: linear-gradient(to top, rgba(0,0,0,0.8), transparent); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trash-restore { align-self: flex-start; display: inline-flex; align-items: center; gap: var(--space-4); height: 24px; padding: 0 var(--space-8); border-radius: var(--radius-6); font-size: var(--font-10-5); color: var(--text-dim); background: var(--bg-elevated); }
+.trash-restore:hover:not(:disabled) { color: var(--text); background: var(--bg-hover); }
+.trash-when { font-size: var(--font-9-5); font-style: normal; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) { .trash-head { flex-direction: column; } .trash-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); } }

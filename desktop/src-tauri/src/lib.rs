@@ -21,6 +21,15 @@ struct Db {
     conn: Mutex<Option<Connection>>,
 }
 
+/// 在后台线程里临时打开库（不经过 State 的连接锁），用完就关。
+fn open_conn(dir: &Path) -> Result<Connection, String> {
+    Connection::open_with_flags(
+        dir.join("lifelog.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_CREATE,
+    )
+    .map_err(|err| err.to_string())
+}
+
 fn resolve_data_dir() -> PathBuf {
     if let Ok(home) = std::env::var("LIFELOG_HOME") {
         return PathBuf::from(home);
@@ -176,7 +185,7 @@ fn timeline_months(db: State<'_, Db>) -> Result<Vec<MonthRow>, String> {
         "ORDER BY a2.taken_at DESC, a2.id DESC"
     };
     let sql = format!(
-        "WITH months AS (                  SELECT substr(day, 1, 7) AS m, count(*) AS n FROM assets WHERE day IS NOT NULL GROUP BY m)              SELECT m, n, (                  SELECT a2.id FROM assets a2 WHERE a2.day >= m || '-01'                    AND a2.day < date(m || '-01', '+1 month')                  {} LIMIT 1) AS cover              FROM months ORDER BY m DESC",
+        "WITH months AS (                  SELECT substr(day, 1, 7) AS m, count(*) AS n FROM assets WHERE deleted_at IS NULL AND day IS NOT NULL GROUP BY m)              SELECT m, n, (                  SELECT a2.id FROM assets a2 WHERE a2.deleted_at IS NULL AND a2.day >= m || '-01'                    AND a2.day < date(m || '-01', '+1 month')                  {} LIMIT 1) AS cover              FROM months ORDER BY m DESC",
         cover_order
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
@@ -243,7 +252,10 @@ fn category_groups(db: State<'_, Db>, kind: String) -> Result<Vec<GroupRow>, Str
         ("", "ORDER BY a.taken_at DESC, a.id DESC")
     };
     let sql = format!(
-        "SELECT a.id, c.tags, c.scene, c.people, c.place FROM assets a              LEFT JOIN captions c ON c.rowid = (                  SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1){}              {}",
+        "SELECT a.id, c.tags, c.scene, c.people, c.place FROM assets a \
+         LEFT JOIN captions c ON c.rowid = ( \
+             SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1){} \
+         WHERE a.deleted_at IS NULL {}",
         score_join, order_by
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
@@ -300,6 +312,8 @@ fn category_groups(db: State<'_, Db>, kind: String) -> Result<Vec<GroupRow>, Str
 #[derive(Serialize)]
 struct Stats {
     assets: i64,
+    /// 最近删除里的张数（侧栏入口角标）。
+    trash: i64,
     captions: i64,
     days: i64,
     events: i64,
@@ -333,6 +347,7 @@ fn read_dup_groups(conn: &Connection) -> Result<Vec<DupGroup>, String> {
         .prepare(
             "SELECT g.id, g.keeper_id, g.reason, m.asset_id, m.distance \
              FROM dup_groups g JOIN dup_members m ON m.group_id = g.id \
+             JOIN assets a ON a.id = m.asset_id AND a.deleted_at IS NULL \
              ORDER BY g.id, m.distance IS NULL, m.distance, m.asset_id",
         )
         .map_err(|e| e.to_string())?;
@@ -395,13 +410,26 @@ fn library_stats(db: State<'_, Db>) -> Result<Stats, String> {
             .unwrap_or(0)
     };
     let first: Option<String> = conn
-        .query_row("SELECT min(day) FROM assets WHERE day IS NOT NULL", [], |r| r.get(0))
+        .query_row(
+            "SELECT min(day) FROM assets WHERE deleted_at IS NULL AND day IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
         .unwrap_or(None);
     let last: Option<String> = conn
-        .query_row("SELECT max(day) FROM assets WHERE day IS NOT NULL", [], |r| r.get(0))
+        .query_row(
+            "SELECT max(day) FROM assets WHERE deleted_at IS NULL AND day IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
         .unwrap_or(None);
     Ok(Stats {
-        assets: count("assets"),
+        assets: conn
+            .query_row("SELECT count(*) FROM assets WHERE deleted_at IS NULL", [], |r| r.get(0))
+            .unwrap_or(0),
+        trash: conn
+            .query_row("SELECT count(*) FROM assets WHERE deleted_at IS NOT NULL", [], |r| r.get(0))
+            .unwrap_or(0),
         captions: count("captions"),
         days: count("days"),
         events: count("events"),
@@ -439,7 +467,8 @@ fn filter_where(
     has_asset_tags: bool,
     has_dup_tables: bool,
 ) -> (String, Vec<rusqlite::types::Value>) {
-    let mut sql = String::from(" WHERE 1=1");
+    // 最近删除里的照片对主库所有查询都不可见（视图 = 未软删）。
+    let mut sql = String::from(" WHERE a.deleted_at IS NULL");
     let mut args: Vec<rusqlite::types::Value> = Vec::new();
 
     if let Some(q) = filter.query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
@@ -782,7 +811,7 @@ fn album_groups(db: State<'_, Db>) -> Result<Vec<AlbumRow>, String> {
     let sql = format!(
         "SELECT al.name, aa.asset_id FROM albums al \
          JOIN album_assets aa ON aa.album_id = al.id \
-         JOIN assets a ON a.id = aa.asset_id{} \
+         JOIN assets a ON a.id = aa.asset_id AND a.deleted_at IS NULL{} \
          ORDER BY al.name, {}",
         join, order
     );
@@ -827,7 +856,8 @@ fn facets(db: State<'_, Db>) -> Result<Facets, String> {
         .prepare(
             "SELECT c.tags, c.scene, c.people, c.place FROM assets a \
              LEFT JOIN captions c ON c.rowid = ( \
-                 SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)",
+                 SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1) \
+             WHERE a.deleted_at IS NULL",
         )
         .map_err(|e| e.to_string())?;
     let mut tags: HashMap<String, i64> = HashMap::new();
@@ -877,7 +907,7 @@ fn facets(db: State<'_, Db>) -> Result<Facets, String> {
     facets.people = sorted(people);
 
     let mut stmt = conn
-        .prepare("SELECT substr(day,1,7) AS m, count(*) FROM assets WHERE day IS NOT NULL GROUP BY m ORDER BY m DESC")
+        .prepare("SELECT substr(day,1,7) AS m, count(*) FROM assets WHERE deleted_at IS NULL AND day IS NOT NULL GROUP BY m ORDER BY m DESC")
         .map_err(|e| e.to_string())?;
     let months = stmt
         .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
@@ -912,14 +942,17 @@ fn load_export_rows(conn: &Connection, args: &ExportArgs) -> Result<Vec<export::
                 .iter()
                 .map(|id| rusqlite::types::Value::Text(id.clone()))
                 .collect();
-            (format!(" WHERE a.id IN ({placeholders})"), values)
+            (
+                format!(" WHERE a.deleted_at IS NULL AND a.id IN ({placeholders})"),
+                values,
+            )
         }
         (_, Some(filter)) => filter_where(
             filter,
             has_table(conn, "asset_tags"),
             has_table(conn, "dup_groups") && has_table(conn, "dup_members"),
         ),
-        _ => (String::from(" WHERE 1=1"), Vec::new()),
+        _ => (String::from(" WHERE a.deleted_at IS NULL"), Vec::new()),
     };
     let sql = format!(
         "SELECT a.id, a.path, a.day, a.taken_at, c.caption, c.scene, c.people, c.place,                 c.activity, c.mood, c.tags, c.ocr_text          FROM assets a          LEFT JOIN captions c ON c.rowid = (              SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1)          {}",
@@ -1122,92 +1155,157 @@ async fn space_summary(db: State<'_, Db>) -> Result<serde_json::Value, String> {
         .map_err(|err| err.to_string())?
 }
 
+/// 软删除：只写 deleted_at，不动文件；真正的物理删除在 empty_trash。
 #[tauri::command]
 async fn delete_records(
     db: State<'_, Db>,
     ids: Vec<String>,
-    with_files: Option<bool>,
+    between: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    let _ = between;
     let home = db.data_dir.clone();
     let ids: Vec<String> = ids.into_iter().filter(|id| !id.trim().is_empty()).collect();
     if ids.is_empty() {
         return Err("没有选中要删除的照片".to_string());
     }
+    tauri::async_runtime::spawn_blocking(move || {
+        run_python_cli(
+            &home,
+            &["record-trash".to_string(), "--ids".to_string(), ids.join(",")],
+        )
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
 
-    // 先取路径（只认库里登记的记录，不接受外部传入的路径）
-    let mut paths: Vec<String> = Vec::new();
-    if with_files.unwrap_or(false) {
-        let guard = db.open()?;
-        let conn = guard.as_ref().unwrap();
-        let marks = vec!["?"; ids.len()].join(",");
-        let mut stmt = conn
-            .prepare(&format!("SELECT path FROM assets WHERE id IN ({marks})"))
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(params_from_iter(ids.iter()), |row| row.get::<_, String>(0))
-            .map_err(|e| e.to_string())?;
-        for row in rows {
-            paths.push(row.map_err(|e| e.to_string())?);
+/// 还原：清空 deleted_at，照片回到原来的位置。
+#[tauri::command]
+async fn restore_records(
+    db: State<'_, Db>,
+    ids: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    let ids: Vec<String> = ids.into_iter().filter(|id| !id.trim().is_empty()).collect();
+    if ids.is_empty() {
+        return Err("没有选中要还原的照片".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        run_python_cli(
+            &home,
+            &["record-restore".to_string(), "--ids".to_string(), ids.join(",")],
+        )
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn trash_list(
+    db: State<'_, Db>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut args = vec!["trash-list".to_string()];
+        if let Some(limit) = limit {
+            args.push("--limit".to_string());
+            args.push(limit.to_string());
         }
+        if let Some(offset) = offset.filter(|value| *value > 0) {
+            args.push("--offset".to_string());
+            args.push(offset.to_string());
+        }
+        run_python_cli(&home, &args)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+/// 清空最近删除：先移文件进系统废纸篓，再删记录。有一张移不动就整体停下。
+#[tauri::command]
+async fn empty_trash(
+    db: State<'_, Db>,
+    ids: Option<Vec<String>>,
+) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    // 查询放在独立作用域里：连接与语句都必须在 await 之前释放，否则 future 不是 Send。
+    let target_ids: Vec<String> = match ids {
+        Some(list) => list.into_iter().filter(|id| !id.trim().is_empty()).collect(),
+        None => {
+            let conn = open_conn(&home)?;
+            let mut stmt = conn
+                .prepare("SELECT id FROM assets WHERE deleted_at IS NOT NULL")
+                .map_err(|e| e.to_string())?;
+            let rows: Vec<String> = stmt
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .flatten()
+                .collect();
+            rows
+        }
+    };
+    if target_ids.is_empty() {
+        return Ok(serde_json::json!({ "ok": true, "requested": 0, "files": { "trashed": 0 } }));
     }
 
     tauri::async_runtime::spawn_blocking(move || {
-        let mut files = serde_json::json!({
-            "requested": paths.len(),
-            "trashed": 0,
-            "missing": 0,
-            "failed": Vec::<String>::new(),
-        });
+        let conn = open_conn(&home)?;
+        let marks = vec!["?"; target_ids.len()].join(",");
+        let mut stmt = conn
+            .prepare(&format!("SELECT path FROM assets WHERE id IN ({marks})"))
+            .map_err(|e| e.to_string())?;
+        let paths: Vec<String> = stmt
+            .query_map(params_from_iter(target_ids.iter()), |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .collect();
+        drop(stmt);
+        drop(conn);
 
-        if !paths.is_empty() {
-            let mut trashed = 0usize;
-            let mut missing = 0usize;
-            let mut failed: Vec<String> = Vec::new();
-            for raw in &paths {
-                let path = std::path::PathBuf::from(raw);
-                if !path.exists() {
-                    missing += 1;
-                    continue;
-                }
-                // 移到废纸篓而不是直接抹掉，误删还能捞回来。
-                // 走 NSFileManager 而不是 Finder：不需要额外授权，也不会去唤醒 Finder。
-                match trash_with(&path) {
-                    Ok(()) => trashed += 1,
-                    Err(err) => failed.push(format!("{}: {err}", path.display())),
-                }
+        let mut trashed = 0usize;
+        let mut missing = 0usize;
+        let mut failed: Vec<String> = Vec::new();
+        for raw in &paths {
+            let path = std::path::PathBuf::from(raw);
+            if !path.exists() {
+                missing += 1;
+                continue;
             }
-            files = serde_json::json!({
-                "requested": paths.len(),
-                "trashed": trashed,
-                "missing": missing,
-                "failed": failed,
-            });
-            // 有文件没能移进废纸篓就整体停下：只删记录会把文件变成看不见的孤儿
-            if !failed.is_empty() {
-                if let Some(hint) = permission_hint(&failed) {
-                    return Err(hint);
-                }
-                return Err(format!(
-                    "有 {} 个文件无法移到废纸篓，已停止且未删除任何记录（{}）",
-                    failed.len(),
-                    failed[0]
-                ));
+            match trash_with(&path) {
+                Ok(()) => trashed += 1,
+                Err(err) => failed.push(format!("{}: {err}", path.display())),
             }
+        }
+        if !failed.is_empty() {
+            if let Some(hint) = permission_hint(&failed) {
+                return Err(hint);
+            }
+            return Err(format!(
+                "有 {} 个文件无法移到废纸篓，已停止且未删除任何记录（{}）",
+                failed.len(),
+                failed[0]
+            ));
         }
 
         let result = run_python_cli(
             &home,
-            &["record-delete".to_string(), "--ids".to_string(), ids.join(",")],
+            &["trash-empty".to_string(), "--ids".to_string(), target_ids.join(",")],
         )?;
-        // record-delete（lifelog/cli.py）会在同一个库里同步删掉 cleanup_queue 的行。
-        // 记录没了，缩略图缓存就成了孤儿，顺手清掉。
         let _ = run_python_cli(
             &home,
-            &["thumbs-prune".to_string(), "--ids".to_string(), ids.join(",")],
+            &["thumbs-prune".to_string(), "--ids".to_string(), target_ids.join(",")],
         );
         let mut out = result;
         if let serde_json::Value::Object(map) = &mut out {
-            map.insert("files".to_string(), files);
+            map.insert(
+                "files".to_string(),
+                serde_json::json!({
+                    "requested": paths.len(),
+                    "trashed": trashed,
+                    "missing": missing,
+                }),
+            );
         }
         Ok(out)
     })
@@ -1215,6 +1313,58 @@ async fn delete_records(
     .map_err(|err| err.to_string())?
 }
 
+/// 启动时的自动清理：把超过保留期的记录移进系统废纸篓并删行。
+/// 与 empty_trash 共用同一套顺序（先移文件，失败就保留记录）。
+fn purge_expired_now(home: &Path) -> Result<usize, String> {
+    let expired = run_python_cli(home, &["trash-expired".to_string()])?;
+    let ids: Vec<String> = expired
+        .get("ids")
+        .and_then(|value| value.as_array())
+        .map(|list| list.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let marks = vec!["?"; ids.len()].join(",");
+    let occurred = {
+        let conn = open_conn(home)?;
+        let mut stmt = conn
+            .prepare(&format!("SELECT path FROM assets WHERE id IN ({marks})"))
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<String> = stmt
+            .query_map(params_from_iter(ids.iter()), |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .collect();
+        rows
+    };
+    for raw in &occurred {
+        let path = std::path::PathBuf::from(raw);
+        if path.exists() {
+            // 移不动就整批跳过，避免出现「文件还在、记录没了」的孤儿。
+            if trash_with(&path).is_err() {
+                return Ok(0);
+            }
+        }
+    }
+    run_python_cli(
+        home,
+        &["trash-empty".to_string(), "--ids".to_string(), ids.join(",")],
+    )?;
+    Ok(ids.len())
+}
+
+/// 手动触发一次（设置页/调试用）；平时由启动钩子调用。
+#[tauri::command]
+async fn trash_purge_expired(db: State<'_, Db>) -> Result<serde_json::Value, String> {
+    let home = db.data_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let purged = purge_expired_now(&home)?;
+        Ok(serde_json::json!({ "ok": true, "purged": purged }))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
 #[tauri::command]
 async fn import_xiaomi(app: AppHandle, db: State<'_, Db>, dry_run: bool) -> Result<serde_json::Value, String> {
     let home = db.data_dir.clone();
@@ -1342,7 +1492,11 @@ fn thumb_status(db: State<'_, Db>) -> Result<serde_json::Value, String> {
     let guard = db.open()?;
     let conn = guard.as_ref().unwrap();
     let assets: i64 = conn
-        .query_row("SELECT count(*) FROM assets", [], |row| row.get(0))
+        .query_row(
+            "SELECT count(*) FROM assets WHERE deleted_at IS NULL",
+            [],
+            |row| row.get(0),
+        )
         .unwrap_or(0);
     Ok(serde_json::json!({
         "assets": assets,
@@ -1623,6 +1777,19 @@ pub fn run() {
         // 仅压测用：设置 LIFELOG_BENCH_FOCUS=1 时启动即把窗口置前，
         // 否则 WKWebView 在后台会节流 rAF，滚动帧率根本测不出来。
         .setup(|app| {
+            // 启动时清掉超过保留期的回收站记录：移到系统废纸篓 + 删行。
+            // 只在后台跑一次，不常驻；失败不影响启动。
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let state = handle.state::<Db>();
+                    let home = state.data_dir.clone();
+                    drop(state);
+                    if let Err(err) = purge_expired_now(&home) {
+                        eprintln!("[trash] 自动清理失败：{err}");
+                    }
+                });
+            }
             if std::env::var("LIFELOG_BENCH_FOCUS").is_ok() {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.unminimize();
@@ -1646,6 +1813,10 @@ pub fn run() {
             export_assets,
             import_xiaomi,
             delete_records,
+            restore_records,
+            trash_list,
+            empty_trash,
+            trash_purge_expired,
             library_access,
             open_privacy_settings,
             reveal_in_finder,
@@ -1700,16 +1871,16 @@ mod filter_tests {
     fn seed() -> rusqlite::Connection {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch(
-            "CREATE TABLE assets (id TEXT PRIMARY KEY, path TEXT, day TEXT, taken_at TEXT, kind TEXT);
+            "CREATE TABLE assets (id TEXT PRIMARY KEY, path TEXT, day TEXT, taken_at TEXT, kind TEXT, deleted_at TEXT);
              CREATE TABLE captions (rowid INTEGER PRIMARY KEY, asset_id TEXT, caption TEXT, scene TEXT,
                                     people TEXT, place TEXT, activity TEXT, mood TEXT, tags TEXT,
                                     ocr_text TEXT, created_at TEXT);
              CREATE TABLE asset_tags (asset_id TEXT, tag TEXT, created_at TEXT);
              CREATE TABLE albums (id TEXT PRIMARY KEY, name TEXT, created_at TEXT);
              CREATE TABLE album_assets (album_id TEXT, asset_id TEXT, added_at TEXT);
-             INSERT INTO assets VALUES ('a1','/p/1.jpg','2024-01-01','2024-01-01T10:00:00','image');
-             INSERT INTO assets VALUES ('a2','/p/2.jpg','2024-01-02','2024-01-02T10:00:00','image');
-             INSERT INTO assets VALUES ('a3','/p/3.jpg','2024-01-03','2024-01-03T10:00:00','image');
+             INSERT INTO assets (id, path, day, taken_at, kind) VALUES ('a1','/p/1.jpg','2024-01-01','2024-01-01T10:00:00','image');
+             INSERT INTO assets (id, path, day, taken_at, kind) VALUES ('a2','/p/2.jpg','2024-01-02','2024-01-02T10:00:00','image');
+             INSERT INTO assets (id, path, day, taken_at, kind) VALUES ('a3','/p/3.jpg','2024-01-03','2024-01-03T10:00:00','image');
              INSERT INTO captions VALUES (1,'a1','海边日落','户外','一人','海边','休息','平静','[\"风景\"]',NULL,'2024-01-01');
              INSERT INTO captions VALUES (2,'a2','山间徒步','户外','一人','山里','行走','平静','[\"风景\"]',NULL,'2024-01-02');
              INSERT INTO captions VALUES (3,'a3','室内看书','室内居家','多人','家','阅读','安静','[\"人物\"]',NULL,'2024-01-03');",
@@ -1955,7 +2126,7 @@ mod filter_tests {
             "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20000)
              INSERT INTO assets SELECT printf('x%04d', i), '/p/'||i||'.jpg',
                 printf('2024-01-%02d', (i%28)+1),
-                printf('2024-01-%02dT%02d:00:00', (i%28)+1, i%24), 'image' FROM n;",
+                printf('2024-01-%02dT%02d:00:00', (i%28)+1, i%24), 'image', NULL FROM n;",
         )
         .unwrap();
 
@@ -2030,7 +2201,7 @@ mod filter_tests {
         for (index, score) in scores.iter().enumerate() {
             let id = format!("s{index}");
             conn.execute(
-                "INSERT INTO assets VALUES (?,?,?,?,?)",
+                "INSERT INTO assets (id, path, day, taken_at, kind) VALUES (?,?,?,?,?)",
                 rusqlite::params![
                     id,
                     format!("/p/{index}.jpg"),
@@ -2094,11 +2265,11 @@ mod filter_tests {
             "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<600)
              INSERT INTO assets SELECT printf('jan%04d', i), '/p/'||i||'.jpg',
                 printf('2024-01-%02d', (i%28)+1),
-                printf('2024-01-%02dT%02d:00:00', (i%28)+1, i%24), 'image' FROM n;
+                printf('2024-01-%02dT%02d:00:00', (i%28)+1, i%24), 'image', NULL FROM n;
              WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<40)
              INSERT INTO assets SELECT printf('feb%04d', i), '/p/f'||i||'.jpg',
                 printf('2024-02-%02d', (i%28)+1),
-                printf('2024-02-%02dT%02d:00:00', (i%28)+1, i%24), 'image' FROM n;",
+                printf('2024-02-%02dT%02d:00:00', (i%28)+1, i%24), 'image', NULL FROM n;",
         )
         .unwrap();
 
@@ -2154,9 +2325,9 @@ mod filter_tests {
             "CREATE TABLE asset_quality (asset_id TEXT PRIMARY KEY, score REAL NOT NULL,
                                         stars INTEGER, model TEXT, model_version TEXT, created_at TEXT);
              -- 同一天三张：分数 3.0 / 9.0 / 6.0，排序后应是高分那张第一
-             INSERT INTO assets VALUES ('x1','/p/x1.jpg','2024-01-01','2024-01-01T10:00:00','image');
-             INSERT INTO assets VALUES ('b1','/p/b1.jpg','2024-01-01','2024-01-01T11:00:00','image');
-             INSERT INTO assets VALUES ('c1','/p/c1.jpg','2024-01-01','2024-01-01T12:00:00','image');
+             INSERT INTO assets (id, path, day, taken_at, kind) VALUES ('x1','/p/x1.jpg','2024-01-01','2024-01-01T10:00:00','image');
+             INSERT INTO assets (id, path, day, taken_at, kind) VALUES ('b1','/p/b1.jpg','2024-01-01','2024-01-01T11:00:00','image');
+             INSERT INTO assets (id, path, day, taken_at, kind) VALUES ('c1','/p/c1.jpg','2024-01-01','2024-01-01T12:00:00','image');
              INSERT INTO asset_quality VALUES ('x1',3.0,NULL,NULL,NULL,NULL);
              INSERT INTO asset_quality VALUES ('b1',9.0,NULL,NULL,NULL,NULL);
              INSERT INTO asset_quality VALUES ('c1',6.0,NULL,NULL,NULL,NULL);",
@@ -2180,8 +2351,8 @@ mod filter_tests {
 
         // 换成跨两天：日期优先，高分不能把昨天的照片顶到前面
         conn.execute_batch(
-            "INSERT INTO assets VALUES ('z1','/p/z1.jpg','2024-01-02','2024-01-02T09:00:00','image');
-             INSERT INTO assets VALUES ('z2','/p/z2.jpg','2024-01-02','2024-01-02T10:00:00','image');
+            "INSERT INTO assets (id, path, day, taken_at, kind) VALUES ('z1','/p/z1.jpg','2024-01-02','2024-01-02T09:00:00','image');
+             INSERT INTO assets (id, path, day, taken_at, kind) VALUES ('z2','/p/z2.jpg','2024-01-02','2024-01-02T10:00:00','image');
              INSERT INTO asset_quality VALUES ('z1',1.0,NULL,NULL,NULL,NULL);
              INSERT INTO asset_quality VALUES ('z2',0.5,NULL,NULL,NULL,NULL);",
         )
@@ -2282,7 +2453,7 @@ mod filter_tests {
         conn.execute_batch(
             "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<50)
              INSERT INTO assets SELECT printf('s%03d', i), '/p/s'||i||'.jpg', '2024-05-01',
-                '2024-05-01T09:00:00', 'image' FROM n;",
+                '2024-05-01T09:00:00', 'image', NULL FROM n;",
         )
         .unwrap();
 
@@ -2334,7 +2505,7 @@ mod filter_tests {
             .unwrap();
         conn.execute_batch(
             "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20)
-             INSERT INTO assets SELECT printf('n%03d', i), '/p/n'||i||'.jpg',
+             INSERT INTO assets (id, path, day, taken_at, kind) SELECT printf('n%03d', i), '/p/n'||i||'.jpg',
                 printf('2024-03-%02d', (i%28)+1),
                 printf('2024-03-%02dT08:00:00', (i%28)+1), 'image' FROM n;
              INSERT INTO assets (id, path, day, taken_at, kind) VALUES
@@ -2434,9 +2605,15 @@ mod dup_tests {
     fn seed() -> rusqlite::Connection {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch(
-            "CREATE TABLE dup_groups (id INTEGER PRIMARY KEY, keeper_id TEXT, reason TEXT, created_at TEXT);
+            "CREATE TABLE assets (id TEXT PRIMARY KEY, deleted_at TEXT);
+             CREATE TABLE dup_groups (id INTEGER PRIMARY KEY, keeper_id TEXT, reason TEXT, created_at TEXT);
              CREATE TABLE dup_members (group_id INTEGER, asset_id TEXT, distance INTEGER,
                                        PRIMARY KEY (group_id, asset_id));
+             INSERT INTO assets VALUES ('a1',NULL);
+             INSERT INTO assets VALUES ('a2',NULL);
+             INSERT INTO assets VALUES ('a3',NULL);
+             INSERT INTO assets VALUES ('b1',NULL);
+             INSERT INTO assets VALUES ('b2',NULL);
              INSERT INTO dup_groups VALUES (1,'a2','l0+l1','2026-01-01');
              INSERT INTO dup_groups VALUES (2,'b1','burst','2026-01-01');
              INSERT INTO dup_members VALUES (1,'a2',0);

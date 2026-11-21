@@ -72,15 +72,17 @@ import { OrganizeView } from "./components/OrganizeView";
 import { RecognitionDialog } from "./components/RecognitionDialog";
 import { SettingsView } from "./components/SettingsView";
 import { SpaceView, assetFromEntry } from "./components/SpaceView";
+import { TrashView } from "./components/TrashView";
 import { AlbumPicker } from "./components/AlbumPicker";
 import { TagPicker } from "./components/TagPicker";
-import { openTrash, openExternal } from "./api";
+import { openExternal } from "./api";
 import { liveEventMessage, useLiveController } from "./live";
 import {
   gridColumnCount,
   matchesFilters,
   matchesSearch,
   unique,
+  formatBytes,
   yearRange,
   type CategoryKind,
   type View,
@@ -113,6 +115,7 @@ function readRoute() {
     requestedView === "people" ||
     requestedView === "places" ||
     requestedView === "space" ||
+    requestedView === "trash" ||
     requestedView === "organize" ||
     requestedView === "settings"
       ? requestedView
@@ -551,16 +554,15 @@ const route = useMemo(readRoute, []);
     if (deleting || !selection.length) return;
     setDeleting(true);
     try {
-      const result = await deleteRecords(selection, true);
+      // 只写 deleted_at：照片进「最近删除」，30 天内都能还原，文件不动。
+      const result = await deleteRecords(selection);
       setDeleteOpen(false);
       setSelection([]);
       refreshData();
-      const failed = result.files?.failed?.length ?? 0;
-      showToast(
-        failed
-          ? `${failed} 个文件没能移到废纸篓，未删除任何记录`
-          : `已删除 ${result.removed.assets} 张，原图在废纸篓`,
-      );
+      showToast(`已移到最近删除 ${result.trashed ?? selection.length} 张`, {
+        kind: "action",
+        action: { label: "查看", run: () => navigate("trash") },
+      });
     } catch (err) {
       showError(`移除失败：${describeDeleteError(err)}`);
     } finally {
@@ -598,10 +600,13 @@ const route = useMemo(readRoute, []);
     if (deleting || !spaceClean) return;
     setDeleting(true);
     try {
-      const result = await deleteRecords(spaceClean.ids, true);
+      const result = await deleteRecords(spaceClean.ids);
       setSpaceClean(null);
       refreshData();
-      showToast("已清理 " + result.removed.assets + " 个，原图在废纸篓", { kind: "action", action: { label: "打开废纸篓", run: () => void openTrash() } });
+      showToast(`已移到最近删除 ${result.trashed ?? spaceClean.ids.length} 个`, {
+        kind: "action",
+        action: { label: "查看", run: () => navigate("trash") },
+      });
     } catch (err) {
       showError("清理失败：" + describeDeleteError(err));
     } finally {
@@ -1095,12 +1100,15 @@ const route = useMemo(readRoute, []);
     if (!detailDelete || deleting) return;
     setDeleting(true);
     try {
-      const result = await deleteRecords([detailDelete.id], true);
+      const result = await deleteRecords([detailDelete.id]);
       setDetailDelete(null);
       setDetailDeleteError(null);
       closeDetail();
       refreshData();
-      showToast(`已删除 ${result.removed.assets} 张，原图在废纸篓`);
+      showToast(`已移到最近删除 ${result.trashed ?? 1} 张`, {
+        kind: "action",
+        action: { label: "查看", run: () => navigate("trash") },
+      });
     } catch (err) {
       const message = describeDeleteError(err);
       setDetailDeleteError(message);
@@ -1607,6 +1615,7 @@ const route = useMemo(readRoute, []);
   const categoryCount = view === "organize" ? (allAssets?.length ?? 0) : (stats?.assets ?? 0);
   const title = (() => {
     if (view === "space") return "图库清理";
+    if (view === "trash") return "最近删除";
     if (view === "organize") return "整理视图";
     if (view === "settings") return "设置";
     if (album) return `相册 · ${album}`;
@@ -1628,6 +1637,8 @@ const route = useMemo(readRoute, []);
   const subtitle = [
     view === "space"
       ? "按体积清理 · 待清理只记清单"
+      : view === "trash"
+      ? "30 天内可还原"
       : view === "organize"
       ? "AI 归位过程 · 只在内存预演"
       : view === "settings"
@@ -1760,6 +1771,17 @@ const route = useMemo(readRoute, []);
             setImportSummaryView(null);
             setRecognitionOpen(true);
           }}
+        />
+      );
+    }
+
+    if (view === "trash") {
+      return (
+        <TrashView
+          onRestored={() => refreshData()}
+          onPurged={() => refreshData()}
+          onError={showError}
+          onToast={(message) => showToast(message)}
         />
       );
     }
@@ -1961,14 +1983,14 @@ const route = useMemo(readRoute, []);
           }}
           view={view}
           onView={navigate}
-          minimal={view === "organize" || view === "settings"}
+          minimal={view === "organize" || view === "settings" || view === "trash"}
           hideGridTools={view === "space"}
           theme={theme}
           onTheme={setTheme}
         />
 
         {/* 没有任何条件时整条不渲染：不留空白，也不占一次布局 */}
-        {view !== "organize" && view !== "settings" && view !== "space" && conditions.length > 0 && (
+        {view !== "organize" && view !== "settings" && view !== "space" && view !== "trash" && conditions.length > 0 && (
           <div className="condition-slot" data-open="true">
           <div className="condition-bar">
             <div className="result-count">
@@ -2082,7 +2104,10 @@ const route = useMemo(readRoute, []);
       {spaceClean && (
         <DeleteDialog
           count={spaceClean.ids.length}
-          bytes={spaceClean.bytes}
+          title={`移到最近删除 ${spaceClean.ids.length} 个 · ${formatBytes(spaceClean.bytes)}`}
+          note="只移出图库，30 天内可还原；文件不会被删除。"
+          confirmLabel="移到最近删除"
+          confirmIcon="archive"
           origin={dialogRect}
           busy={deleting}
           onCancel={() => setSpaceClean(null)}
@@ -2094,7 +2119,9 @@ const route = useMemo(readRoute, []);
         <DeleteDialog
           count={1}
           title="删除这一张？"
-          note="原图移到废纸篓，记录一并删除。"
+          note="照片会移到最近删除，30 天内可还原；文件先不动。"
+          confirmLabel="移到最近删除"
+          confirmIcon="archive"
           origin={
             detailDelete.origin
               ? { x: detailDelete.origin.left, y: detailDelete.origin.top, width: detailDelete.origin.width, height: detailDelete.origin.height }
@@ -2134,6 +2161,9 @@ const route = useMemo(readRoute, []);
       {deleteOpen && (
         <DeleteDialog
           count={selection.length}
+          note="照片会移到最近删除，30 天内可还原；文件先不动。"
+          confirmLabel="移到最近删除"
+          confirmIcon="archive"
           origin={dialogRect}
           busy={deleting}
           onCancel={() => setDeleteOpen(false)}

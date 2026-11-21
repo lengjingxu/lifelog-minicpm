@@ -32,7 +32,7 @@ def _ensure(con) -> None:
 def _totals(con) -> tuple[int, int]:
     row = con.execute(
         "SELECT count(*), COALESCE(sum(a.size),0) FROM cleanup_queue q "
-        "JOIN assets a ON a.id = q.asset_id"
+        "JOIN assets a ON a.id = q.asset_id AND a.deleted_at IS NULL"
     ).fetchone()
     return row[0] or 0, row[1] or 0
 
@@ -43,7 +43,8 @@ def list_queue() -> dict:
         _ensure(con)
         rows = con.execute(
             "SELECT q.asset_id, q.added_at, q.source, a.path, a.day, a.taken_at, a.kind, a.size "
-            "FROM cleanup_queue q JOIN assets a ON a.id = q.asset_id ORDER BY q.id DESC"
+            "FROM cleanup_queue q JOIN assets a ON a.id = q.asset_id "
+            "WHERE a.deleted_at IS NULL ORDER BY q.id DESC"
         ).fetchall()
         count, total = _totals(con)
     finally:
@@ -66,7 +67,7 @@ def add_to_queue(ids: list[str], source: str = "space") -> dict:
         marks = ",".join("?" for _ in ids) or "NULL"
         cur = con.execute(
             "INSERT OR IGNORE INTO cleanup_queue (asset_id, added_at, source) "
-            f"SELECT id, ?, ? FROM assets WHERE id IN ({marks})",
+            f"SELECT id, ?, ? FROM assets WHERE deleted_at IS NULL AND id IN ({marks})",
             [_now(), source or "space", *ids],
         )
         con.commit()
@@ -105,7 +106,7 @@ def add_all_dup_candidates(source: str = "space") -> dict:
             "SELECT m.asset_id, ?, ? FROM dup_groups g "
             "JOIN dup_members m ON m.group_id = g.id "
             "JOIN assets a ON a.id = m.asset_id "
-            "WHERE m.asset_id != g.keeper_id",
+            "WHERE m.asset_id != g.keeper_id AND a.deleted_at IS NULL",
             [_now(), source or "space"],
         )
         con.commit()
@@ -128,14 +129,16 @@ def summary() -> dict:
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='cleanup_queue'"
         ).fetchone()
         photos = con.execute(
-            "SELECT count(*), COALESCE(sum(size),0) FROM assets WHERE kind IS NULL OR kind != 'video'"
+            "SELECT count(*), COALESCE(sum(size),0) FROM assets "
+            "WHERE deleted_at IS NULL AND (kind IS NULL OR kind != 'video')"
         ).fetchone()
         videos = con.execute(
-            "SELECT count(*), COALESCE(sum(size),0) FROM assets WHERE kind = 'video'"
+            "SELECT count(*), COALESCE(sum(size),0) FROM assets "
+            "WHERE deleted_at IS NULL AND kind = 'video'"
         ).fetchone()
         big = con.execute(
             "SELECT count(*), COALESCE(sum(size),0) FROM assets "
-            "WHERE kind = 'video' AND size >= 104857600"
+            "WHERE deleted_at IS NULL AND kind = 'video' AND size >= 104857600"
         ).fetchone()
         queue = _totals(con) if has_queue else (0, 0)
     finally:
@@ -157,7 +160,7 @@ def summary() -> dict:
 DUP_SQL = """
 SELECT count(*) FROM (
     SELECT size FROM assets
-    WHERE kind = 'image' AND size IS NOT NULL
+    WHERE deleted_at IS NULL AND kind = 'image' AND size IS NOT NULL
     GROUP BY size HAVING count(*) > 1
 )"""
 
@@ -170,7 +173,7 @@ SCREENSHOT_WHERE = """
 
 DUP_WHERE = (
     "a.kind = 'image' AND a.size IS NOT NULL AND a.size IN ("
-    "    SELECT size FROM assets WHERE kind = 'image' AND size IS NOT NULL"
+    "    SELECT size FROM assets WHERE deleted_at IS NULL AND kind = 'image' AND size IS NOT NULL"
     "    GROUP BY size HAVING count(*) > 1)"
 )
 
@@ -189,13 +192,15 @@ def _filter_sql(view: str) -> str:
 
 def _count(con, view: str) -> tuple[int, int]:
     if view == "large":
-        row = con.execute("SELECT count(*), COALESCE(sum(size),0) FROM assets").fetchone()
+        row = con.execute(
+            "SELECT count(*), COALESCE(sum(size),0) FROM assets WHERE deleted_at IS NULL"
+        ).fetchone()
         return row[0] or 0, row[1] or 0
     row = con.execute(
         "SELECT count(*), COALESCE(sum(a.size),0) FROM assets a "
         "LEFT JOIN captions c ON c.rowid = ("
         "    SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1) "
-        f"WHERE {_filter_sql(view)}"
+        f"WHERE a.deleted_at IS NULL AND ({_filter_sql(view)})"
     ).fetchone()
     return row[0] or 0, row[1] or 0
 
@@ -212,12 +217,14 @@ def views() -> dict:
         # 可回收：组内 keeper 以外的成员体积合计。
         result["dup"]["reclaim_count"] = con.execute(
             "SELECT count(*) FROM dup_groups g JOIN dup_members m ON m.group_id = g.id "
-            "WHERE m.asset_id != g.keeper_id"
+            "JOIN assets a ON a.id = m.asset_id "
+            "WHERE m.asset_id != g.keeper_id AND a.deleted_at IS NULL"
         ).fetchone()[0] or 0
         result["dup"]["reclaim"] = con.execute(
             "SELECT COALESCE(sum(a.size),0) FROM dup_groups g "
             "JOIN dup_members m ON m.group_id = g.id "
-            "JOIN assets a ON a.id = m.asset_id WHERE m.asset_id != g.keeper_id"
+            "JOIN assets a ON a.id = m.asset_id "
+            "WHERE m.asset_id != g.keeper_id AND a.deleted_at IS NULL"
         ).fetchone()[0] or 0
         result["dup"]["ready"] = _dup_truth(con)
     finally:
@@ -273,6 +280,7 @@ def _dup_groups(con, limit: int | None = None, offset: int = 0) -> list[dict]:
         "FROM dup_groups g "
         "JOIN dup_members m ON m.group_id = g.id "
         "JOIN assets a ON a.id = m.asset_id "
+        "WHERE a.deleted_at IS NULL "
         "GROUP BY g.id ORDER BY n DESC, g.id"
     )
     params: list = []
@@ -314,7 +322,11 @@ def dup_group_ids(con, group_id: int) -> list[str]:
         # 有评分表时按分数降序（无分垫底）；没有评分表时退回 distance。
         order.append("COALESCE(q.score, -1) DESC")
     order += ["m.distance IS NULL", "m.distance", "m.asset_id"]
-    sql = "SELECT m.asset_id FROM dup_members m{} WHERE m.group_id = ? ORDER BY {}".format(
+    sql = (
+        "SELECT m.asset_id FROM dup_members m "
+        "JOIN assets a ON a.id = m.asset_id AND a.deleted_at IS NULL "
+        "{} WHERE m.group_id = ? ORDER BY {}"
+    ).format(
         score_join, ", ".join(order)
     )
     # 占位符顺序按 SQL 文本：先 WHERE 的 group_id，再 ORDER BY 的 keeper。
@@ -326,7 +338,8 @@ def dup_all_candidates(con) -> list[str]:
     """所有重复组里 keeper 以外的 asset_id（「全部加入待清理」用）。"""
     rows = con.execute(
         "SELECT m.asset_id FROM dup_groups g JOIN dup_members m ON m.group_id = g.id "
-        "WHERE m.asset_id != g.keeper_id ORDER BY m.asset_id"
+        "JOIN assets a ON a.id = m.asset_id "
+        "WHERE m.asset_id != g.keeper_id AND a.deleted_at IS NULL ORDER BY m.asset_id"
     ).fetchall()
     return [row[0] for row in rows]
 
@@ -338,7 +351,7 @@ def _screenshot_groups(con) -> list[dict]:
         "SELECT a.path, a.size FROM assets a "
         "LEFT JOIN captions c ON c.rowid = ("
         "    SELECT rowid FROM captions c2 WHERE c2.asset_id = a.id ORDER BY c2.created_at DESC LIMIT 1) "
-        f"WHERE {SCREENSHOT_WHERE} ORDER BY a.size DESC"
+        f"WHERE a.deleted_at IS NULL AND {SCREENSHOT_WHERE} ORDER BY a.size DESC"
     ).fetchall()
     buckets: dict[str, list] = {}
     for path, size in rows:
@@ -409,7 +422,8 @@ def versions() -> dict:
     con = db.connect()
     try:
         row = con.execute(
-            "SELECT count(*), COALESCE(sum(size),0), COALESCE(max(created_at), '') FROM assets"
+            "SELECT count(*), COALESCE(sum(size),0), COALESCE(max(created_at), ''), "
+            "       COALESCE(count(deleted_at), 0), COALESCE(max(deleted_at), '') FROM assets"
         ).fetchone()
     finally:
         con.close()
@@ -433,19 +447,23 @@ def import_summary() -> dict:
             row = con.execute(sql, params).fetchone()
             return row[0] if row else 0
 
-        total = one("SELECT count(*) FROM assets")
-        images = one("SELECT count(*) FROM assets WHERE kind != 'video'")
-        videos = one("SELECT count(*) FROM assets WHERE kind = 'video'")
-        bytes_total = one("SELECT COALESCE(sum(size),0) FROM assets")
+        total = one("SELECT count(*) FROM assets WHERE deleted_at IS NULL")
+        images = one(
+            "SELECT count(*) FROM assets WHERE deleted_at IS NULL AND kind != 'video'"
+        )
+        videos = one(
+            "SELECT count(*) FROM assets WHERE deleted_at IS NULL AND kind = 'video'"
+        )
+        bytes_total = one("SELECT COALESCE(sum(size),0) FROM assets WHERE deleted_at IS NULL")
         screenshots = one(
-            "SELECT count(*) FROM assets WHERE path LIKE '%Screenshot%' "
-            "OR path LIKE '%screenshot%' OR path LIKE '%截屏%' OR path LIKE '%屏幕%'"
+            "SELECT count(*) FROM assets WHERE deleted_at IS NULL AND (path LIKE '%Screenshot%' "
+            "OR path LIKE '%screenshot%' OR path LIKE '%截屏%' OR path LIKE '%屏幕%')"
         )
         # 还没跑识别的：有 assets 但没有当前描述。
         # 用 current_caption 而不是 merged_caption：真实库是 view（合成表），
         # 别的库可能没有这张表，直接查表会整条命令失败。
         unlabeled = one(
-            "SELECT count(*) FROM assets a WHERE NOT EXISTS "
+            "SELECT count(*) FROM assets a WHERE a.deleted_at IS NULL AND NOT EXISTS "
             "(SELECT 1 FROM current_caption m WHERE m.asset_id = a.id)"
         )
         # 重复可回收：keeper 之外的成员。去重还没跑过时这几张表可能不存在。
@@ -453,18 +471,24 @@ def import_summary() -> dict:
             dup_groups = one("SELECT count(*) FROM dup_groups")
             dup_reclaim = one(
                 "SELECT count(*) FROM dup_groups g JOIN dup_members m ON m.group_id = g.id "
-                "WHERE m.asset_id != g.keeper_id"
+                "JOIN assets a ON a.id = m.asset_id "
+                "WHERE m.asset_id != g.keeper_id AND a.deleted_at IS NULL"
             )
             dup_bytes = one(
                 "SELECT COALESCE(sum(a.size),0) FROM dup_groups g "
                 "JOIN dup_members m ON m.group_id = g.id "
-                "JOIN assets a ON a.id = m.asset_id WHERE m.asset_id != g.keeper_id"
+                "JOIN assets a ON a.id = m.asset_id "
+                "WHERE m.asset_id != g.keeper_id AND a.deleted_at IS NULL"
             )
         except sqlite3.OperationalError:
             dup_groups, dup_reclaim, dup_bytes = 0, 0, 0
-        days = one("SELECT count(DISTINCT day) FROM assets WHERE day IS NOT NULL")
+        days = one(
+            "SELECT count(DISTINCT day) FROM assets "
+            "WHERE deleted_at IS NULL AND day IS NOT NULL"
+        )
         first_day, last_day = con.execute(
-            "SELECT min(day), max(day) FROM assets WHERE day IS NOT NULL"
+            "SELECT min(day), max(day) FROM assets "
+            "WHERE deleted_at IS NULL AND day IS NOT NULL"
         ).fetchone() or (None, None)
     finally:
         con.close()

@@ -1,4 +1,5 @@
 import {
+  ArchiveRestore,
   Clock,
   Database,
   Folder,
@@ -45,6 +46,7 @@ const NAV = [
   { id: "people" as const, label: "人物", icon: Users },
   { id: "places" as const, label: "地点", icon: MapPin },
   { id: "space" as const, label: "图库清理", icon: HardDrive },
+  { id: "trash" as const, label: "最近删除", icon: ArchiveRestore },
   { id: "organize" as const, label: "整理视图", icon: Sparkles },
 ];
 
@@ -145,6 +147,8 @@ export function Sidebar({
           const count =
             item.id === "library" || item.id === "timeline"
               ? stats?.assets
+              : item.id === "trash"
+                ? stats?.trash || undefined
               : item.id === "tags"
                 ? tags.length
                 : item.id === "people"

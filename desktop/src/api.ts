@@ -28,6 +28,8 @@ export type Asset = {
 
 export type Stats = {
   assets: number;
+  /** 最近删除里的张数（侧栏入口的角标）。 */
+  trash?: number;
   captions: number;
   days: number;
   events: number;
@@ -691,8 +693,11 @@ export const openTrash = () =>
 export type DeleteResult = {
   ok: boolean;
   requested: number;
-  removed: { captions: number; asset_tags: number; album_assets: number; assets: number };
-  /** 原图移到废纸篓的结果；failed 非空时后端会整体失败、不会删记录 */
+  /** 软删除的行数（进「最近删除」）。 */
+  trashed?: number;
+  /** 只有清空回收站时才有：真正删掉的记录数。 */
+  removed?: { captions: number; asset_tags: number; album_assets: number; assets: number };
+  /** 清空回收站时原图移进系统废纸篓的结果。 */
   files?: { requested: number; trashed: number; missing: number; failed: string[] };
   days_rebuilt?: number;
   events_rebuilt?: number;
@@ -715,8 +720,47 @@ export const libraryAccess = () =>
   isTauri ? invoke<LibraryAccess>("library_access") : Promise.resolve({ roots: [] });
 export const openPrivacySettings = () => invoke<void>("open_privacy_settings");
 
-export const deleteRecords = (ids: string[], withFiles = false) =>
-  invoke<DeleteResult>("delete_records", { ids, withFiles });
+/** 删除 = 移到「最近删除」：只写 deleted_at，文件与关联行都不动，随时可还原。 */
+export const deleteRecords = (ids: string[]) =>
+  invoke<DeleteResult>("delete_records", { ids, between: null });
+
+export type TrashItem = {
+  id: string;
+  path: string;
+  day: string | null;
+  taken_at: string | null;
+  kind: string | null;
+  size: number | null;
+  deleted_at: string;
+  /** 缩略图地址（后端按 id 生成）；可能为空。 */
+  thumb?: string;
+};
+
+export type TrashList = {
+  count: number;
+  bytes: number;
+  items: TrashItem[];
+  retention_days: number;
+};
+
+export const trashList = async (options?: { limit?: number; offset?: number }): Promise<TrashList> => {
+  if (!isTauri) {
+    // 浏览器 fixture 没有软删状态：给空回收站，视图仍可打开。
+    return { count: 0, bytes: 0, items: [], retention_days: 30 };
+  }
+  return invoke<TrashList>("trash_list", {
+    limit: options?.limit ?? null,
+    offset: options?.offset ?? 0,
+  });
+};
+
+export const restoreRecords = (ids: string[]) => invoke<{ ok: boolean; restored: number }>("restore_records", { ids });
+
+export const emptyTrash = (ids?: string[]) =>
+  invoke<{ ok: boolean; requested: number; files?: { trashed: number; missing: number } }>("empty_trash", {
+    ids: ids ?? null,
+  });
+
 
 export type SpaceViewKey = "large" | "dup" | "screenshot" | "video" | "photo";
 
