@@ -19,6 +19,7 @@ import {
   cleanupList,
   cleanupRemove,
   dedupBuild,
+  dupGroupPage,
   queryAssets,
   spaceGroups,
   spaceVersions,
@@ -26,12 +27,14 @@ import {
   type Asset,
   type CleanupEntry,
   type CleanupList,
+  type DupGroupPageGroup,
   type SpaceGroup,
   type SpaceViewKey,
   type SpaceViews,
 } from "../api";
 import { GAP, formatBytes } from "../utils";
 import { reducedMotion } from "../motion";
+import { DupGroupBoard } from "./DupGroupBoard";
 
 const PAGE_SIZE = 200;
 const CARD_MIN_WIDTH = 158;
@@ -116,6 +119,10 @@ export function SpaceView({ onOpenDetail, onClean, onToast, onError, onProgress,
   const [view, setView] = useState<SpaceViewKey>("large");
   const [views, setViews] = useState<SpaceViews | null>(null);
   const [groups, setGroups] = useState<SpaceGroup[]>([]);
+  // 重复图分组视图：按 20 组分页，切视角/卸载时清空。
+  const [dupGroups, setDupGroups] = useState<DupGroupPageGroup[]>([]);
+  const [dupTotalGroups, setDupTotalGroups] = useState(0);
+  const [dupLoadingMore, setDupLoadingMore] = useState(false);
   const [groupsTotal, setGroupsTotal] = useState(0);
   const [version, setVersion] = useState("");
   const [rows, setRows] = useState<Asset[]>([]);
@@ -212,7 +219,24 @@ export function SpaceView({ onOpenDetail, onClean, onToast, onError, onProgress,
       return;
     }
     let alive = true;
-    spaceGroups(view, view === "dup" ? { limit: 1 } : {})
+    if (view === "dup") {
+      // 重复图走分组视图：一次 20 组，组内自带成员（keeper 第一、按分排序）。
+      setDupGroups([]);
+      setDupLoadingMore(false);
+      dupGroupPage({ limit: 1, offset: 0 })
+        .then((page) => {
+          if (!alive) return;
+          setDupTotalGroups(page.total_groups);
+          setGroupsTotal(page.total_groups);
+        })
+        .catch(() => {
+          if (alive) setGroupsTotal(0);
+        });
+      return () => {
+        alive = false;
+      };
+    }
+    spaceGroups(view, {})
       .then((result) => {
         if (!alive) return;
         setGroups(result.groups);
@@ -225,6 +249,40 @@ export function SpaceView({ onOpenDetail, onClean, onToast, onError, onProgress,
       alive = false;
     };
   }, [view, version]);
+
+  /** 重复图分组分页：首屏 20 组，滚到底再取 20 组。 */
+  const loadDupGroups = useCallback(
+    async (offset: number) => {
+      setDupLoadingMore(true);
+      try {
+        const page = await dupGroupPage({ limit: 20, offset });
+        // 切视角/重新加载后旧请求的结果不能写进新列表。
+        setDupGroups((previous) => {
+          if (offset === 0) return page.groups;
+          const seen = new Set(previous.map((group) => group.key));
+          return [...previous, ...page.groups.filter((group) => !seen.has(group.key))];
+        });
+        setDupTotalGroups(page.total_groups);
+        setGroupsTotal(page.total_groups);
+      } catch (reason) {
+        onError("读取重复组失败：" + String(reason));
+      } finally {
+        setDupLoadingMore(false);
+      }
+    },
+    [onError],
+  );
+
+  // 进入重复图：先拉第一页；离开就清空，避免内存堆积。
+  useEffect(() => {
+    if (view !== "dup") {
+      setDupGroups([]);
+      return;
+    }
+    setDupGroups([]);
+    void loadDupGroups(0);
+    return () => setDupGroups([]);
+  }, [view, version, loadDupGroups]);
 
   const computeDup = useCallback(async () => {
     if (computing) return;
@@ -295,18 +353,28 @@ export function SpaceView({ onOpenDetail, onClean, onToast, onError, onProgress,
     void fetchPage(rows.length);
   }, [fetchPage, hasMore, loading, loadingMore, rows.length]);
 
+  /** 重复图分组视图的「加载下一批」：一次 +20 组。 */
+  const loadMoreDup = useCallback(() => {
+    if (dupLoadingMore) return;
+    if (dupGroups.length >= dupTotalGroups) return;
+    void loadDupGroups(dupGroups.length);
+  }, [dupGroups.length, dupLoadingMore, dupTotalGroups, loadDupGroups]);
+
   useEffect(() => {
     const node = sentinelRef.current;
     if (!node) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) loadMore();
+        if (entries.some((entry) => entry.isIntersecting)) {
+          if (view === "dup") loadMoreDup();
+          else loadMore();
+        }
       },
       { root: scrollRef.current, rootMargin: "600px 0px" },
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [loadMore]);
+  }, [loadMore, loadMoreDup, view]);
 
   // 乐观更新：点一下立刻变勾；请求失败回滚。
   const applyQueueRef = useRef<(ids: string[], add: boolean) => void>(() => {});
@@ -467,6 +535,20 @@ export function SpaceView({ onOpenDetail, onClean, onToast, onError, onProgress,
     }
     return [] as string[];
   }, []);
+
+  /** 分组视图：按组对象直接切换，不用再去反查成员。 */
+  const toggleDupGroup = useCallback(
+    (group: DupGroupPageGroup) => {
+      const keeper = group.keeper ?? group.members.find((member) => member.is_keeper)?.id ?? null;
+      const candidates = group.members
+        .map((member) => member.id)
+        .filter((id) => id !== keeper);
+      if (!candidates.length) return;
+      const add = candidates.some((id) => !queueIds.has(id));
+      applyQueue(add ? candidates.filter((id) => !queueIds.has(id)) : candidates, add);
+    },
+    [applyQueue, queueIds],
+  );
 
   /** 重复图：点任意一张 = 整组切换，keeper 永远不进待清理。 */
   const toggleDupByAsset = useCallback(
@@ -778,49 +860,69 @@ export function SpaceView({ onOpenDetail, onClean, onToast, onError, onProgress,
       <div className="space-grid" ref={scrollRef} role="grid" aria-label="文件缩略图" aria-multiselectable="true">
         {/* 替身层挂在这里：卡片从列表里移除后它还在，且不参与网格布局。 */}
         <div ref={flyRootRef} className="space-fly-root" aria-hidden="true" />
-        <div
-          ref={gridRef}
-          className="space-grid-inner"
-          style={{ height: Math.max(rowVirtualizer.getTotalSize(), cardHeight) + "px" }}
-        >
-          {gridWidth > 0 &&
-            rowVirtualizer.getVirtualItems().map((virtualRow) => {
-              const items = visibleRows.slice(virtualRow.index * columns, virtualRow.index * columns + columns);
-              return (
-                <div
-                  key={virtualRow.key}
-                  className="space-grid-row"
-                  style={{
-                    height: cardHeight + "px",
-                    transform: "translateY(" + virtualRow.start + "px)",
-                    gridTemplateColumns: "repeat(" + columns + ", minmax(0, 1fr))",
-                    gap: GAP + "px",
-                  }}
-                >
-                  {items.map((asset) => (
-                    <SpaceCard
-                      key={asset.id}
-                      asset={asset}
-                      inQueue={queueIds.has(asset.id)}
-                      focused={focusId === asset.id}
-                      dupCount={view === "dup" ? asset.dup_count ?? 0 : 0}
-                      keeper={view === "dup" && asset.keeper === true}
-                      onToggle={handleCardClick}
-                      onOpen={() => onOpenDetail(entryFromAsset(asset), rows)}
-                    />
-                  ))}
-                </div>
-              );
-            })}
-          {loading && rows.length === 0 && (
-            <div className="space-grid-loading">
-              <LoaderCircle size={16} className="spin" />
-              <span>正在读取…</span>
-            </div>
-          )}
-        </div>
+        {view === "dup" ? (
+          <DupGroupBoard
+            groups={dupGroups}
+            queued={queueIds}
+            onToggleGroup={toggleDupGroup}
+            onToggleCandidates={applyQueue}
+            loadingMore={dupLoadingMore}
+            hasMore={dupGroups.length < dupTotalGroups}
+            onLoadMore={loadMoreDup}
+          />
+        ) : (
+          <div
+            ref={gridRef}
+            className="space-grid-inner"
+            style={{ height: Math.max(rowVirtualizer.getTotalSize(), cardHeight) + "px" }}
+          >
+            {gridWidth > 0 &&
+              rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const items = visibleRows.slice(virtualRow.index * columns, virtualRow.index * columns + columns);
+                return (
+                  <div
+                    key={virtualRow.key}
+                    className="space-grid-row"
+                    style={{
+                      height: cardHeight + "px",
+                      transform: "translateY(" + virtualRow.start + "px)",
+                      gridTemplateColumns: "repeat(" + columns + ", minmax(0, 1fr))",
+                      gap: GAP + "px",
+                    }}
+                  >
+                    {items.map((asset) => (
+                      <SpaceCard
+                        key={asset.id}
+                        asset={asset}
+                        inQueue={queueIds.has(asset.id)}
+                        focused={focusId === asset.id}
+                        dupCount={0}
+                        keeper={false}
+                        onToggle={handleCardClick}
+                        onOpen={() => onOpenDetail(entryFromAsset(asset), rows)}
+                      />
+                    ))}
+                  </div>
+                );
+              })}
+            {loading && rows.length === 0 && (
+              <div className="space-grid-loading">
+                <LoaderCircle size={16} className="spin" />
+                <span>正在读取…</span>
+              </div>
+            )}
+          </div>
+        )}
         <div ref={sentinelRef} className="space-sentinel">
-          {loadingMore ? (
+          {view === "dup" ? (
+            dupLoadingMore ? (
+              <span><LoaderCircle size={12} className="spin" /> 载入中…</span>
+            ) : dupGroups.length < dupTotalGroups ? (
+              <span>继续下滑</span>
+            ) : dupGroups.length > 0 ? (
+              <span>已到底</span>
+            ) : null
+          ) : loadingMore ? (
             <span><LoaderCircle size={12} className="spin" /> 载入中…</span>
           ) : hasMore ? (
             <span>继续下滑</span>
@@ -829,9 +931,15 @@ export function SpaceView({ onOpenDetail, onClean, onToast, onError, onProgress,
           ) : null}
         </div>
         {error && <div className="space-empty">读取失败：{error}</div>}
-        {!loading && !error && rows.length === 0 && (
+        {!loading && !error && rows.length === 0 && view !== "dup" && (
           <div className="space-empty">
-            {view === "dup" && dupStat?.ready === false ? (
+            <ImageOff size={20} strokeWidth={1.5} />
+            <strong>{pathFilter ? "没有匹配的文件" : "这里没有文件"}</strong>
+          </div>
+        )}
+        {view === "dup" && !dupLoadingMore && dupGroups.length === 0 && (
+          <div className="space-empty">
+            {dupStat?.ready === false ? (
               <>
                 <LoaderCircle size={20} strokeWidth={1.5} className={computing ? "spin" : undefined} />
                 <strong>{computing ? "正在计算指纹…" : "指纹还没算"}</strong>
@@ -842,7 +950,7 @@ export function SpaceView({ onOpenDetail, onClean, onToast, onError, onProgress,
             ) : (
               <>
                 <ImageOff size={20} strokeWidth={1.5} />
-                <strong>{pathFilter ? "没有匹配的文件" : "这里没有文件"}</strong>
+                <strong>没有重复组</strong>
               </>
             )}
           </div>

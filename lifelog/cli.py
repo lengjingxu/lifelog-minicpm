@@ -419,6 +419,14 @@ def cmd_import_summary(args) -> int:
     return 0
 
 
+def cmd_dup_group_page(args) -> int:
+    from . import space
+    print(json.dumps(
+        space.dup_group_page(limit=args.limit, offset=args.offset),
+        ensure_ascii=False,
+    ))
+    return 0
+
 def cmd_space_groups(args) -> int:
     from . import space
     group_id = None
@@ -674,6 +682,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("import-summary", help="导入结束后的库汇总（只读聚合）")
     p.set_defaults(func=cmd_import_summary)
 
+    p = sub.add_parser("dup-group-page", help="重复图分组视图：一次返回多组的完整成员")
+    p.add_argument("--limit", type=int, default=20, help="本次返回多少组（默认 20）")
+    p.add_argument("--offset", type=int, default=0)
+    p.set_defaults(func=cmd_dup_group_page)
     p = sub.add_parser("space-groups", help="图库清理分组：dup（真实重复）/ screenshot（来源目录）")
     p.add_argument("--view", required=True)
     p.add_argument("--limit", type=int, help="dup 视角最多返回多少组（默认 30，只带轻量字段）")

@@ -2708,3 +2708,33 @@ button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 .cell-favorite:hover { color: var(--accent); background: rgba(0,0,0,0.6); }
 /* 有「×N」角标时把心形挪到它下面，避免重叠 */
 .cell .dup-badge ~ .cell-favorite { top: 30px; }
+
+/* 重复图：按组分区。一组一块，组内一行横向缩略图（最多 8 张 + 更多格） */
+.dup-board { display: flex; flex-direction: column; gap: var(--space-14); padding: 0 var(--space-16) var(--space-24); }
+.dup-group { display: flex; flex-direction: column; gap: var(--space-8); padding: var(--space-12); border-radius: var(--radius-12); background: rgba(255,255,255,var(--alpha-0-025)); box-shadow: 0 0 0 1px var(--line) inset; }
+.dup-group.queued { box-shadow: 0 0 0 1px var(--accent-line) inset; }
+.dup-group-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); flex-wrap: wrap; }
+.dup-group-title { display: flex; align-items: baseline; gap: var(--space-8); min-width: 0; font-size: var(--font-11); color: var(--text-dim); flex-wrap: wrap; }
+.dup-group-title strong { font-size: var(--font-11-5); font-weight: 600; color: var(--text); }
+.dup-group-title span + span::before { content: "·"; margin-right: var(--space-6); color: var(--text-faint); }
+.dup-group-queued { font-style: normal; font-size: var(--font-10-5); color: var(--accent); }
+.dup-group-action { flex: none; height: 26px; padding: 0 var(--space-10); border-radius: var(--radius-999); font-size: var(--font-10-5); color: var(--text-dim); background: var(--bg-elevated); }
+.dup-group-action:hover:not(:disabled) { color: var(--text); background: var(--bg-hover); }
+.dup-group-action:disabled { opacity: 0.4; }
+.dup-group-thumbs { display: flex; gap: var(--space-6); overflow: hidden; }
+.dup-group-thumbs.expanded { flex-wrap: wrap; overflow: visible; }
+.dup-thumb { position: relative; flex: none; width: 84px; height: 64px; border-radius: var(--radius-8); overflow: hidden; background: rgba(255,255,255,var(--alpha-0-04)); }
+.dup-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.dup-thumb.keeper { box-shadow: 0 0 0 2px var(--accent) inset; }
+.dup-thumb.queued img { filter: brightness(0.55) saturate(0.7); }
+.dup-thumb-flag { position: absolute; top: 3px; left: 3px; padding: 0 4px; border-radius: 4px; font-size: 9px; line-height: 14px; color: #fff; background: rgba(0,0,0,0.55); font-variant-numeric: tabular-nums; }
+.dup-thumb-flag.keeper { background: var(--accent); }
+.dup-thumb-play { position: absolute; bottom: 4px; left: 4px; display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; color: #fff; background: rgba(0,0,0,0.55); }
+.dup-thumb-check { position: absolute; top: 3px; right: 3px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; color: #fff; background: var(--accent); }
+.dup-thumb-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; height: 100%; color: var(--text-faint); }
+.dup-thumb-empty em { font-style: normal; font-size: 9px; }
+.dup-more { flex: none; width: 84px; height: 64px; border-radius: var(--radius-8); display: grid; place-items: center; font-size: var(--font-11); color: var(--text-dim); background: rgba(255,255,255,var(--alpha-0-04)); box-shadow: 0 0 0 1px var(--line) inset; }
+.dup-more:hover { color: var(--text); background: var(--bg-hover); }
+.dup-more.collapse { width: 34px; }
+.dup-board-foot { display: flex; justify-content: center; padding: var(--space-10) 0; font-size: var(--font-10-5); color: var(--text-faint); }
+.dup-board-foot .ghost-button { height: 26px; padding: 0 var(--space-10); font-size: var(--font-10-5); }

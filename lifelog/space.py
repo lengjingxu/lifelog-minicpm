@@ -304,6 +304,103 @@ def _dup_groups(con, limit: int | None = None, offset: int = 0) -> list[dict]:
     return groups
 
 
+def _dup_groups_with_members(con, limit: int, offset: int) -> dict:
+    """分页返回多组的完整成员（一次 JOIN 取完，不做 N+1）。
+
+    成员排序：keeper 第一，其余按美学分降序、无分垫底，最后按 id 保证稳定。
+    只返回未软删的成员；成员全被软删的组直接跳过，不占分页位。
+    """
+    limit = max(1, min(int(limit or 20), 100))
+    offset = max(0, int(offset or 0))
+    score_join = (
+        " LEFT JOIN asset_quality q ON q.asset_id = m.asset_id"
+        if _table_exists(con, "asset_quality")
+        else ""
+    )
+    score_expr = "q.score" if score_join else "NULL"
+    # 没有评分表时不能引用 q，排序退回「keeper 优先 + id」。
+    score_order = "COALESCE(q.score, -1) DESC, " if score_join else ""
+
+    # 只统计还有可见成员的组：软删全部成员后组不该继续出现在列表里。
+    base = (
+        "SELECT g.id AS gid, g.reason AS reason, g.keeper_id AS keeper, "
+        "       count(m.asset_id) AS n, "
+        "       COALESCE(sum(a.size),0) AS bytes, "
+        "       COALESCE(sum(CASE WHEN m.asset_id != g.keeper_id THEN a.size ELSE 0 END),0) AS reclaim "
+        "FROM dup_groups g "
+        "JOIN dup_members m ON m.group_id = g.id "
+        "JOIN assets a ON a.id = m.asset_id AND a.deleted_at IS NULL "
+        "GROUP BY g.id"
+    )
+    total_groups = con.execute(f"SELECT count(*) FROM ({base})").fetchone()[0] or 0
+    total_members = con.execute(f"SELECT COALESCE(sum(n),0) FROM ({base})").fetchone()[0] or 0
+
+    head_rows = con.execute(
+        f"SELECT gid, reason, keeper, n, bytes, reclaim FROM ({base}) "
+        "ORDER BY n DESC, gid LIMIT ? OFFSET ?",
+        (limit, offset),
+    ).fetchall()
+    if not head_rows:
+        return {"total_groups": total_groups, "total_members": total_members, "groups": []}
+
+    heads = {row[0]: row for row in head_rows}
+    marks = ",".join("?" for _ in head_rows)
+    member_rows = con.execute(
+        "SELECT m.group_id, m.asset_id, a.path, a.size, a.day, a.taken_at, a.kind, "
+        f"       {score_expr} "
+        "FROM dup_members m "
+        "JOIN assets a ON a.id = m.asset_id AND a.deleted_at IS NULL "
+        f"{score_join} "
+        f"WHERE m.group_id IN ({marks}) "
+        "ORDER BY m.group_id, CASE WHEN m.asset_id = "
+        "    (SELECT g.keeper_id FROM dup_groups g WHERE g.id = m.group_id) THEN 0 ELSE 1 END, "
+        f"    {score_order}m.asset_id",
+        [row[0] for row in head_rows],
+    ).fetchall()
+
+    thumbs_dir = config.DATA_DIR / "thumbs"
+    by_group: dict[int, list] = {}
+    for group_id, asset_id, path, size, day, taken_at, kind, score in member_rows:
+        thumb = thumbs_dir / f"{asset_id}.jpg"
+        by_group.setdefault(group_id, []).append({
+            "id": asset_id,
+            "path": path,
+            "thumb": str(thumb) if thumb.exists() else "",
+            "size": size or 0,
+            "day": day,
+            "taken_at": taken_at,
+            "kind": kind or "image",
+            "score": score,
+            "is_keeper": asset_id == (heads[group_id][2] or ""),
+        })
+
+    groups = []
+    for gid, reason, keeper, count, total_bytes, reclaim in head_rows:
+        tiers = _reason_tiers(reason or "")
+        groups.append({
+            "key": f"dup:{gid}",
+            "label": "/".join(REASON_LABELS[tier] for tier in tiers) or (reason or "重复"),
+            "reason": reason or "",
+            "reasons": tiers,
+            "count": count or 0,
+            "bytes": total_bytes or 0,
+            "reclaim_bytes": reclaim or 0,
+            "keeper": keeper or None,
+            "members": by_group.get(gid, []),
+        })
+    return {"total_groups": total_groups, "total_members": total_members, "groups": groups}
+
+
+def dup_group_page(limit: int = 20, offset: int = 0) -> dict:
+    """重复图分组视图：一次取多组的完整成员，供前端按组分区渲染。"""
+    con = db.connect()
+    try:
+        if not (_table_exists(con, "dup_groups") and _table_exists(con, "dup_members")):
+            return {"total_groups": 0, "total_members": 0, "groups": []}
+        return _dup_groups_with_members(con, limit, offset)
+    finally:
+        con.close()
+
 def dup_group_ids(con, group_id: int) -> list[str]:
     """按需取一组的成员：keeper 第一，其余按美学分从高到低。"""
     row = con.execute("SELECT keeper_id FROM dup_groups WHERE id = ?", (group_id,)).fetchone()

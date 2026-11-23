@@ -387,6 +387,84 @@ class FavoriteTests(unittest.TestCase):
 
 
 
+class DupGroupPageTests(unittest.TestCase):
+    """dup-group-page：一次返回多组完整成员，keeper 第一、其余按分数降序。"""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="space-duppage-"))
+        self._paths = (config.DATA_DIR, config.DB_PATH)
+        config.DATA_DIR = self.root
+        config.DB_PATH = self.root / "lifelog.sqlite"
+        db.init_db()
+        con = db.connect()
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS asset_quality (asset_id TEXT PRIMARY KEY, score REAL NOT NULL)"
+        )
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS dup_groups (id INTEGER PRIMARY KEY, keeper_id TEXT, reason TEXT, created_at TEXT)"
+        )
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS dup_members (group_id INTEGER, asset_id TEXT, distance INTEGER, "
+            "PRIMARY KEY (group_id, asset_id))",
+        )
+        # 组 1：3 个可见成员 + 1 个软删成员；keeper 不是最高分（模拟旧 dedup 结果）
+        con.execute("INSERT INTO dup_groups (id, keeper_id, reason) VALUES (1, 'old-keeper', 'burst+l1')")
+        rows = [
+            ("old-keeper", 5.0, None),
+            ("best", 9.0, None),
+            ("mid", 6.0, None),
+            ("gone", 7.5, "2026-01-01T00:00:00"),
+        ]
+        for asset_id, score, deleted in rows:
+            con.execute(
+                "INSERT INTO assets (id, path, size, day, kind, deleted_at) VALUES (?,?,?,?,?,?)",
+                (asset_id, f"/tmp/{asset_id}.jpg", 1000, "2024-01-01", "image", deleted),
+            )
+            con.execute("INSERT INTO asset_quality (asset_id, score) VALUES (?,?)", (asset_id, score))
+            con.execute("INSERT INTO dup_members (group_id, asset_id) VALUES (1, ?)", (asset_id,))
+        # 组 2：成员全部软删 → 不该出现在列表里
+        con.execute("INSERT INTO dup_groups (id, keeper_id, reason) VALUES (2, 'dead', 'l0')")
+        con.execute(
+            "INSERT INTO assets (id, path, size, day, kind, deleted_at) VALUES ('dead','/tmp/dead.jpg',10,'2024-01-01','image','2026-01-01T00:00:00')"
+        )
+        con.execute("INSERT INTO dup_members (group_id, asset_id) VALUES (2, 'dead')")
+        con.commit()
+        con.close()
+
+    def tearDown(self):
+        config.DATA_DIR, config.DB_PATH = self._paths
+
+    def test_keeper_first_then_score_desc_and_skips_deleted(self):
+        page = space.dup_group_page(limit=20, offset=0)
+        self.assertEqual(page["total_groups"], 1, "成员全软删的组要跳过")
+        self.assertEqual(page["total_members"], 3)
+        group = page["groups"][0]
+        self.assertEqual(group["key"], "dup:1")
+        self.assertEqual(group["count"], 3)
+        ids = [m["id"] for m in group["members"]]
+        self.assertEqual(ids[0], "old-keeper", "keeper 排第一")
+        self.assertNotIn("gone", ids, "软删成员不返回")
+        self.assertTrue(group["members"][0]["is_keeper"])
+        scores = [m["score"] for m in group["members"][1:]]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
+    def test_pagination_is_stable(self):
+        page1 = space.dup_group_page(limit=1, offset=0)
+        page2 = space.dup_group_page(limit=1, offset=5)
+        self.assertEqual(len(page1["groups"]), 1)
+        self.assertEqual(page2["groups"], [])
+        self.assertEqual(page1["total_groups"], 1)
+
+    def test_without_quality_table_scores_are_none(self):
+        con = db.connect()
+        con.execute("DROP TABLE asset_quality")
+        con.commit()
+        con.close()
+        page = space.dup_group_page(limit=20, offset=0)
+        self.assertTrue(all(m["score"] is None for m in page["groups"][0]["members"]))
+
+
+
 if __name__ == "__main__":
     unittest.main()
 

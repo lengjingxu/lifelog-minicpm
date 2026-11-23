@@ -861,6 +861,99 @@ export type SpaceGroups = {
   total?: number | null;
 };
 
+/** 重复图分组视图的一个成员（含 keeper 标记与美学分）。 */
+export type DupGroupMember = {
+  id: string;
+  path: string;
+  thumb: string;
+  size?: number | null;
+  day?: string | null;
+  taken_at?: string | null;
+  kind?: string | null;
+  score?: number | null;
+  is_keeper: boolean;
+};
+
+/** 重复图分组视图的一组：组头统计 + 完整成员（keeper 第一，其余按分数降序）。 */
+export type DupGroupPageGroup = {
+  key: string;
+  label: string;
+  reason?: string;
+  reasons?: string[];
+  count: number;
+  bytes?: number;
+  reclaim_bytes?: number;
+  keeper?: string | null;
+  members: DupGroupMember[];
+};
+
+export type DupGroupPage = {
+  total_groups: number;
+  total_members: number;
+  groups: DupGroupPageGroup[];
+};
+
+/** 重复图分组视图分页：一次拿多组的完整成员，供按组展示。 */
+export async function dupGroupPage(
+  options: { limit?: number; offset?: number } = {},
+): Promise<DupGroupPage> {
+  if (!isTauri) {
+    const { assets, dups } = await loadFixture();
+    const byId = new Map(assets.map((asset) => [asset.id, asset]));
+    const groups = (dups ?? []).map((dup) => {
+      const members = dup.members
+        .map((member) => {
+          const asset = byId.get(member.asset_id);
+          if (!asset) return null;
+          return {
+            id: asset.id,
+            path: asset.path,
+            thumb: asset.thumb,
+            size: asset.size ?? null,
+            day: asset.day,
+            taken_at: asset.taken_at,
+            kind: asset.kind,
+            score: asset.score ?? null,
+            is_keeper: asset.id === dup.keeper_id,
+          } satisfies DupGroupMember;
+        })
+        .filter((member) => member !== null)
+        .sort((a, b) => {
+          if (a.is_keeper !== b.is_keeper) return a.is_keeper ? -1 : 1;
+          return (b.score ?? -1) - (a.score ?? -1);
+        });
+      return {
+        key: `dup:${dup.id}`,
+        label: "重复图",
+        count: members.length,
+        keeper: dup.keeper_id,
+        members,
+      } satisfies DupGroupPageGroup;
+    });
+    const limit = options.limit ?? 20;
+    const offset = options.offset ?? 0;
+    return {
+      total_groups: groups.length,
+      total_members: groups.reduce((sum, group) => sum + group.count, 0),
+      groups: groups.slice(offset, offset + limit),
+    };
+  }
+  const raw = await invoke<{
+    total_groups: number;
+    total_members: number;
+    groups: Array<Omit<DupGroupPageGroup, "keeper"> & { keeper?: string | null }>;
+  }>("dup_group_page", { limit: options.limit, offset: options.offset });
+  return {
+    total_groups: raw.total_groups,
+    total_members: raw.total_members,
+    groups: raw.groups.map((group) => ({
+      ...group,
+      members: group.members ?? [],
+    })),
+  };
+}
+
+
 export type CleanupEntry = {
   asset_id: string;
   added_at: string;
